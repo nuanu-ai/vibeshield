@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs
+*.log
+logs/
+
+# Build and cache
+dist/
+build/
+coverage/
+.cache/
+.turbo/
+.pytest_cache/
+__pycache__/
+
+# VibeShield generated artifacts
+runs/
+artifacts/
+tmp/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
