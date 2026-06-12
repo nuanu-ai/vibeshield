@@ -1,72 +1,124 @@
 # AGENTS.md
 
-This file defines how agents should work in this repository.
+Repository-level guidance for coding agents working on VibeShield.
 
-## Product Focus
+Keep this file short and practical. Put product and architecture detail in the
+relevant files under `docs/` instead of duplicating it here.
 
-VibeShield is a security-audit pipeline, not a general AppSec platform.
+## Project Context
 
-The MVP must prove the detection core:
+VibeShield is an early-stage security audit pipeline for AI-generated and
+beginner-built web projects.
 
-- accept a repo/archive;
-- classify the project;
-- run staged analysis;
-- verify findings with code evidence;
-- report only useful, actionable findings;
-- preserve internal debug artifacts for calibration.
+The current MVP focuses on proving the detection core through a local CLI
+pipeline that accepts a GitHub repository URL:
 
-Do not spend MVP effort on dashboards, GitHub App flows, PR generation, auto-fixes, accounts, or continuous monitoring unless the project plan explicitly changes.
+```bash
+vibeshield scan https://github.com/owner/repo
+```
+
+Primary orientation:
+
+- `README.md`: concise project overview.
+- `docs/`: current product, architecture, and planning documents.
+
+## Repository Layout
+
+- `AGENTS.md`: coding-agent guidance.
+- `README.md`: human entry point.
+- `docs/`: product, architecture, and planning documents.
+
+Implementation directories may be added as the MVP takes shape. When adding a
+new top-level area, keep the README or relevant docs clear enough for the next
+agent to orient quickly.
 
 ## Engineering Principles
 
-Follow these principles aggressively:
+- **KISS**: prefer the simplest design that validates the current detection
+  hypothesis.
+- **DRY**: share schemas, contracts, and analyzer plumbing when duplication
+  creates real maintenance risk.
+- **YAGNI**: add infrastructure, abstractions, and dependencies when the current
+  MVP needs them.
 
-- **KISS**: choose the simplest design that proves the current detection hypothesis.
-- **DRY**: share contracts, schemas, and analyzer plumbing instead of duplicating finding formats.
-- **YAGNI**: do not build SaaS infrastructure, plugin marketplaces, complex queues, or broad abstractions before they are needed.
+Prefer boring, inspectable code over clever orchestration. Keep behavior easy to
+debug from files on disk.
 
-Prefer boring, inspectable code over clever orchestration.
+## Scope Rules
 
-## Architecture Rules
+- Use `README.md` and the relevant files in `docs/` as the source of truth for
+  current product and architecture decisions.
+- When docs appear to conflict, prefer the most specific and most recently
+  updated decision document, then update or flag the conflict.
+- Treat major product or architecture changes as documentation changes too.
+- Keep `AGENTS.md` focused on durable engineering guidance, not detailed design.
+- Preserve existing user changes and avoid broad refactors while doing focused
+  work.
+- Treat repositories being analyzed by VibeShield as untrusted input.
 
-Keep architecture choices grounded in the current plan, but avoid hard-coding detailed technical decisions in this file.
+## Stack Direction
 
-High-level expectations:
+The planned core direction is TypeScript/Node orchestration with simple,
+inspectable steps.
 
-- keep the system modular and easy to change;
-- keep data contracts explicit;
-- keep generated outputs inspectable;
-- keep security-sensitive behavior conservative;
-- avoid premature infrastructure;
-- update the relevant docs when a material decision changes.
+Use structured JSON contracts for run state, findings, coverage, metrics, and
+reports when they are useful. Do not design a heavy analyzer framework before
+the first working scan flow exists.
 
-## Output Rules
+## Commands
 
-External reports should be short and actionable:
+Project tooling:
 
-- `Fix now`: maximum 3 findings.
-- `Fix next`: maximum 5 findings.
-- `Hygiene`: maximum 5 findings.
-- Include code evidence and confidence.
-- Include coverage boundaries.
+- install: `pnpm install`;
+- lint: `pnpm lint`;
+- typecheck: `pnpm typecheck`;
+- test: `pnpm test`;
+- run the local CLI in dev: `pnpm scan https://github.com/owner/repo`;
+- run the live Daytona smoke check: `pnpm smoke:daytona https://github.com/octocat/Hello-World`;
+- build package output: `pnpm build`.
 
-Internal artifacts may be verbose:
+The current default CLI path uses the real `@daytona/sdk` adapter. Live scans
+need `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and `DAYTONA_TARGET`; if credentials
+are missing, the CLI must fail clearly rather than cloning an untrusted repo on
+the host. `FakeDaytonaSandboxProvider` is only a local test double.
 
-- raw scanner outputs;
-- suppressed findings;
-- hypotheses;
-- verifier traces;
-- metrics.
+## Commit Hygiene
 
-## Documentation Rules
+Optimize commits for future `git bisect`.
 
-- Keep current plans in `docs/`.
-- Preserve brainstorm/history files unless the user asks to rewrite them.
-- When a plan changes materially, update the relevant doc in the same change.
-- Prefer clear product language over enterprise security jargon.
+- Prefer Conventional Commit prefixes when they fit (`feat:`, `fix:`, `test:`,
+  `docs:`, `chore:`, `refactor:`), but prioritize accurate, atomic history over
+  forced labels.
+- Prefer small, logical commits: one behavior change, tooling change, or docs
+  status update per commit.
+- Keep commits green on the main development path: run the relevant
+  lint/typecheck/test command before committing.
+- Commit tests with the behavior they protect unless a separate test-only commit
+  still leaves the tree green.
+- Keep `package.json` and lockfile changes in the same commit.
+- Update docs in the same commit as the behavior change when the docs describe
+  that behavior.
+- Do not mix mechanical formatting with product or runtime logic.
+- Do not commit generated or local artifacts such as `node_modules`, `dist`,
+  `runs`, logs, or temporary scan outputs.
 
-## Git Rules
+## Verification
 
-- Do not rewrite history unless the user explicitly asks.
-- Do not revert user changes without explicit permission.
-- Keep commits focused and readable when commits are requested.
+Before finishing a coding task:
+
+- run the most relevant lint/typecheck/test command available;
+- verify generated outputs are inspectable and kept out of git when appropriate;
+- update docs when behavior, scope, or commands change;
+- report any missing checks clearly in the final response.
+
+For docs-only changes, check that referenced files exist and that links point to
+current paths.
+
+## Done Means
+
+A task is complete when:
+
+- the requested change is implemented;
+- relevant docs stay consistent with the change;
+- the working tree contains only intended changes;
+- verification was run or the verification gap is explicit.
