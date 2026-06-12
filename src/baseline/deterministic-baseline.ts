@@ -1,0 +1,344 @@
+import path from "node:path";
+import type {
+  BaselineSummaryArtifact,
+  BaselineToolName,
+  BaselineToolSummary,
+  InventoryArtifact,
+} from "../artifacts/contracts.js";
+import type { ArtifactStore } from "../artifacts/store.js";
+import { relativeArtifactPath } from "../run/file-io.js";
+import type { RunJobState } from "../run/types.js";
+import type { RuntimeJobResult, SandboxSession } from "../sandbox/types.js";
+
+const baselineToolOrder: BaselineToolName[] = [
+  "syft",
+  "trivy",
+  "gitleaks",
+  "actionlint",
+  "zizmor",
+  "checkov",
+];
+
+export interface BaselineProgressEvent {
+  job?: string;
+  message: string;
+  type: string;
+}
+
+export interface RunDeterministicBaselineInput {
+  commitSha: string | null;
+  generatedAt: string;
+  inventory: InventoryArtifact;
+  onProgress?: (event: BaselineProgressEvent) => Promise<void>;
+  outputsDir: string;
+  runDir: string;
+  sandbox: SandboxSession;
+  sourceUrl: string;
+  store: ArtifactStore;
+}
+
+export interface RunDeterministicBaselineResult {
+  jobStates: RunJobState[];
+  summary: BaselineSummaryArtifact;
+  summaryPath: string;
+}
+
+export async function runDeterministicBaseline(
+  input: RunDeterministicBaselineInput,
+): Promise<RunDeterministicBaselineResult> {
+  const githubActionsWorkflows = input.inventory.files
+    .map((file) => file.path)
+    .filter(isGithubActionsWorkflow)
+    .sort((left, right) => left.localeCompare(right));
+  const iacCandidates = input.inventory.files
+    .map((file) => file.path)
+    .filter(isIacCandidatePath)
+    .sort((left, right) => left.localeCompare(right));
+
+  const toolSummaries: BaselineToolSummary[] = [];
+  const jobStates: RunJobState[] = [];
+  let sbomSandboxPath: string | undefined;
+
+  const availabilityResult = await input.sandbox.prepareBaselineTools({
+    generatedAt: input.generatedAt,
+    tools: baselineToolOrder.map((tool) => {
+      const skippedReason = skipReasonForTool(tool, githubActionsWorkflows, iacCandidates);
+      return {
+        required: isToolRequired(tool, githubActionsWorkflows, iacCandidates),
+        ...(skippedReason === undefined ? {} : { skippedReason }),
+        tool,
+      };
+    }),
+  });
+  const toolAvailabilityPath = await pullRuntimeArtifact({
+    artifact: availabilityResult.artifact,
+    job: "tool-availability",
+    outputsDir: input.outputsDir,
+    runDir: input.runDir,
+    sandbox: input.sandbox,
+    stage: "deterministic-baseline",
+  });
+  input.store.register({
+    id: "baseline-tool-availability",
+    kind: "tool-availability.v1",
+    path: toolAvailabilityPath,
+    version: 1,
+  });
+
+  const availabilityByTool = new Map(
+    availabilityResult.availability.tools.map((tool) => [tool.tool, tool]),
+  );
+
+  for (const tool of baselineToolOrder) {
+    await input.onProgress?.({
+      job: tool,
+      message: `Running deterministic baseline job: ${tool}.`,
+      type: "baseline.job.started",
+    });
+
+    const availability = availabilityByTool.get(tool);
+    const result =
+      availability?.required === true && availability.status !== "available"
+        ? buildUnavailableToolResult({
+            diagnostics:
+              availability.diagnostics.length > 0
+                ? availability.diagnostics
+                : [`Required baseline tool is not available: ${tool}`],
+            generatedAt: input.generatedAt,
+            tool,
+          })
+        : await input.sandbox.runJob({
+            baseline: {
+              hasGithubActions: githubActionsWorkflows.length > 0,
+              hasIacCandidates: iacCandidates.length > 0,
+              ...(sbomSandboxPath === undefined ? {} : { sbomSandboxPath }),
+              tool,
+            },
+            generatedAt: input.generatedAt,
+            kind: "baseline-tool",
+            name: tool,
+            stage: "deterministic-baseline",
+          });
+
+    const artifactPaths = await pullRuntimeArtifacts({
+      job: tool,
+      outputsDir: input.outputsDir,
+      result,
+      runDir: input.runDir,
+      sandbox: input.sandbox,
+    });
+
+    if (tool === "syft") {
+      sbomSandboxPath = result.artifacts.find((artifact) =>
+        artifact.relativePath.endsWith("syft-sbom.json"),
+      )?.sandboxPath;
+    }
+
+    const toolSummary: BaselineToolSummary = {
+      artifacts: artifactPaths,
+      diagnostics: result.diagnostics,
+      invocation: result.invocation,
+      observations: result.observations,
+      ...(result.exitCode === undefined ? {} : { exit_code: result.exitCode }),
+      ...(result.skippedReason === undefined ? {} : { skipped_reason: result.skippedReason }),
+      status: result.status,
+      tool,
+      ...(result.version === undefined ? {} : { version: result.version }),
+    };
+    toolSummaries.push(toolSummary);
+
+    jobStates.push({
+      artifacts: artifactPaths,
+      diagnostics: result.diagnostics,
+      finished_at: result.finishedAt,
+      invocation: result.invocation,
+      name: tool,
+      observations: result.observations.length,
+      ...(result.skippedReason === undefined ? {} : { skipped_reason: result.skippedReason }),
+      started_at: result.startedAt,
+      status: result.status === "completed" ? "success" : result.status,
+      ...(result.version === undefined ? {} : { version: result.version }),
+    });
+
+    await input.onProgress?.({
+      job: tool,
+      message: `Deterministic baseline job ${tool} ${result.status}.`,
+      type: "baseline.job.completed",
+    });
+  }
+
+  const sbomArtifact = sbomArtifactPath(toolSummaries);
+  const summary: BaselineSummaryArtifact = {
+    artifact_version: 1,
+    generated_at: input.generatedAt,
+    kind: "baseline-summary.v1",
+    source: {
+      commit_sha: input.commitSha,
+      url: input.sourceUrl,
+    },
+    summary: {
+      github_actions_workflows: githubActionsWorkflows,
+      iac_candidates: iacCandidates,
+      important_paths: buildImportantPaths(input.inventory, githubActionsWorkflows, iacCandidates),
+      observation_counts: countObservations(toolSummaries),
+      ...(sbomArtifact === undefined ? {} : { sbom_artifact: sbomArtifact }),
+      tool_availability_artifact: toolAvailabilityPath,
+      tool_order: baselineToolOrder,
+    },
+    tools: toolSummaries,
+  };
+
+  const summaryPath = await input.store.writeJson({
+    data: summary,
+    id: "baseline-summary",
+    kind: "baseline-summary.v1",
+    relativePath: "outputs/baseline-summary.v1.json",
+    version: 1,
+  });
+
+  return {
+    jobStates,
+    summary,
+    summaryPath,
+  };
+}
+
+function buildUnavailableToolResult(input: {
+  diagnostics: string[];
+  generatedAt: string;
+  tool: BaselineToolName;
+}): RuntimeJobResult {
+  return {
+    artifacts: [],
+    diagnostics: input.diagnostics,
+    finishedAt: new Date().toISOString(),
+    invocation: {
+      command: input.tool,
+    },
+    kind: "baseline-tool",
+    observations: [],
+    startedAt: input.generatedAt,
+    status: "failed",
+  };
+}
+
+async function pullRuntimeArtifacts(input: {
+  job: string;
+  outputsDir: string;
+  result: RuntimeJobResult;
+  runDir: string;
+  sandbox: SandboxSession;
+}): Promise<string[]> {
+  const artifactPaths: string[] = [];
+
+  for (const artifact of input.result.artifacts) {
+    artifactPaths.push(
+      await pullRuntimeArtifact({
+        artifact,
+        job: input.job,
+        outputsDir: input.outputsDir,
+        runDir: input.runDir,
+        sandbox: input.sandbox,
+        stage: "deterministic-baseline",
+      }),
+    );
+  }
+
+  return artifactPaths;
+}
+
+async function pullRuntimeArtifact(input: {
+  artifact: { relativePath: string; sandboxPath: string };
+  job: string;
+  outputsDir: string;
+  runDir: string;
+  sandbox: SandboxSession;
+  stage: "deterministic-baseline";
+}): Promise<string> {
+  const localPath = path.join(input.outputsDir, input.artifact.relativePath);
+  await input.sandbox.pullFile(input.artifact.sandboxPath, localPath, {
+    artifact: input.artifact.relativePath,
+    job: input.job,
+    stage: input.stage,
+  });
+  return relativeArtifactPath(input.runDir, localPath);
+}
+
+function buildImportantPaths(
+  inventory: InventoryArtifact,
+  githubActionsWorkflows: string[],
+  iacCandidates: string[],
+): string[] {
+  return [
+    ...inventory.summary.manifest_files,
+    ...githubActionsWorkflows,
+    ...iacCandidates,
+    ...inventory.files
+      .map((file) => file.path)
+      .filter((file) => /(^|\/)(src|app|pages|routes|api)\//.test(file))
+      .slice(0, 20),
+  ]
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .slice(0, 40);
+}
+
+function countObservations(tools: BaselineToolSummary[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const tool of tools) {
+    counts[tool.tool] = tool.observations.length;
+  }
+  return counts;
+}
+
+function sbomArtifactPath(tools: BaselineToolSummary[]): string | undefined {
+  return tools
+    .find((tool) => tool.tool === "syft")
+    ?.artifacts.find((artifact) => artifact.endsWith("baseline/syft-sbom.json"));
+}
+
+function isGithubActionsWorkflow(filePath: string): boolean {
+  return filePath.startsWith(".github/workflows/");
+}
+
+function isIacCandidatePath(filePath: string): boolean {
+  const basename = path.posix.basename(filePath);
+  return (
+    filePath.endsWith(".tf") ||
+    basename === "Dockerfile" ||
+    basename === "docker-compose.yml" ||
+    basename === "compose.yaml" ||
+    basename === "compose.yml" ||
+    filePath.endsWith(".k8s.yaml") ||
+    filePath.endsWith(".k8s.yml") ||
+    filePath.includes("terraform") ||
+    filePath.includes("kubernetes")
+  );
+}
+
+function isToolRequired(
+  tool: BaselineToolName,
+  githubActionsWorkflows: string[],
+  iacCandidates: string[],
+): boolean {
+  if (tool === "actionlint" || tool === "zizmor") {
+    return githubActionsWorkflows.length > 0;
+  }
+  if (tool === "checkov") {
+    return iacCandidates.length > 0;
+  }
+  return true;
+}
+
+function skipReasonForTool(
+  tool: BaselineToolName,
+  githubActionsWorkflows: string[],
+  iacCandidates: string[],
+): string | undefined {
+  if ((tool === "actionlint" || tool === "zizmor") && githubActionsWorkflows.length === 0) {
+    return "No GitHub Actions workflows were detected in inventory.";
+  }
+  if (tool === "checkov" && iacCandidates.length === 0) {
+    return "No IaC/config candidates were detected in inventory.";
+  }
+  return undefined;
+}

@@ -15,6 +15,7 @@
     "cli": "tsx src/cli.ts",
     "scan": "tsx src/cli.ts scan",
     "smoke:daytona": "tsx scripts/smoke-daytona.ts",
+    "smoke:pi-daytona": "tsx scripts/smoke-pi-daytona.ts",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -27,6 +28,7 @@
     "vitest": "^3.2.0"
   },
   "dependencies": {
-    "@daytona/sdk": "^0.187.0"
+    "@daytona/sdk": "^0.187.0",
+    "dotenv": "^17.4.2"
   }
 }

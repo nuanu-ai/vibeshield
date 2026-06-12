@@ -1,11 +1,19 @@
 import type { RunStage } from "./types.js";
 
 export class ScanStageError extends Error {
+  readonly diagnostics: string[];
   readonly stage: RunStage;
   readonly userMessage: string;
 
-  constructor(input: { cause?: unknown; message: string; stage: RunStage; userMessage?: string }) {
+  constructor(input: {
+    cause?: unknown;
+    diagnostics?: string[];
+    message: string;
+    stage: RunStage;
+    userMessage?: string;
+  }) {
     super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
+    this.diagnostics = input.diagnostics ?? [];
     this.name = "ScanStageError";
     this.stage = input.stage;
     this.userMessage = input.userMessage ?? input.message;

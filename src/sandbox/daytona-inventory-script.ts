@@ -69,6 +69,7 @@ async function walkRepo(root, relativeDirectory, directories, files) {
     if (stats.isFile()) {
       const contents = await readFile(absolutePath);
       files.push({
+        ...lineCountField(contents),
         path: relativePath,
         sha256: createHash("sha256").update(contents).digest("hex"),
         size_bytes: stats.size,
@@ -96,6 +97,21 @@ async function walkRepo(root, relativeDirectory, directories, files) {
   }
 }
 
+function lineCountField(contents) {
+  if (contents.includes(0)) {
+    return {};
+  }
+
+  const text = contents.toString("utf8");
+  if (text.includes("\\uFFFD")) {
+    return {};
+  }
+
+  return {
+    line_count: text === "" ? 0 : text.split(/\\r\\n|\\r|\\n/).length,
+  };
+}
+
 async function main() {
   const directories = [];
   const files = [];
@@ -114,7 +130,8 @@ async function main() {
     directories,
     files,
     generated_at: config.generatedAt,
-    generated_by: "vibeshield-phase0",
+    generated_by: "vibeshield-phase1",
+    kind: "inventory.v1",
     sandbox: {
       id: config.sandboxId,
       inventory_location: "inside_sandbox",

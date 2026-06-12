@@ -4,6 +4,7 @@ import path from "node:path";
 import type { GitHubRepoReference } from "../run/github-url.js";
 
 export interface RepoInventoryFile {
+  line_count?: number;
   path: string;
   sha256?: string;
   size_bytes: number;
@@ -17,7 +18,8 @@ export interface RepoInventoryDirectory {
 export interface RepoInventory {
   artifact_version: 1;
   generated_at: string;
-  generated_by: "vibeshield-phase0";
+  generated_by: "vibeshield-phase1";
+  kind: "inventory.v1";
   sandbox: {
     id: string;
     inventory_location: "inside_sandbox";
@@ -77,7 +79,8 @@ export async function buildRepoInventory(input: {
     directories,
     files,
     generated_at: input.generatedAt,
-    generated_by: "vibeshield-phase0",
+    generated_by: "vibeshield-phase1",
+    kind: "inventory.v1",
     sandbox: {
       id: input.sandboxId,
       inventory_location: "inside_sandbox",
@@ -123,6 +126,7 @@ async function walkRepo(
     if (stats.isFile()) {
       const contents = await readFile(absolutePath);
       files.push({
+        ...lineCountField(contents),
         path: relativePath,
         sha256: createHash("sha256").update(contents).digest("hex"),
         size_bytes: stats.size,
@@ -148,6 +152,21 @@ async function walkRepo(
       type: "other",
     });
   }
+}
+
+function lineCountField(contents: Buffer): { line_count?: number } {
+  if (contents.includes(0)) {
+    return {};
+  }
+
+  const text = contents.toString("utf8");
+  if (text.includes("\uFFFD")) {
+    return {};
+  }
+
+  return {
+    line_count: text === "" ? 0 : text.split(/\r\n|\r|\n/).length,
+  };
 }
 
 function isManifestPath(filePath: string): boolean {

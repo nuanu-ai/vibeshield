@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { copyFile, readFile } from "node:fs/promises";
 import path from "node:path";
+import type { InventoryArtifact } from "../artifacts/contracts.js";
+import { ArtifactStore } from "../artifacts/store.js";
+import { runDeterministicBaseline } from "../baseline/deterministic-baseline.js";
+import { buildPiContextPack } from "../context/step-context-builder.js";
+import { runProjectUnderstanding } from "../pi/project-understanding.js";
 import { writeFailureReport, writeSuccessReport } from "../report/report.js";
 import { createDefaultSandboxProvider } from "../sandbox/default-provider.js";
 import type { SandboxProvider, SandboxSession } from "../sandbox/types.js";
@@ -11,10 +17,12 @@ import {
   writeJsonAtomic,
 } from "./file-io.js";
 import { parseGitHubRepoUrl } from "./github-url.js";
-import type { RunEvent, ScanRunState } from "./types.js";
+import { redactDeep } from "./redaction.js";
+import type { RunEvent, RunStepState, ScanRunState } from "./types.js";
 
 export interface RunScanOptions {
   repoUrlInput: string;
+  onProgress?: (event: RunEvent) => unknown | Promise<unknown>;
   runsRoot?: string;
   sandboxProvider?: SandboxProvider;
 }
@@ -52,7 +60,9 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   const runJsonPath = path.join(runDir, "run.json");
   const eventsPath = path.join(runDir, "events.jsonl");
   const reportPath = path.join(runDir, "report.md");
-  const inventoryPath = path.join(outputsDir, "repo-inventory.json");
+  const inventoryPath = path.join(outputsDir, "inventory.v1.json");
+  const legacyInventoryPath = path.join(outputsDir, "repo-inventory.json");
+  const store = new ArtifactStore(runDir, outputsDir);
 
   await ensureDirectory(outputsDir);
 
@@ -69,11 +79,14 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   };
 
   const persistRun = async () => writeJsonAtomic(runJsonPath, run);
-  const appendEvent = async (event: Omit<RunEvent, "timestamp">) =>
-    appendJsonLine(eventsPath, {
+  const appendEvent = async (event: Omit<RunEvent, "timestamp">) => {
+    const eventWithTimestamp: RunEvent = redactDeep({
       ...event,
       timestamp: new Date().toISOString(),
     });
+    await appendJsonLine(eventsPath, eventWithTimestamp);
+    await options.onProgress?.(eventWithTimestamp);
+  };
 
   await persistRun();
   await appendEvent({
@@ -148,8 +161,19 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
       generatedAt: new Date().toISOString(),
       repo: parsed.repo,
     });
-    await sandbox.pullFile(inventoryArtifact.sandboxPath, inventoryPath);
+    await sandbox.pullFile(inventoryArtifact.sandboxPath, inventoryPath, {
+      artifact: inventoryArtifact.relativePath,
+      stage: "inventory",
+    });
+    await copyFile(inventoryPath, legacyInventoryPath);
     run.artifacts.inventory = relativeArtifactPath(runDir, inventoryPath);
+    run.artifacts.inventory_legacy = relativeArtifactPath(runDir, legacyInventoryPath);
+    store.register({
+      id: "inventory",
+      kind: "inventory.v1",
+      path: run.artifacts.inventory,
+      version: 1,
+    });
     await persistRun();
     await appendEvent({
       artifact: run.artifacts.inventory,
@@ -159,17 +183,141 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
       type: "artifact.written",
     });
 
+    const inventory = JSON.parse(await readFile(inventoryPath, "utf8")) as InventoryArtifact;
+
+    run.current_stage = "deterministic-baseline";
+    run.steps = run.steps ?? [];
+    const baselineStep: RunStepState = {
+      diagnostics: [],
+      jobs: [],
+      name: "deterministic-baseline",
+      stage: "deterministic-baseline",
+      started_at: new Date().toISOString(),
+      status: "running",
+    };
+    run.steps.push(baselineStep);
+    await persistRun();
+    await appendEvent({
+      message: "Starting deterministic baseline step.",
+      sandbox_id: sandbox.id,
+      stage: "deterministic-baseline",
+      type: "step.started",
+    });
+
+    const activeSandbox = sandbox;
+    const baselineResult = await runDeterministicBaseline({
+      commitSha: cloneResult.commitSha,
+      generatedAt: new Date().toISOString(),
+      inventory,
+      onProgress: (event) =>
+        appendEvent({
+          ...(event.job === undefined ? {} : { job: event.job }),
+          message: event.message,
+          sandbox_id: activeSandbox.id,
+          stage: "deterministic-baseline",
+          type: event.type,
+        }),
+      outputsDir,
+      runDir,
+      sandbox,
+      sourceUrl: parsed.repo.url,
+      store,
+    });
+    baselineStep.jobs = baselineResult.jobStates;
+    baselineStep.status = "success";
+    baselineStep.finished_at = new Date().toISOString();
+    run.artifacts.baseline_summary = baselineResult.summaryPath;
+    syncKnownArtifacts(run, store);
+    await persistRun();
+    await appendEvent({
+      artifact: baselineResult.summaryPath,
+      message: "Deterministic baseline summary written.",
+      sandbox_id: sandbox.id,
+      stage: "deterministic-baseline",
+      type: "artifact.written",
+    });
+
+    run.current_stage = "context";
+    await persistRun();
+    await appendEvent({
+      message: "Building curated Pi context pack from validated artifacts.",
+      sandbox_id: sandbox.id,
+      stage: "context",
+      type: "context.started",
+    });
+    const contextResult = await buildPiContextPack({
+      baseline: baselineResult.summary,
+      inventory,
+      store,
+    });
+    run.artifacts.pi_context_pack = contextResult.contextPath;
+    await persistRun();
+    await appendEvent({
+      artifact: contextResult.contextPath,
+      message: "Pi context pack written.",
+      sandbox_id: sandbox.id,
+      stage: "context",
+      type: "artifact.written",
+    });
+
+    run.current_stage = "pi";
+    const piStep: RunStepState = {
+      diagnostics: [],
+      jobs: [],
+      name: "pi-project-understanding",
+      stage: "pi",
+      started_at: new Date().toISOString(),
+      status: "running",
+    };
+    run.steps.push(piStep);
+    await persistRun();
+    await appendEvent({
+      message: "Running Pi project-understanding from curated context pack.",
+      sandbox_id: sandbox.id,
+      stage: "pi",
+      type: "pi.started",
+    });
+    const piResult = await runProjectUnderstanding({
+      contextPack: contextResult.contextPack,
+      contextPath: contextResult.contextPath,
+      generatedAt: new Date().toISOString(),
+      inventory,
+      outputsDir,
+      runDir,
+      sandbox,
+      store,
+    });
+    piStep.jobs = [piResult.jobState];
+    piStep.status = "success";
+    piStep.finished_at = new Date().toISOString();
+    run.artifacts.project_understanding = piResult.projectUnderstandingPath;
+    run.artifacts.pi_progress = piResult.progressPath;
+    run.artifacts.pi_raw_output = piResult.rawOutputPath;
+    run.artifacts.pi_stderr = piResult.stderrPath;
+    await persistRun();
+    await appendEvent({
+      artifact: piResult.projectUnderstandingPath,
+      message: "Project understanding artifact accepted by quality gate.",
+      sandbox_id: sandbox.id,
+      stage: "project-understanding-validation",
+      type: "artifact.written",
+    });
+
     run.status = "success";
   } catch (error) {
     const stage = run.current_stage;
     failure = toScanStageError(error, stage);
     run.status = "failed";
+    syncKnownArtifacts(run, store);
     run.error = {
+      diagnostics: failure.diagnostics,
       message: failure.message,
       stage: failure.stage,
       user_message: failure.userMessage,
     };
+    markRunningStepFailed(run, failure);
     const failureEvent: Omit<RunEvent, "timestamp"> = {
+      diagnostics: failure.diagnostics,
       message: failure.userMessage,
       stage: failure.stage,
       type: "step.failed",
@@ -221,12 +369,13 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   run.artifacts.report = "report.md";
 
   if (run.status === "success") {
-    run.current_stage = "completed";
+    run.current_stage = "report";
+    await persistRun();
     await writeSuccessReport({
-      inventoryPath: run.artifacts.inventory ?? "outputs/repo-inventory.json",
       reportPath,
       run,
     });
+    run.current_stage = "completed";
     await persistRun();
     return {
       exitCode: 0,
@@ -252,4 +401,35 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
 function createRunId(date: Date): string {
   const timestamp = date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(".", "");
   return `run_${timestamp}_${randomUUID().slice(0, 8)}`;
+}
+
+function markRunningStepFailed(run: ScanRunState, failure: ScanStageError): void {
+  const runningStep = run.steps?.find((step) => step.status === "running");
+  if (runningStep === undefined) {
+    return;
+  }
+
+  runningStep.status = "failed";
+  runningStep.finished_at = new Date().toISOString();
+  runningStep.diagnostics =
+    failure.diagnostics.length > 0 ? failure.diagnostics : [failure.message];
+}
+
+function syncKnownArtifacts(run: ScanRunState, store: ArtifactStore): void {
+  const baseline = store.get("baseline-summary");
+  if (baseline !== undefined) {
+    run.artifacts.baseline_summary = baseline.path;
+  }
+  const baselineToolAvailability = store.get("baseline-tool-availability");
+  if (baselineToolAvailability !== undefined) {
+    run.artifacts.baseline_tool_availability = baselineToolAvailability.path;
+  }
+  const context = store.get("pi-context-pack");
+  if (context !== undefined) {
+    run.artifacts.pi_context_pack = context.path;
+  }
+  const projectUnderstanding = store.get("project-understanding");
+  if (projectUnderstanding !== undefined) {
+    run.artifacts.project_understanding = projectUnderstanding.path;
+  }
 }

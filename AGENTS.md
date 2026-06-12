@@ -74,13 +74,17 @@ Project tooling:
 - typecheck: `pnpm typecheck`;
 - test: `pnpm test`;
 - run the local CLI in dev: `pnpm scan https://github.com/owner/repo`;
-- run the live Daytona smoke check: `pnpm smoke:daytona https://github.com/octocat/Hello-World`;
+- run the live Daytona smoke scan:
+  `pnpm smoke:daytona https://github.com/octocat/Hello-World`;
+- run the experimental Pi-in-Daytona smoke:
+  `pnpm smoke:pi-daytona https://github.com/xor777/ai-spam-detector`;
 - build package output: `pnpm build`.
 
 The current default CLI path uses the real `@daytona/sdk` adapter. Live scans
-need `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and `DAYTONA_TARGET`; if credentials
-are missing, the CLI must fail clearly rather than cloning an untrusted repo on
-the host. `FakeDaytonaSandboxProvider` is only a local test double.
+need `DAYTONA_API_KEY` and `OPENROUTER_API_KEY`; `DAYTONA_API_URL` and
+`DAYTONA_TARGET` are optional SDK overrides. If credentials are missing, the CLI
+must fail clearly rather than cloning an untrusted repo on the host.
+`FakeDaytonaSandboxProvider` is only a local test double.
 
 ## Commit Hygiene
 

@@ -11,6 +11,9 @@ importers:
       '@daytona/sdk':
         specifier: ^0.187.0
         version: 0.187.0(ws@8.21.0)
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.2.5

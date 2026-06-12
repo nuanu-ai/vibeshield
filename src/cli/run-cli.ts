@@ -28,6 +28,9 @@ export async function runCli(
   }
 
   const scanOptions: RunScanOptions = { repoUrlInput: repoUrl };
+  scanOptions.onProgress = (event) => {
+    io.stdout.write(`[${event.stage}] ${event.message}\n`);
+  };
   if (dependencies.runsRoot !== undefined) {
     scanOptions.runsRoot = dependencies.runsRoot;
   }
