@@ -181,21 +181,24 @@ function normalizeZizmor(stdout: string | undefined): BaselineObservation[] {
       return [];
     }
 
-    const message = stringValue(
-      alert.title ?? alert.message ?? alert.description ?? alert.rule ?? alert.ident,
+    const ident = stringValue(alert.ident ?? alert.rule, "");
+    const description = stringValue(
+      alert.title ?? alert.message ?? alert.description ?? alert.desc,
       "",
     );
+    const message = compactJoin([ident, description], ": ");
     if (!message) {
       return [];
     }
 
+    const determinations = recordValue(alert.determinations);
     return [
       {
-        confidence: "medium" as const,
+        confidence: normalizeConfidence(determinations?.confidence),
         evidence: evidenceFromZizmorAlert(alert),
         kind: "workflow" as const,
         message: compact(message),
-        severity: normalizeSeverity(alert.severity, "medium"),
+        severity: normalizeSeverity(alert.severity ?? determinations?.severity, "medium"),
       },
     ];
   });
@@ -208,14 +211,38 @@ function evidenceFromZizmorAlert(alert: Record<string, unknown>): string[] {
       return [];
     }
     const locationRecord = location as Record<string, unknown>;
-    return evidenceFromPathAndRange(
-      stringValue(locationRecord.path ?? locationRecord.file ?? locationRecord.filename, ""),
-      locationRecord.line ?? locationRecord.start_line,
-      locationRecord.end_line,
-    );
+    return evidenceFromZizmorLocation(locationRecord);
   });
 
   return evidence.length > 0 ? evidence : [];
+}
+
+function evidenceFromZizmorLocation(location: Record<string, unknown>): string[] {
+  const concrete = recordValue(location.concrete);
+  const concreteLocation = recordValue(concrete?.location ?? location.location);
+  const startPoint = recordValue(concreteLocation?.start_point ?? concreteLocation?.startPoint);
+  const endPoint = recordValue(concreteLocation?.end_point ?? concreteLocation?.endPoint);
+
+  return evidenceFromPathAndRange(
+    zizmorLocationPath(location),
+    location.line ?? location.start_line ?? concreteLocation?.line ?? startPoint?.row,
+    location.end_line ?? concreteLocation?.end_line ?? endPoint?.row,
+  );
+}
+
+function zizmorLocationPath(location: Record<string, unknown>): string {
+  const symbolic = recordValue(location.symbolic);
+  const key = recordValue(symbolic?.key);
+  const local = recordValue(key?.Local ?? key?.local);
+  return stringValue(
+    location.path ??
+      location.file ??
+      location.filename ??
+      local?.given_path ??
+      local?.path ??
+      local?.prefix,
+    "",
+  );
 }
 
 function parseJsonObject(text: string | undefined): Record<string, unknown> | null {
@@ -278,6 +305,21 @@ function normalizeSeverity(
   }
 }
 
+function normalizeConfidence(value: unknown): BaselineObservation["confidence"] {
+  if (typeof value !== "string") {
+    return "medium";
+  }
+
+  switch (value.toLowerCase()) {
+    case "high":
+      return "high";
+    case "low":
+      return "low";
+    default:
+      return "medium";
+  }
+}
+
 function evidenceFromPathAndRange(
   pathValue: string,
   startLine?: unknown,
@@ -307,6 +349,10 @@ function normalizePath(value: string): string {
     .replace(/^repo\//, "")
     .replace(/^\//, "")
     .trim();
+}
+
+function compactJoin(values: string[], separator: string): string {
+  return values.filter((value) => value.trim() !== "").join(separator);
 }
 
 function compact(value: string): string {

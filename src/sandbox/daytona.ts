@@ -1044,7 +1044,17 @@ function toolArgs() {
         ? ["sbom", "--format", "json", config.sbomSandboxPath]
         : ["fs", "--format", "json", config.repoPath];
     case "gitleaks":
-      return ["detect", "--source", config.repoPath, "--no-git", "--redact", "--report-format", "json"];
+      return [
+        "detect",
+        "--source",
+        config.repoPath,
+        "--no-git",
+        "--redact",
+        "--report-format",
+        "json",
+        "--report-path",
+        path.join(toolDir, "gitleaks-report.redacted.json"),
+      ];
     case "actionlint":
       return workflowFileArgs();
     case "zizmor":
@@ -1146,6 +1156,12 @@ if (skippedReason !== null) {
   exitCode = result.status ?? (result.error ? 127 : 0);
   stdout = redact(result.stdout || "");
   stderr = redact(result.stderr || "");
+  if (config.tool === "gitleaks") {
+    const reportPath = path.join(toolDir, "gitleaks-report.redacted.json");
+    if (fs.existsSync(reportPath)) {
+      stdout = redact(fs.readFileSync(reportPath, "utf8"));
+    }
+  }
   if (!findingExitCode(config.tool, exitCode)) {
     status = "failed";
     diagnostics.push("Tool execution failed with exit code " + exitCode + ".");

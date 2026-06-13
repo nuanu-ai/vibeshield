@@ -65,6 +65,77 @@ describe("deterministic baseline observation normalization", () => {
     ]);
   });
 
+  it("turns Gitleaks JSON reports into redacted secret findings", () => {
+    const observations = normalizeBaselineObservations({
+      status: "completed",
+      stdout: JSON.stringify([
+        {
+          Description: "Generic API Key",
+          EndLine: 12,
+          File: "src/config.ts",
+          RuleID: "generic-api-key",
+          StartLine: 12,
+        },
+      ]),
+      tool: "gitleaks",
+    });
+
+    expect(observations).toEqual([
+      {
+        confidence: "high",
+        evidence: ["src/config.ts:12"],
+        kind: "secret",
+        message: "generic-api-key: Generic API Key",
+        severity: "high",
+      },
+    ]);
+  });
+
+  it("turns Zizmor alerts into workflow findings with concrete evidence", () => {
+    const observations = normalizeBaselineObservations({
+      status: "completed",
+      stdout: JSON.stringify([
+        {
+          desc: "template expansion in shell",
+          determinations: {
+            confidence: "High",
+            severity: "High",
+          },
+          ident: "template-injection",
+          locations: [
+            {
+              concrete: {
+                location: {
+                  end_point: { column: 20, row: 18 },
+                  start_point: { column: 6, row: 16 },
+                },
+              },
+              symbolic: {
+                key: {
+                  Local: {
+                    given_path: "repo/.github/workflows/release.yml",
+                    prefix: "repo/.github/workflows",
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ]),
+      tool: "zizmor",
+    });
+
+    expect(observations).toEqual([
+      {
+        confidence: "high",
+        evidence: [".github/workflows/release.yml:16-18"],
+        kind: "workflow",
+        message: "template-injection: template expansion in shell",
+        severity: "high",
+      },
+    ]);
+  });
+
   it("does not report findings for failed scanner execution", () => {
     const observations = normalizeBaselineObservations({
       status: "failed",
