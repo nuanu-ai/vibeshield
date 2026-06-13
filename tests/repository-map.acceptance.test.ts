@@ -146,7 +146,7 @@ describe("AppSec repository map acceptance", () => {
     );
   });
 
-  it("renders the original 0-14 repository-map sections and deterministic scanner findings", async () => {
+  it("renders an auditor-readable 0-14 Markdown repository map with scanner observations", async () => {
     const { provider } = await createProvider();
 
     const result = await runScan({
@@ -158,12 +158,30 @@ describe("AppSec repository map acceptance", () => {
     expect(result.exitCode).toBe(0);
     const report = await readFile(path.join(expectRunDir(result), "report.md"), "utf8");
     for (let section = 0; section <= 14; section += 1) {
-      expect(report).toMatch(new RegExp(`(^|\\n)#{2,3}\\s+${section}\\.\\s+`));
+      expect(report).toMatch(new RegExp(`(^|\\n)##\\s+${section}\\.\\s+`));
     }
+    expect(report).toContain("| Tool | Severity | Kind | Observation | Evidence |");
     expect(report).toContain("CVE-FAKE-0001 in fixture-dependency@1.0.0 fixed in 1.0.1");
     expect(report).toContain("CKV_FAKE_1: Fixture IaC check failed");
-    expect(report).toContain("outputs/repo-map/coverage-structure.json");
-    expect(report).toContain("outputs/repository-map.json");
+    expect(report).toContain("| Type | Name | Handler | External Input | Evidence |");
+    expect(report).toContain("POST /api/spam");
+    expect(report).toContain("requireSession middleware");
+    expect(report).toContain("entry-http-spam");
+    expect(report).toContain("sink-db-insert");
+    expect(report).toContain("External HTTP to app/database");
+    expect(report).toContain("src/server.ts:5");
+    expect(report).not.toContain("```");
+    expect(report).not.toContain("metadata");
+    expect(report).not.toContain("invocation");
+    expect(report).not.toContain("stdout_bytes");
+    expect(report).not.toContain("output_bytes");
+    expect(report).not.toContain("provider");
+    expect(report).not.toContain("tools");
+    expect(report).not.toContain("No security findings or verdict");
+    expect(report).not.toContain("not a security audit");
+    expect(report).not.toContain("Inspectable artifacts");
+    expect(report).not.toContain("outputs/repo-map/coverage-structure.json");
+    expect(report).not.toContain("outputs/repository-map.json");
   });
 
   it("keeps untrusted checkout work inside a fresh sandbox and preserves failure diagnostics", async () => {
@@ -262,6 +280,10 @@ describe("AppSec repository map acceptance", () => {
     expect(minimalBaseline.tools.find((tool) => tool.tool === "checkov")?.skipped_reason).toContain(
       "No IaC",
     );
+    const minimalReport = await readFile(path.join(minimalRunDir, "report.md"), "utf8");
+    expect(minimalReport).not.toContain("Deterministic scanner observations");
+    expect(minimalReport).not.toContain("observations: 0");
+    expect(minimalReport).not.toContain("syft: completed");
   });
 
   it("continues to repository mapping when a scanner runtime call fails", async () => {

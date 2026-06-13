@@ -173,10 +173,11 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     );
 
     const report = await readFile(path.join(runDir, "report.md"), "utf8");
-    expect(report).toContain("Intake, inventory, deterministic baseline, and repository mapping");
-    expect(report).toContain("not a security audit");
-    expect(report).toContain("No security findings or verdict");
-    expect(report).toContain("outputs/repo-inventory.json");
+    expect(report).toContain("# VibeShield Repository Map");
+    expect(report).toContain("## 0. Coverage");
+    expect(report).not.toContain("not a security audit");
+    expect(report).not.toContain("No security findings or verdict");
+    expect(report).not.toContain("outputs/repo-inventory.json");
   });
 
   it("creates a fresh sandbox per run and keeps the checkout out of local artifacts", async () => {
