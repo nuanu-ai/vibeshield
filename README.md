@@ -2,11 +2,11 @@
 
 VibeShield is an early-stage security audit pipeline for AI-generated and beginner-built web projects.
 
-The current MVP goal is not a dashboard, GitHub App, or auto-fix system. The goal is to prove the scan pipeline:
+The current product slice is not a dashboard, GitHub App, or auto-fix system. The goal is to prove the scan pipeline:
 
 > GitHub repo in, inspectable run artifacts out.
 
-The current walking skeleton is an evidence-backed repository map, not a security verdict or findings report. Security findings come in later phases after the project map and runtime boundary are stable.
+The current scan output is a facts-only AppSec repository map plus deterministic scanner results. The map is not a security verdict; deeper security findings come later after the repository map and runtime boundary are stable.
 
 ## Current Direction
 
@@ -16,7 +16,7 @@ The first implementation should be a local CLI pipeline:
 vibeshield scan https://github.com/owner/repo
 ```
 
-Target outputs over the MVP:
+Target outputs:
 
 ```text
 run.json
@@ -29,9 +29,9 @@ findings.json
 metrics.json
 ```
 
-The first walking skeleton may produce only a smaller subset.
+The first implementation may produce only a smaller subset.
 
-No frontend, backend, GitHub App, PR generation, accounts, or continuous monitoring in the first MVP.
+No frontend, backend, GitHub App, PR generation, accounts, or continuous monitoring in the current product slice.
 
 ## Technical Shape
 
@@ -39,8 +39,8 @@ Preferred direction for the core is TypeScript/Node orchestration with simple, i
 
 The first implementation should avoid a heavy analyzer framework. Later steps may call external tools when that becomes useful.
 
-Phase 1 extends the local CLI skeleton with deterministic baseline jobs,
-curated Pi context, staged Pi repository mapping, evidence validation, and an
+The local CLI runs deterministic baseline jobs, builds curated Pi context,
+collects a facts-only repository map, validates evidence, and writes an
 artifact-driven report. The default runtime sandbox path uses the official
 `@daytona/sdk` adapter. Tests use a fake Daytona adapter only as a local test
 double. A live scan requires Daytona and OpenRouter credentials and must not fall
@@ -63,7 +63,6 @@ Project docs live in [docs/](./docs/).
 Start here:
 
 - [Architecture](./docs/architecture.md)
-- [MVP plan](./docs/mvp-plan.md)
 - [Product idea](./docs/idea.md)
 
 ## Working Principles
@@ -92,11 +91,12 @@ OpenRouter. The fake adapter in
 `src/sandbox/fake-daytona.ts` is for non-live acceptance tests only.
 
 Current runs write inspectable artifacts under each local run directory,
-including `outputs/inventory.v1.json`, `outputs/baseline-summary.v1.json`,
-`outputs/baseline/tool-availability.v1.json`,
-`outputs/baseline/syft-sbom.json`, `outputs/pi-context-pack.v1.json`,
-`outputs/entry-points.v1.json`, `outputs/sensitive-sinks.v1.json`,
-`outputs/data-flows.v1.json`, `outputs/project-understanding.v1.json`,
-per-stage `outputs/*-semantic-evaluation.v1.json` verdicts,
+including `outputs/inventory.json`, `outputs/baseline-summary.json`,
+`outputs/baseline/tool-availability.json`,
+`outputs/baseline/syft-sbom.json`, `outputs/pi-context-pack.json`,
+repository map section artifacts under `outputs/repo-map/`,
+`outputs/repository-map.json`,
 per-stage redacted Pi progress/log artifacts under `outputs/pi/<stage>/`, and
-`report.md`.
+`report.md`. The current map sections are coverage/structure, stack/build/deps,
+entrypoints, auth/config/secrets, storage/integrations/infra, operation sinks,
+data flows, and trust boundaries.

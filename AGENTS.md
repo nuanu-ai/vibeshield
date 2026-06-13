@@ -10,7 +10,7 @@ relevant files under `docs/` instead of duplicating it here.
 VibeShield is an early-stage security audit pipeline for AI-generated and
 beginner-built web projects.
 
-The current MVP focuses on proving the detection core through a local CLI
+The current product slice focuses on proving the detection core through a local CLI
 pipeline that accepts a GitHub repository URL:
 
 ```bash
@@ -28,7 +28,7 @@ Primary orientation:
 - `README.md`: human entry point.
 - `docs/`: product, architecture, and planning documents.
 
-Implementation directories may be added as the MVP takes shape. When adding a
+Implementation directories may be added as the product takes shape. When adding a
 new top-level area, keep the README or relevant docs clear enough for the next
 agent to orient quickly.
 
@@ -39,7 +39,7 @@ agent to orient quickly.
 - **DRY**: share schemas, contracts, and analyzer plumbing when duplication
   creates real maintenance risk.
 - **YAGNI**: add infrastructure, abstractions, and dependencies when the current
-  MVP needs them.
+  current product slice needs them.
 
 Prefer boring, inspectable code over clever orchestration. Keep behavior easy to
 debug from files on disk.
@@ -74,6 +74,7 @@ Project tooling:
 - typecheck: `pnpm typecheck`;
 - test: `pnpm test`;
 - run the local CLI in dev: `pnpm scan https://github.com/owner/repo`;
+- resume a failed run from durable artifacts: `pnpm resume /path/to/run-directory`;
 - run the live Daytona smoke scan:
   `pnpm smoke:daytona https://github.com/octocat/Hello-World`;
 - run the experimental Pi-in-Daytona smoke:

@@ -1,7 +1,7 @@
 # Architecture
 
 VibeShield is a local CLI pipeline that accepts a GitHub repository URL and
-returns an inspectable run directory. The current MVP produces repository
+returns an inspectable run directory. The current product slice produces repository
 understanding artifacts, not a security verdict.
 
 ## Runtime Boundary
@@ -35,7 +35,7 @@ vibeshield scan <github-url>
        -> actionlint, if GitHub Actions exist
        -> zizmor, if GitHub Actions exist
        -> checkov, if IaC/config candidates exist
-       -> baseline-summary.v1.json
+       -> baseline-summary.json
 
   -> build Pi context pack
        -> compact repo/inventory facts
@@ -43,11 +43,19 @@ vibeshield scan <github-url>
        -> budget limits
        -> no raw scanner output/debug noise
 
-  -> staged Pi repository mapping
-       -> entry-points.v1
-       -> sensitive-sinks.v1
-       -> data-flows.v1
-       -> project-understanding.v1
+  -> facts-only AppSec repository map
+       -> Pi collector: coverage-structure
+       -> Pi collector: stack-build-deps
+       -> Pi collector: entrypoints
+       -> Pi collector: auth-config-secrets
+       -> Pi collector: storage-integrations-infra
+       -> Pi collector: operation-sinks
+       -> Pi collector: data-flows
+            input: entrypoints + operation-sinks
+       -> Pi collector: trust-boundaries
+            input: prior map artifacts
+       -> Pi synthesis: repository-map
+            input: all section artifacts
 
   -> write report.md
   -> write run.json/events.jsonl
@@ -58,11 +66,12 @@ vibeshield scan <github-url>
 
 Baseline scanners run before Pi and provide normalized context for later
 analysis. A scanner failure does not stop the whole baseline step. Each tool
-records status, invocation metadata, diagnostics, and artifacts.
+records status, invocation metadata, diagnostics, artifacts, and any concrete
+findings that can be normalized from its output.
 
 Current baseline tools:
 
-- `syft`: SBOM generation.
+- `syft`: CycloneDX SBOM generation.
 - `trivy sbom`: vulnerability observations from SBOM input.
 - `gitleaks`: secret observations.
 - `actionlint`: conditional on GitHub Actions workflows.
@@ -70,75 +79,95 @@ Current baseline tools:
 - `checkov`: conditional on IaC/config candidates.
 
 `osv-scanner` is deferred until its Daytona/network behavior is reliable enough
-for MVP use.
+for the sandboxed scan pipeline.
+
+Concrete deterministic findings are written to `baseline-summary.json` and
+shown directly in `report.md`; raw scanner output remains available under
+`outputs/baseline/<tool>/`.
 
 ## Pi Context Pack
 
-`StepContextBuilder` creates `outputs/pi-context-pack.v1.json` from validated
+`StepContextBuilder` creates `outputs/pi-context-pack.json` from validated
 artifacts. It keeps Pi input compact and excludes raw scanner output, logs,
 debug metadata, and high-volume diagnostics.
 
 The context pack includes:
 
 - repository URL and commit SHA;
-- inventory summaries and candidate paths;
+- inventory summaries, language/LOC summary, and candidate paths;
 - baseline summary signal;
 - budget limits for Pi artifacts.
 
-## Pi Repository Mapping
+## Repository Map Pipeline
 
-Phase 1 has four staged Pi mapping artifacts:
+The repository map pipeline produces facts-only AppSec artifacts. These artifacts are
+not a security review and not a full program trace; they are a compact,
+evidence-backed navigation map for later analysis and threat modeling.
 
-- `entry-points.v1`: HTTP routes, resolvers, RPC methods, CLI commands, event
-  handlers, webhooks, cron jobs, upload handlers, and external format parsers.
-- `sensitive-sinks.v1`: observable operation sinks such as DB queries, process
-  execution, filesystem operations, parsing, redirects, outbound URL/client
-  construction, crypto/randomness, and logging.
-- `data-flows.v1`: source entrypoint to sink traces using prior entry point and
-  sink artifacts.
-- `project-understanding.v1`: synthesis only; it groups and summarizes previous
-  artifacts and must not rediscover new facts.
+The current implementation calls Pi once per map step. A complete successful
+scan runs nine Pi jobs:
 
-## Pi Evaluator Loop
+- `coverage-structure`: collect coverage, reviewed areas, excluded areas,
+  repository size, language LOC, repository shape, reviewed directories,
+  excluded directories, access gaps, and fact gaps. This covers original map
+  sections 0 and 2.
+- `stack-build-deps`: collect languages, frameworks, runtimes, package
+  managers, manifests, lockfiles, direct dependency signals, declared build
+  commands, CI evidence, and vendored/lockfile facts. This covers original map
+  sections 1 and 11.
+- `entrypoints`: collect externally reachable or externally triggered
+  boundaries such as HTTP routes, CLI commands, events, webhooks, scheduled
+  jobs, uploads, and parsers. This covers original map section 3.
+- `auth-config-secrets`: collect authentication/authorization facts, config
+  loading, env variables, `.env` examples, and redacted secret-like references.
+  This step receives the accepted `entrypoints` artifact so it can map
+  observable protected/public/unknown entrypoint status without rediscovering
+  entrypoints. This covers original map sections 4 and 7.
+- `storage-integrations-infra`: collect DB/storage/schema facts, external
+  integrations, Docker/runtime, workflow, IaC, and deploy declarations.
+  This covers original map sections 9, 10, and 12.
+- `operation-sinks`: collect observable operation sinks such as DB queries,
+  process execution, filesystem/path operations, parsing/deserialization,
+  redirects, outbound URL/client construction, crypto/randomness, and logging.
+  This covers original map sections 6, 8, and 13.
+- `data-flows`: use only the accepted `entrypoints` and `operation-sinks`
+  artifacts plus minimal repo context to record bounded shallow paths from
+  external input to operation sinks. This covers original map section 5.
+- `trust-boundaries`: synthesize inference-only trust boundaries from prior map
+  artifacts; it must reference existing IDs/evidence instead of rediscovering
+  repository facts. This covers original map section 14.
+- `repository-map`: synthesize the final human-oriented repository map from all
+  section artifacts; it must not add new facts.
 
-Each Pi stage uses the same minimal loop:
+Each Pi job writes a structured JSON artifact. Dependent jobs receive only the
+minimal prior artifacts they need, so Pi does not carry one large prompt across
+the whole repository.
+
+## Pi Quality Gate
+
+The current pipeline uses a single Pi collector pass per map section:
 
 ```text
 collector Pi
   -> candidate JSON
   -> schema-only validation
-  -> semantic evaluator Pi
-       -> accepted: write final artifact and verdict
-       -> rejected: pass feedback back to collector and retry
-  -> max 3 attempts
+  -> write final artifact
 ```
 
 The deterministic validator only checks JSON/schema/shape and budgets. It does
 not try to prove whether a claim is semantically correct.
 
+There is no semantic evaluator loop in the current implementation. A Pi job is:
+collector run -> deterministic validation -> accepted artifact or failed run.
+
 The collector is the exploration role. It runs with read/search/list tools and
-must do the stage-specific discovery work before returning candidate JSON.
-
-The semantic evaluator is evidence-led rather than blind. It also runs with
-read/search/list tools, but starts from the candidate artifact, cited evidence,
-prior stage input, and the stage contract:
-
-- evidence supports the claim;
-- kinds are not mislabeled;
-- overclaims are rejected;
-- data flows are not more confident than the evidence allows;
-- project-understanding does not invent new entrypoints, sinks, or flows.
-
-The evaluator may dig deeper when needed to validate or falsify a concrete
-candidate claim, evidence reference, kind classification, trace, or explicit
-coverage statement. It must not use broad repository rediscovery as the default
-evaluation strategy or reject candidates for whole-repo completeness gaps unless
-the omission is directly observable from the candidate, prior stage input, or
-cited evidence.
-
-If the evaluator rejects a candidate, its feedback is appended to the next
-collector prompt. If all attempts are rejected, the stage fails with the final
-semantic verdict preserved.
+must do the section-specific discovery work before returning candidate JSON. It
+stays at map level: repository structure, boundary declarations/registrations,
+auth/config facts, observable operation lines, storage/integration/infra facts,
+and bounded external-input connections. Internal critical operations without an
+observable external input source remain in operation sinks, coverage, or fact
+gaps rather than invented flows. Trust boundaries are explicitly marked as
+inferences and may only reference facts and IDs from earlier artifacts.
 
 ## Pi Runtime Observability
 
@@ -151,7 +180,6 @@ and streams only those sanitized events back to the host:
 - `thinking...` when the agent starts a reasoning turn;
 - one event per completed tool call, with tool name and a compact path/pattern
   when Pi exposes one;
-- semantic evaluator rejection with the short reason before a collector retry;
 - periodic heartbeat while Pi is still running;
 - output start and completion/failure.
 
@@ -159,26 +187,26 @@ The final structured artifact is reconstructed from the final assistant text
 and written to `outputs/pi/<stage>/<stage>.raw.redacted.txt`. The raw Pi JSONL
 event stream is not stored as a user artifact.
 
-Progress messages label whether the running Pi job is the stage `collector` or
-the semantic `evaluator`, and include the attempt number when available.
+Progress messages label the running Pi mapping job as the stage `collector`.
 
 ## Artifacts
 
 Successful runs write inspectable artifacts under the local run directory:
 
-- `outputs/inventory.v1.json`
-- `outputs/baseline/tool-availability.v1.json`
+- `outputs/inventory.json`
+- `outputs/baseline/tool-availability.json`
 - `outputs/baseline/syft-sbom.json`
-- `outputs/baseline-summary.v1.json`
-- `outputs/pi-context-pack.v1.json`
-- `outputs/entry-points.v1.json`
-- `outputs/entry-points-semantic-evaluation.v1.json`
-- `outputs/sensitive-sinks.v1.json`
-- `outputs/sensitive-sinks-semantic-evaluation.v1.json`
-- `outputs/data-flows.v1.json`
-- `outputs/data-flows-semantic-evaluation.v1.json`
-- `outputs/project-understanding.v1.json`
-- `outputs/project-understanding-semantic-evaluation.v1.json`
+- `outputs/baseline-summary.json`
+- `outputs/pi-context-pack.json`
+- `outputs/repo-map/coverage-structure.json`
+- `outputs/repo-map/stack-build-deps.json`
+- `outputs/repo-map/entrypoints.json`
+- `outputs/repo-map/auth-config-secrets.json`
+- `outputs/repo-map/storage-integrations-infra.json`
+- `outputs/repo-map/operation-sinks.json`
+- `outputs/repo-map/data-flows.json`
+- `outputs/repo-map/trust-boundaries.json`
+- `outputs/repository-map.json`
 - `outputs/pi/<stage>/...` raw/stderr/progress/metadata artifacts
 - `report.md`
 - `run.json`
@@ -196,3 +224,25 @@ Failures after sandbox creation should leave a useful run directory:
 - non-zero CLI exit code.
 
 The sandbox should be deleted after both success and failure.
+
+## Resume Semantics
+
+`vibeshield resume <run-dir>` continues a failed run from durable local
+artifacts. Final accepted artifacts are reused; raw Pi candidates are not
+treated as accepted output.
+
+Resume always creates a fresh sandbox and clones the original repository at the
+`commit_sha` recorded in `run.json`. If the run records a previous sandbox id,
+VibeShield first asks the sandbox provider to delete that old sandbox id. A
+failed, unsupported, or not-found stale-sandbox cleanup is recorded in
+`events.jsonl` but does not block the fresh resume sandbox.
+
+The resume boundary is artifact-based:
+
+- reuse `inventory` when present, otherwise rebuild inventory;
+- reuse `baseline-summary` when present, otherwise rerun deterministic
+  baseline;
+- reuse `pi-context-pack` when present, otherwise rebuild context;
+- resume Pi from the first missing final map artifact in the section order from
+  `coverage-structure` through `repository-map`;
+- rewrite `report.md` from the final accepted artifacts.
