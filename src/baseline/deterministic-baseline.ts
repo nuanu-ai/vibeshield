@@ -90,13 +90,15 @@ export async function runDeterministicBaseline(
   );
 
   for (const tool of baselineToolOrder) {
-    await input.onProgress?.({
-      job: tool,
-      message: `Running deterministic baseline job: ${tool}.`,
-      type: "baseline.job.started",
-    });
-
     const availability = availabilityByTool.get(tool);
+    if (availability?.required !== false) {
+      await input.onProgress?.({
+        job: tool,
+        message: `Running deterministic baseline job: ${tool}.`,
+        type: "baseline.job.started",
+      });
+    }
+
     const result =
       availability?.required === true && availability.status !== "available"
         ? buildUnavailableToolResult({
@@ -160,11 +162,13 @@ export async function runDeterministicBaseline(
       ...(result.version === undefined ? {} : { version: result.version }),
     });
 
-    await input.onProgress?.({
-      job: tool,
-      message: `Deterministic baseline job ${tool} ${result.status}.`,
-      type: "baseline.job.completed",
-    });
+    if (result.status === "skipped" || result.status === "failed") {
+      await input.onProgress?.({
+        job: tool,
+        message: `Deterministic baseline job ${tool} ${result.status}.`,
+        type: result.status === "skipped" ? "baseline.job.skipped" : "baseline.job.failed",
+      });
+    }
   }
 
   const sbomArtifact = sbomArtifactPath(toolSummaries);

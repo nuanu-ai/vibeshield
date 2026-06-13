@@ -6,8 +6,12 @@ import { promisify } from "node:util";
 import type {
   BaselineObservation,
   BaselineToolName,
+  DataFlowsArtifact,
+  EntryPointsArtifact,
   PiContextPackArtifact,
+  PiSemanticEvaluationArtifact,
   ProjectUnderstandingArtifact,
+  SensitiveSinksArtifact,
   ToolAvailabilityArtifact,
 } from "../artifacts/contracts.js";
 import { buildRepoInventory } from "../inventory/repo-inventory.js";
@@ -34,10 +38,13 @@ const execFileAsync = promisify(execFile);
 export interface FakeDaytonaSandboxProviderOptions {
   failAt?: "baseline" | "clone" | "inventory" | "pi";
   fixtureRepos: Map<string, string>;
+  piOutputs?: Partial<Record<string, FakePiOutput>>;
   projectUnderstandingOutput?: ProjectUnderstandingArtifact | ((input: RuntimeJobInput) => unknown);
   sandboxRoot: string;
   unavailableTools?: BaselineToolName[];
 }
+
+type FakePiOutput = unknown | ((input: RuntimeJobInput) => unknown);
 
 export class FakeDaytonaSandboxProvider implements SandboxProvider {
   readonly createdSandboxIds: string[] = [];
@@ -57,6 +64,7 @@ export class FakeDaytonaSandboxProvider implements SandboxProvider {
     const sessionOptions: FakeDaytonaSandboxSessionOptions = {
       fixtureRepos: this.options.fixtureRepos,
       id,
+      piOutputs: this.options.piOutputs ?? {},
       repoUrl: context.repo.url,
       sandboxDir,
       unavailableTools: this.options.unavailableTools ?? [],
@@ -349,26 +357,34 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
     }
 
     const startedAt = new Date().toISOString();
-    const piDir = path.join(this.artifactsDir, "pi");
-    await mkdir(piDir, { recursive: true });
+    const stepDir = path.join(this.artifactsDir, "pi", input.pi.artifactSubdir);
+    await mkdir(stepDir, { recursive: true });
 
-    const output = redactDeep(
-      typeof this.options.projectUnderstandingOutput === "function"
-        ? this.options.projectUnderstandingOutput(input)
-        : (this.options.projectUnderstandingOutput ?? defaultFakeProjectUnderstanding(input)),
+    await input.onProgress?.({
+      job: input.name,
+      message: `Running Pi ${input.pi.step}.`,
+      type: "runner.started",
+    });
+
+    const selectedOutput = fakePiOutputForStep(input, this.options);
+    const output = redactDeep(selectedOutput);
+
+    const rawPath = path.join(stepDir, `${input.pi.outputBaseName}.raw.redacted.txt`);
+    const stderrPath = path.join(stepDir, "stderr.redacted.log");
+    const progressPath = path.join(stepDir, "progress.jsonl");
+    const metadataPath = path.join(stepDir, "metadata.json");
+
+    await writeFile(
+      rawPath,
+      isFakeRawPiOutput(output) ? `${output.rawText}\n` : `${JSON.stringify(output, null, 2)}\n`,
+      "utf8",
     );
-
-    const rawPath = path.join(piDir, "project-understanding.raw.redacted.txt");
-    const stderrPath = path.join(piDir, "stderr.redacted.log");
-    const progressPath = path.join(piDir, "progress.jsonl");
-    const metadataPath = path.join(piDir, "metadata.json");
-
-    await writeFile(rawPath, `${JSON.stringify(output, null, 2)}\n`, "utf8");
     await writeFile(stderrPath, "fake pi completed\n", "utf8");
     await writeFile(
       progressPath,
       `${JSON.stringify({
-        message: "Fake Pi produced project understanding.",
+        message: `Fake Pi produced ${input.pi.step}.`,
+        step: input.pi.step,
         timestamp: new Date().toISOString(),
         type: "pi.completed",
       })}\n`,
@@ -380,13 +396,19 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
         {
           input_context_artifact: input.pi.inputContextArtifact,
           invocation: {
-            args: ["-p", "--tools", "read,grep,find,ls"],
+            args: ["-p", "--tools", input.pi.tools.join(",")],
             command: "pi",
             cwd: this.repoPath,
+            metadata: { tools: input.pi.tools },
             provider: "openrouter",
           },
           model: input.pi.model,
           provider: input.pi.provider,
+          stderr_bytes: "fake pi completed\n".length,
+          stdout_bytes: isFakeRawPiOutput(output)
+            ? output.rawText.length
+            : JSON.stringify(output, null, 2).length + 1,
+          step: input.pi.step,
           version: "fake-pi-0.0.0",
         },
         null,
@@ -395,22 +417,28 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       "utf8",
     );
 
+    await input.onProgress?.({
+      job: input.name,
+      message: `Pi ${input.pi.step} completed.`,
+      type: "pi.completed",
+    });
+
     return {
       artifacts: [
         {
-          relativePath: "pi/project-understanding.raw.redacted.txt",
+          relativePath: `pi/${input.pi.artifactSubdir}/${input.pi.outputBaseName}.raw.redacted.txt`,
           sandboxPath: rawPath,
         },
         {
-          relativePath: "pi/stderr.redacted.log",
+          relativePath: `pi/${input.pi.artifactSubdir}/stderr.redacted.log`,
           sandboxPath: stderrPath,
         },
         {
-          relativePath: "pi/progress.jsonl",
+          relativePath: `pi/${input.pi.artifactSubdir}/progress.jsonl`,
           sandboxPath: progressPath,
         },
         {
-          relativePath: "pi/metadata.json",
+          relativePath: `pi/${input.pi.artifactSubdir}/metadata.json`,
           sandboxPath: metadataPath,
         },
       ],
@@ -418,16 +446,18 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       exitCode: 0,
       finishedAt: new Date().toISOString(),
       invocation: {
-        args: ["-p", "--tools", "read,grep,find,ls"],
+        args: ["-p", "--tools", input.pi.tools.join(",")],
         command: "pi",
         cwd: this.repoPath,
+        metadata: { tools: input.pi.tools },
         provider: "openrouter",
       },
-      kind: "pi-project-understanding",
+      kind: "pi-repository-mapping",
       metadata: {
         input_context_artifact: input.pi.inputContextArtifact,
         model: input.pi.model,
         provider: input.pi.provider,
+        step: input.pi.step,
         version: "fake-pi-0.0.0",
       },
       observations: [],
@@ -473,6 +503,7 @@ interface FakeDaytonaSandboxSessionOptions {
   failAt?: "baseline" | "clone" | "inventory" | "pi";
   fixtureRepos: Map<string, string>;
   id: string;
+  piOutputs: Partial<Record<string, FakePiOutput>>;
   projectUnderstandingOutput?: ProjectUnderstandingArtifact | ((input: RuntimeJobInput) => unknown);
   removeLiveSandboxId: () => void;
   repoUrl: string;
@@ -585,18 +616,204 @@ function fakeObservationsForTool(tool: BaselineToolName, files: string[]): Basel
   return observations;
 }
 
+function fakePiOutputForStep(
+  input: RuntimeJobInput,
+  options: FakeDaytonaSandboxSessionOptions,
+): unknown {
+  if (input.pi === undefined) {
+    throw new Error("Missing Pi job input.");
+  }
+
+  const configured = options.piOutputs[input.pi.step] ?? options.piOutputs[input.pi.outputBaseName];
+  if (configured !== undefined) {
+    return typeof configured === "function" ? configured(input) : configured;
+  }
+
+  if (
+    input.pi.outputBaseName === "project-understanding" &&
+    options.projectUnderstandingOutput !== undefined
+  ) {
+    return typeof options.projectUnderstandingOutput === "function"
+      ? options.projectUnderstandingOutput(input)
+      : options.projectUnderstandingOutput;
+  }
+
+  if (input.pi.outputBaseName.endsWith("-semantic-evaluation")) {
+    return defaultFakeSemanticEvaluation(input);
+  }
+
+  switch (input.pi.outputBaseName) {
+    case "entry-points":
+      return defaultFakeEntryPoints(input);
+    case "sensitive-sinks":
+      return defaultFakeSensitiveSinks(input);
+    case "data-flows":
+      return defaultFakeDataFlows(input);
+    case "project-understanding":
+      return defaultFakeProjectUnderstanding(input);
+    default:
+      throw new Error(`No fake Pi output is configured for ${input.pi.outputBaseName}.`);
+  }
+}
+
+function defaultFakeSemanticEvaluation(input: RuntimeJobInput): PiSemanticEvaluationArtifact {
+  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
+  const stage = input.pi?.step.replace(/:semantic-evaluation$/, "") ?? "unknown";
+  return {
+    accepted: true,
+    artifact_version: 1,
+    attempt_count: 1,
+    candidate_kind: stage as PiSemanticEvaluationArtifact["candidate_kind"],
+    generated_at: new Date().toISOString(),
+    generated_by: "pi",
+    issues: [],
+    kind: "pi-semantic-evaluation.v1",
+    missing_coverage: [],
+    overclaims: [],
+    repo: {
+      commit_sha: context?.repo?.commit_sha ?? null,
+      url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
+    },
+    stage,
+    summary: "Fake semantic evaluator accepted the candidate artifact.",
+  };
+}
+
+function isFakeRawPiOutput(value: unknown): value is { rawText: string } {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "rawText" in value &&
+    typeof (value as { rawText?: unknown }).rawText === "string"
+  );
+}
+
+function defaultFakeEntryPoints(input: RuntimeJobInput): EntryPointsArtifact {
+  const now = new Date().toISOString();
+  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
+  const inventory = context?.inventory;
+  const manifestPath = inventory?.manifest_files?.[0] ?? "README.md";
+  const entrypointPath = inventory?.candidate_entrypoints?.[0] ?? manifestPath;
+  const repo = {
+    commit_sha: context?.repo?.commit_sha ?? null,
+    url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
+  };
+
+  return {
+    artifact_version: 1,
+    coverage: {
+      not_covered: [
+        { area: "Runtime-only entrypoints", reason: "Fake Pi does not execute the app." },
+      ],
+      reviewed: [{ area: "Candidate entrypoint files", evidence: [`${entrypointPath}:1`] }],
+    },
+    entry_points: [
+      {
+        confidence: "medium",
+        evidence: [`${entrypointPath}:1`],
+        id: "ep-1",
+        kind: "http_route",
+        location: entrypointPath,
+        name: "Primary HTTP route candidate",
+        route: "/api",
+      },
+    ],
+    generated_at: now,
+    generated_by: "pi",
+    kind: "entry-points.v1",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo,
+  };
+}
+
+function defaultFakeSensitiveSinks(input: RuntimeJobInput): SensitiveSinksArtifact {
+  const now = new Date().toISOString();
+  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
+  const inventory = context?.inventory;
+  const manifestPath = inventory?.manifest_files?.[0] ?? "README.md";
+  const sinkPath =
+    inventory?.candidate_entrypoints?.[1] ?? inventory?.candidate_entrypoints?.[0] ?? manifestPath;
+  const repo = {
+    commit_sha: context?.repo?.commit_sha ?? null,
+    url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
+  };
+
+  return {
+    artifact_version: 1,
+    coverage: {
+      not_covered: [{ area: "Runtime-only sinks", reason: "Fake Pi does not execute the app." }],
+      reviewed: [{ area: "Candidate operation files", evidence: [`${sinkPath}:1`] }],
+    },
+    generated_at: now,
+    generated_by: "pi",
+    kind: "sensitive-sinks.v1",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo,
+    sinks: [
+      {
+        confidence: "medium",
+        evidence: [`${sinkPath}:1`],
+        id: "sink-1",
+        kind: "filesystem_operation",
+        location: sinkPath,
+        operation: "Observable operation candidate",
+      },
+    ],
+  };
+}
+
+function defaultFakeDataFlows(input: RuntimeJobInput): DataFlowsArtifact {
+  const now = new Date().toISOString();
+  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
+  const inventory = context?.inventory;
+  const evidencePath =
+    inventory?.candidate_entrypoints?.[0] ?? inventory?.manifest_files?.[0] ?? "README.md";
+  const repo = {
+    commit_sha: context?.repo?.commit_sha ?? null,
+    url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
+  };
+
+  return {
+    artifact_version: 1,
+    coverage: {
+      not_covered: [{ area: "Runtime execution", reason: "Fake Pi does not execute requests." }],
+      reviewed: [{ area: "Entry-to-sink candidates", evidence: [`${evidencePath}:1`] }],
+    },
+    flows: [
+      {
+        id: "flow-1",
+        intermediate_functions: [],
+        sink: "sink-1",
+        sink_evidence: [`${evidencePath}:1`],
+        source_entrypoint: "ep-1",
+        source_evidence: [`${evidencePath}:1`],
+        trace_status: "direct observed",
+      },
+    ],
+    generated_at: now,
+    generated_by: "pi",
+    inputs: {
+      entry_points_artifact: "outputs/entry-points.v1.json",
+      sensitive_sinks_artifact: "outputs/sensitive-sinks.v1.json",
+    },
+    kind: "data-flows.v1",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo,
+  };
+}
+
 function defaultFakeProjectUnderstanding(input: RuntimeJobInput): ProjectUnderstandingArtifact {
   const now = new Date().toISOString();
   const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
   const inventory = context?.inventory;
   const manifestPath = inventory?.manifest_files?.[0] ?? "README.md";
   const entrypointPath = inventory?.candidate_entrypoints?.[0] ?? manifestPath;
-  const surfacePath =
-    inventory?.github_actions_workflows?.[0] ??
-    inventory?.iac_candidates?.[0] ??
-    entrypointPath ??
-    manifestPath;
-  const envPath = inventory?.env_and_config_candidates?.[0] ?? manifestPath;
   const repo = {
     commit_sha: context?.repo?.commit_sha ?? null,
     url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
@@ -606,25 +823,40 @@ function defaultFakeProjectUnderstanding(input: RuntimeJobInput): ProjectUnderst
     artifact_version: 1,
     coverage: {
       not_covered: [{ area: "Runtime behavior", reason: "Phase 1 does not execute the app." }],
-      reviewed: [{ area: "Repository structure", evidence: [`${manifestPath}:1`] }],
+      reviewed: [{ area: "Previous Pi artifacts", evidence: [`${entrypointPath}:1`] }],
     },
-    env_and_config_surface: [
+    data_flow_groups: [
       {
-        evidence: [`${envPath}:1`],
-        name: envPath,
-        observed_use: "Environment/config candidate listed in repository files.",
+        evidence: [`${entrypointPath}:1`],
+        flow_ids: ["flow-1"],
+        name: "Observed entry-to-operation traces",
+        summary: "Data-flow synthesis is based on data-flows.v1.",
+        trace_statuses: ["direct observed"],
+      },
+    ],
+    entry_point_groups: [
+      {
+        entry_point_ids: ["ep-1"],
+        evidence: [`${entrypointPath}:1`],
+        name: "Primary entrypoint group",
+        summary: "Entry point group summarized from entry-points.v1.",
       },
     ],
     generated_at: now,
     generated_by: "pi",
+    inputs: {
+      data_flows_artifact: "outputs/data-flows.v1.json",
+      entry_points_artifact: "outputs/entry-points.v1.json",
+      sensitive_sinks_artifact: "outputs/sensitive-sinks.v1.json",
+    },
     kind: "project-understanding.v1",
     map: {
-      entrypoints: [
+      components: [
         {
           evidence: [`${entrypointPath}:1`],
-          kind: "candidate",
-          path: entrypointPath,
-          summary: "Primary candidate entrypoint for manual review.",
+          kind: "application",
+          name: "Repository application surface",
+          summary: "Component grouping synthesized from prior Pi artifacts.",
         },
       ],
       important_files: [
@@ -634,37 +866,26 @@ function defaultFakeProjectUnderstanding(input: RuntimeJobInput): ProjectUnderst
           reason: "Important project manifest or configuration file.",
         },
       ],
-      observed_surfaces: [
-        {
-          evidence: [`${surfacePath}:1`],
-          kind: "candidate",
-          path: surfacePath,
-          summary: "Observable project surface selected from inventory and baseline context.",
-        },
-      ],
     },
     metadata: {
-      pi: {
-        input_context_artifact: input.pi?.inputContextArtifact ?? "outputs/pi-context-pack.v1.json",
-        invocation: {
-          args: ["-p", "--tools", "read,grep,find,ls"],
-          command: "pi",
-          cwd: "repo",
-          provider: "openrouter",
-        },
-        model: input.pi?.model ?? "fake",
-        provider: input.pi?.provider ?? "openrouter",
-        version: "fake-pi-0.0.0",
-      },
+      pi: fakePiMetadata(input),
     },
     fact_gaps: [
       {
         area: "Runtime behavior",
-        evidence: [`${surfacePath}:1`],
+        evidence: [`${entrypointPath}:1`],
         missing_fact: "Runtime behavior was not executed or observed in Phase 1.",
       },
     ],
     repo,
+    sensitive_sink_groups: [
+      {
+        evidence: [`${entrypointPath}:1`],
+        name: "Observable operation sinks",
+        sensitive_sink_ids: ["sink-1"],
+        summary: "Sink group summarized from sensitive-sinks.v1.",
+      },
+    ],
     stack: [{ evidence: [`${manifestPath}:1`], name: "Repository stack", role: "detected" }],
     summary: {
       confidence: "medium",
@@ -672,6 +893,24 @@ function defaultFakeProjectUnderstanding(input: RuntimeJobInput): ProjectUnderst
       project_kind: "unknown",
       text: "Repository orientation generated from Phase 1 context pack.",
     },
+  };
+}
+
+function fakePiMetadata(input: RuntimeJobInput): ProjectUnderstandingArtifact["metadata"]["pi"] {
+  const tools = input.pi?.tools ?? ["read", "grep", "find", "ls"];
+  return {
+    input_context_artifact: input.pi?.inputContextArtifact ?? "outputs/pi-context-pack.v1.json",
+    invocation: {
+      args: ["-p", "--tools", tools.join(",")],
+      command: "pi",
+      cwd: "repo",
+      metadata: { tools },
+      provider: "openrouter",
+    },
+    model: input.pi?.model ?? "fake",
+    provider: input.pi?.provider ?? "openrouter",
+    step: input.pi?.step ?? "fake",
+    version: "fake-pi-0.0.0",
   };
 }
 

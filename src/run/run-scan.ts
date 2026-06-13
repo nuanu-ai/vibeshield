@@ -5,7 +5,7 @@ import type { InventoryArtifact } from "../artifacts/contracts.js";
 import { ArtifactStore } from "../artifacts/store.js";
 import { runDeterministicBaseline } from "../baseline/deterministic-baseline.js";
 import { buildPiContextPack } from "../context/step-context-builder.js";
-import { runProjectUnderstanding } from "../pi/project-understanding.js";
+import { runPiRepositoryMapping } from "../pi/project-understanding.js";
 import { writeFailureReport, writeSuccessReport } from "../report/report.js";
 import { createDefaultSandboxProvider } from "../sandbox/default-provider.js";
 import type { SandboxProvider, SandboxSession } from "../sandbox/types.js";
@@ -264,7 +264,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     const piStep: RunStepState = {
       diagnostics: [],
       jobs: [],
-      name: "pi-project-understanding",
+      name: "pi-repository-mapping",
       stage: "pi",
       started_at: new Date().toISOString(),
       status: "running",
@@ -272,32 +272,45 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     run.steps.push(piStep);
     await persistRun();
     await appendEvent({
-      message: "Running Pi project-understanding from curated context pack.",
+      message: "Running staged Pi repository mapping from curated context pack.",
       sandbox_id: sandbox.id,
       stage: "pi",
       type: "pi.started",
     });
-    const piResult = await runProjectUnderstanding({
+    const piResult = await runPiRepositoryMapping({
       contextPack: contextResult.contextPack,
       contextPath: contextResult.contextPath,
       generatedAt: new Date().toISOString(),
       inventory,
+      onJobFinished: async (jobState) => {
+        piStep.jobs.push(jobState);
+        await persistRun();
+      },
+      onProgress: (event) =>
+        appendEvent({
+          ...(event.details === undefined ? {} : { details: event.details }),
+          job: event.job,
+          message: event.message,
+          sandbox_id: activeSandbox.id,
+          stage: "pi",
+          type: event.type,
+        }),
       outputsDir,
       runDir,
       sandbox,
       store,
     });
-    piStep.jobs = [piResult.jobState];
+    piStep.jobs = piResult.jobStates;
     piStep.status = "success";
     piStep.finished_at = new Date().toISOString();
+    run.artifacts.entry_points = piResult.entryPointsPath;
+    run.artifacts.sensitive_sinks = piResult.sensitiveSinksPath;
+    run.artifacts.data_flows = piResult.dataFlowsPath;
     run.artifacts.project_understanding = piResult.projectUnderstandingPath;
-    run.artifacts.pi_progress = piResult.progressPath;
-    run.artifacts.pi_raw_output = piResult.rawOutputPath;
-    run.artifacts.pi_stderr = piResult.stderrPath;
     await persistRun();
     await appendEvent({
       artifact: piResult.projectUnderstandingPath,
-      message: "Project understanding artifact accepted by quality gate.",
+      message: "Staged Pi repository mapping artifacts accepted by quality gates.",
       sandbox_id: sandbox.id,
       stage: "project-understanding-validation",
       type: "artifact.written",
@@ -427,6 +440,18 @@ function syncKnownArtifacts(run: ScanRunState, store: ArtifactStore): void {
   const context = store.get("pi-context-pack");
   if (context !== undefined) {
     run.artifacts.pi_context_pack = context.path;
+  }
+  const entryPoints = store.get("entry-points");
+  if (entryPoints !== undefined) {
+    run.artifacts.entry_points = entryPoints.path;
+  }
+  const sensitiveSinks = store.get("sensitive-sinks");
+  if (sensitiveSinks !== undefined) {
+    run.artifacts.sensitive_sinks = sensitiveSinks.path;
+  }
+  const dataFlows = store.get("data-flows");
+  if (dataFlows !== undefined) {
+    run.artifacts.data_flows = dataFlows.path;
   }
   const projectUnderstanding = store.get("project-understanding");
   if (projectUnderstanding !== undefined) {

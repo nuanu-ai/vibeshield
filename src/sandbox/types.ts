@@ -47,7 +47,7 @@ export interface PrepareBaselineToolsResult {
   availability: ToolAvailabilityArtifact;
 }
 
-export type RuntimeJobKind = "baseline-tool" | "pi-project-understanding";
+export type RuntimeJobKind = "baseline-tool" | "pi-repository-mapping";
 
 export type RuntimeJobStatus = "completed" | "failed" | "skipped";
 
@@ -70,13 +70,26 @@ export interface RuntimeJobInput {
   kind: RuntimeJobKind;
   name: string;
   pi?: {
+    artifactSubdir: string;
+    attempt?: number;
     contextPack: unknown;
     inputContextArtifact: string;
     model: string;
+    outputBaseName: string;
     prompt: string;
     provider: "openrouter";
+    step: string;
+    tools: string[];
   };
+  onProgress?: (event: RuntimeJobProgressEvent) => unknown | Promise<unknown>;
   stage: RunStage;
+}
+
+export interface RuntimeJobProgressEvent {
+  details?: Record<string, unknown>;
+  job: string;
+  message: string;
+  type: string;
 }
 
 export interface RuntimeJobResult {

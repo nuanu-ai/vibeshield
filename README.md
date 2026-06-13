@@ -40,8 +40,8 @@ Preferred direction for the core is TypeScript/Node orchestration with simple, i
 The first implementation should avoid a heavy analyzer framework. Later steps may call external tools when that becomes useful.
 
 Phase 1 extends the local CLI skeleton with deterministic baseline jobs,
-curated Pi context, Pi-generated project understanding, evidence validation, and
-an artifact-driven report. The default runtime sandbox path uses the official
+curated Pi context, staged Pi repository mapping, evidence validation, and an
+artifact-driven report. The default runtime sandbox path uses the official
 `@daytona/sdk` adapter. Tests use a fake Daytona adapter only as a local test
 double. A live scan requires Daytona and OpenRouter credentials and must not fall
 back to cloning a hostile repository on the host.
@@ -62,6 +62,7 @@ Project docs live in [docs/](./docs/).
 
 Start here:
 
+- [Architecture](./docs/architecture.md)
 - [MVP plan](./docs/mvp-plan.md)
 - [Product idea](./docs/idea.md)
 
@@ -78,7 +79,7 @@ pnpm typecheck
 pnpm test
 pnpm scan https://github.com/owner/repo
 pnpm smoke:daytona https://github.com/octocat/Hello-World
-pnpm smoke:pi-daytona https://github.com/xor777/ai-spam-detector
+pnpm smoke:pi-daytona https://github.com/owner/repo
 ```
 
 `pnpm scan` runs the development CLI form of `vibeshield scan`. A successful
@@ -94,5 +95,8 @@ Current runs write inspectable artifacts under each local run directory,
 including `outputs/inventory.v1.json`, `outputs/baseline-summary.v1.json`,
 `outputs/baseline/tool-availability.v1.json`,
 `outputs/baseline/syft-sbom.json`, `outputs/pi-context-pack.v1.json`,
-`outputs/project-understanding.v1.json`, redacted Pi progress/log artifacts, and
+`outputs/entry-points.v1.json`, `outputs/sensitive-sinks.v1.json`,
+`outputs/data-flows.v1.json`, `outputs/project-understanding.v1.json`,
+per-stage `outputs/*-semantic-evaluation.v1.json` verdicts,
+per-stage redacted Pi progress/log artifacts under `outputs/pi/<stage>/`, and
 `report.md`.

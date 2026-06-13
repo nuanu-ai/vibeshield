@@ -6,14 +6,24 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
   BaselineSummaryArtifact,
+  DataFlowsArtifact,
+  EntryPointsArtifact,
   InventoryArtifact,
+  PiSemanticEvaluationArtifact,
   ProjectUnderstandingArtifact,
+  SensitiveSinksArtifact,
 } from "../src/artifacts/contracts.js";
 import { ArtifactStore } from "../src/artifacts/store.js";
 import { runCli } from "../src/cli/run-cli.js";
 import { buildPiContextPack } from "../src/context/step-context-builder.js";
-import { validateProjectUnderstanding } from "../src/pi/project-understanding.js";
+import {
+  validateDataFlowsArtifact,
+  validateEntryPointsArtifact,
+  validateProjectUnderstanding,
+  validateSensitiveSinksArtifact,
+} from "../src/pi/project-understanding.js";
 import { runScan } from "../src/run/run-scan.js";
+import type { RunEvent } from "../src/run/types.js";
 import { FakeDaytonaSandboxProvider } from "../src/sandbox/fake-daytona.js";
 
 const execFileAsync = promisify(execFile);
@@ -26,7 +36,7 @@ afterEach(async () => {
 });
 
 describe("Phase 1 acceptance", () => {
-  it("TP1.1 produces an inspectable project map, baseline summary, context pack, and report", async () => {
+  it("TP1.1 produces staged repository mapping artifacts, baseline summary, context pack, and report", async () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
@@ -39,23 +49,268 @@ describe("Phase 1 acceptance", () => {
     await expectPath(path.join(runDir, "outputs", "baseline-summary.v1.json"));
     await expectPath(path.join(runDir, "outputs", "baseline", "syft-sbom.json"));
     await expectPath(path.join(runDir, "outputs", "pi-context-pack.v1.json"));
+    await expectPath(path.join(runDir, "outputs", "entry-points.v1.json"));
+    await expectPath(path.join(runDir, "outputs", "entry-points-semantic-evaluation.v1.json"));
+    await expectPath(path.join(runDir, "outputs", "sensitive-sinks.v1.json"));
+    await expectPath(path.join(runDir, "outputs", "sensitive-sinks-semantic-evaluation.v1.json"));
+    await expectPath(path.join(runDir, "outputs", "data-flows.v1.json"));
+    await expectPath(path.join(runDir, "outputs", "data-flows-semantic-evaluation.v1.json"));
     await expectPath(path.join(runDir, "outputs", "project-understanding.v1.json"));
-    await expectPath(path.join(runDir, "outputs", "pi", "progress.jsonl"));
+    await expectPath(
+      path.join(runDir, "outputs", "project-understanding-semantic-evaluation.v1.json"),
+    );
+    await expectPath(path.join(runDir, "outputs", "pi", "entry-points", "progress.jsonl"));
+    await expectPath(path.join(runDir, "outputs", "pi", "sensitive-sinks", "progress.jsonl"));
+    await expectPath(path.join(runDir, "outputs", "pi", "data-flows", "progress.jsonl"));
+    await expectPath(path.join(runDir, "outputs", "pi", "project-understanding", "progress.jsonl"));
+
+    const entryPointsMetadata = await readJson<{
+      invocation: { metadata?: { tools?: string[] } };
+    }>(path.join(runDir, "outputs", "pi", "entry-points", "metadata.json"));
+    expect(entryPointsMetadata.invocation.metadata?.tools).toEqual(["read", "grep", "find", "ls"]);
+
+    const entryPointsEvaluatorMetadata = await readJson<{
+      invocation: { metadata?: { tools?: string[] } };
+    }>(path.join(runDir, "outputs", "pi", "entry-points-semantic-evaluation", "metadata.json"));
+    expect(entryPointsEvaluatorMetadata.invocation.metadata?.tools).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+    ]);
+
+    const entryPoints = await readJson<EntryPointsArtifact>(
+      path.join(runDir, "outputs", "entry-points.v1.json"),
+    );
+    expect(entryPoints.entry_points.map((entry) => entry.kind)).toEqual(
+      expect.arrayContaining(["http_route", "cli_command", "cron_job", "external_format_parser"]),
+    );
+    expect(entryPoints.entry_points.find((entry) => entry.id === "ep-http")?.evidence).toContain(
+      "src/server.ts:5",
+    );
+
+    const sensitiveSinks = await readJson<SensitiveSinksArtifact>(
+      path.join(runDir, "outputs", "sensitive-sinks.v1.json"),
+    );
+    expect(sensitiveSinks.sinks.map((sink) => sink.kind)).toEqual(
+      expect.arrayContaining([
+        "sql_or_orm_query",
+        "filesystem_operation",
+        "outbound_http_or_sdk_url",
+        "logging",
+      ]),
+    );
+
+    const dataFlows = await readJson<DataFlowsArtifact>(
+      path.join(runDir, "outputs", "data-flows.v1.json"),
+    );
+    expect(dataFlows.flows.map((flow) => flow.trace_status)).toEqual(
+      expect.arrayContaining([
+        "direct observed",
+        "multi-step inferred",
+        "not traced beyond path:line",
+        "not established",
+      ]),
+    );
 
     const project = await readJson<ProjectUnderstandingArtifact>(
       path.join(runDir, "outputs", "project-understanding.v1.json"),
     );
     expect(project.kind).toBe("project-understanding.v1");
-    expect(project.map.entrypoints[0]?.evidence[0]).toMatch(/:1$/);
-    expect(project.map.observed_surfaces.length).toBeGreaterThan(0);
+    expect(project.entry_point_groups.flatMap((group) => group.entry_point_ids)).toContain(
+      "ep-http",
+    );
+    expect(project.sensitive_sink_groups.flatMap((group) => group.sensitive_sink_ids)).toContain(
+      "sink-db",
+    );
+    expect(project.data_flow_groups.flatMap((group) => group.flow_ids)).toContain("flow-direct");
     expect(project.fact_gaps.length).toBeGreaterThan(0);
 
-    const report = await readFile(path.join(runDir, "report.md"), "utf8");
-    expect(report).toContain("Phase 1 project understanding");
-    expect(report).toContain("Deterministic baseline overview");
-    expect(report).toContain("Entrypoints");
-    expect(report).toContain("Fact gaps");
-    expect(report).toContain("outputs/project-understanding.v1.json");
+    await expectPath(path.join(runDir, "report.md"));
+  });
+
+  it("TP1.1 retries a Pi stage when semantic evaluator rejects the candidate", async () => {
+    let collectorAttempts = 0;
+    let evaluatorAttempts = 0;
+    const progressEvents: RunEvent[] = [];
+    const rejectionReason = "Evidence points to an import, not the route declaration.";
+    const baseEntryPoints = fakeEntryPoints();
+    const baseEntryPoint = baseEntryPoints.entry_points[0];
+    if (baseEntryPoint === undefined) {
+      throw new Error("Fixture entry-points output must include at least one entry point.");
+    }
+    const rejectedEntryPoints: EntryPointsArtifact = {
+      ...baseEntryPoints,
+      entry_points: [
+        {
+          ...baseEntryPoint,
+          evidence: ["src/server.ts:1"],
+          id: "ep-http-wrong-evidence",
+        },
+      ],
+    };
+    const { provider } = await createProvider({
+      piOutputs: {
+        "entry-points.v1": () => {
+          collectorAttempts += 1;
+          return collectorAttempts === 1 ? rejectedEntryPoints : fakeEntryPoints();
+        },
+        "entry-points.v1:semantic-evaluation": () => {
+          evaluatorAttempts += 1;
+          return evaluatorAttempts === 1
+            ? fakeSemanticEvaluation({
+                accepted: false,
+                attempt_count: evaluatorAttempts,
+                issues: [
+                  {
+                    evidence: ["src/server.ts:1", "src/server.ts:5"],
+                    item_id: "ep-http-wrong-evidence",
+                    reason: rejectionReason,
+                    required_change: "Use the route declaration line.",
+                  },
+                ],
+                stage: "entry-points.v1",
+                summary: "Rejecting candidate until route evidence is corrected.",
+              })
+            : fakeSemanticEvaluation({
+                accepted: true,
+                attempt_count: evaluatorAttempts,
+                stage: "entry-points.v1",
+                summary: "Corrected entry-points candidate accepted.",
+              });
+        },
+      },
+    });
+
+    const result = await runScan({
+      onProgress: (event) => progressEvents.push(event),
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(collectorAttempts).toBe(2);
+    expect(evaluatorAttempts).toBe(2);
+    const retryEvent = progressEvents.find(
+      (event) =>
+        event.stage === "pi" &&
+        event.job === "pi-entry-points" &&
+        event.type === "pi.semantic_evaluation.rejected",
+    );
+    expect(retryEvent).toBeDefined();
+    expect(retryEvent?.details).toMatchObject({
+      attempt: 1,
+      next_attempt: 2,
+      reason: rejectionReason.replace(/[.!?]+$/u, ""),
+      step: "entry-points.v1",
+    });
+    expect(retryEvent?.message).toContain(rejectionReason.replace(/[.!?]+$/u, ""));
+
+    const runDir = expectRunDir(result);
+    const entryPoints = await readJson<EntryPointsArtifact>(
+      path.join(runDir, "outputs", "entry-points.v1.json"),
+    );
+    expect(entryPoints.entry_points.map((entry) => entry.id)).toContain("ep-http");
+
+    const verdict = await readJson<PiSemanticEvaluationArtifact>(
+      path.join(runDir, "outputs", "entry-points-semantic-evaluation.v1.json"),
+    );
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.attempt_count).toBe(2);
+    expect(verdict.summary).toContain("accepted");
+  });
+
+  it("TP1.1 treats semantic evaluator feedback as retryable rejection", async () => {
+    let collectorAttempts = 0;
+    let evaluatorAttempts = 0;
+    const firstCandidate = fakeSensitiveSinks();
+    const firstSink = firstCandidate.sinks[0];
+    if (firstSink === undefined) {
+      throw new Error("Fixture sensitive-sinks output must include at least one sink.");
+    }
+
+    const overclaimedCandidate: SensitiveSinksArtifact = {
+      ...firstCandidate,
+      sinks: [
+        {
+          ...firstSink,
+          id: "sink-overclaim",
+          kind: "path_construction",
+          operation: "parameter default treated as path construction",
+        },
+      ],
+    };
+
+    const { provider } = await createProvider({
+      piOutputs: {
+        "sensitive-sinks.v1": () => {
+          collectorAttempts += 1;
+          return collectorAttempts === 1 ? overclaimedCandidate : fakeSensitiveSinks();
+        },
+        "sensitive-sinks.v1:semantic-evaluation": () => {
+          evaluatorAttempts += 1;
+          return evaluatorAttempts === 1
+            ? {
+                rawText: JSON.stringify({
+                  accepted: true,
+                  issues: [],
+                  missing_coverage: [],
+                  overclaims: ["sink-overclaim is an overclaim; evidence shows no path build."],
+                  summary: "Candidate needs revision despite the accepted flag.",
+                }),
+              }
+            : fakeSemanticEvaluation({
+                accepted: true,
+                attempt_count: evaluatorAttempts,
+                stage: "sensitive-sinks.v1",
+                summary: "Corrected sensitive-sinks candidate accepted.",
+              });
+        },
+      },
+    });
+
+    const result = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(collectorAttempts).toBe(2);
+    expect(evaluatorAttempts).toBe(2);
+
+    const verdict = await readJson<PiSemanticEvaluationArtifact>(
+      path.join(expectRunDir(result), "outputs", "sensitive-sinks-semantic-evaluation.v1.json"),
+    );
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.attempt_count).toBe(2);
+  });
+
+  it("TP1.8 emits concise Pi lifecycle progress without duplicate start events", async () => {
+    const { provider } = await createProvider();
+    const piEvents: Array<{ job: string | undefined; type: string }> = [];
+
+    const result = await runScan({
+      onProgress: (event) => {
+        if (event.stage === "pi") {
+          piEvents.push({ job: event.job, type: event.type });
+        }
+      },
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(
+      piEvents.filter(
+        (event) => event.job === "pi-entry-points" && event.type === "runner.started",
+      ),
+    ).toHaveLength(1);
+    expect(
+      piEvents.some((event) => event.job === "pi-entry-points" && event.type === "pi.starting"),
+    ).toBe(false);
   });
 
   it("TP1.2 keeps untrusted checkout work inside a fresh sandbox and preserves failure diagnostics", async () => {
@@ -273,12 +528,7 @@ describe("Phase 1 acceptance", () => {
     });
 
     expect(contextPath).toBe("outputs/pi-context-pack.v1.json");
-    expect(Object.keys(contextPack).sort()).toEqual([
-      "budget",
-      "inventory",
-      "output_schema",
-      "repo",
-    ]);
+    expect(Object.keys(contextPack).sort()).toEqual(["budget", "inventory", "repo"]);
     expect(JSON.stringify(contextPack)).not.toContain("sk-test-secret-value");
     expect(JSON.stringify(contextPack)).not.toContain("raw-scanner-dump");
     expect(JSON.stringify(contextPack)).not.toContain("baseline-summary");
@@ -294,47 +544,78 @@ describe("Phase 1 acceptance", () => {
     ).rejects.toMatchObject({ stage: "context" });
   });
 
-  it("TP1.5 accepts only evidence-backed project-understanding output", () => {
-    const artifact = fakeProjectUnderstanding();
+  it("TP1.5 accepts only evidence-backed staged Pi artifacts", () => {
+    const entryPoints = fakeEntryPoints();
+    const sensitiveSinks = fakeSensitiveSinks();
+    const dataFlows = fakeDataFlows();
+    const projectUnderstanding = fakeProjectUnderstanding();
+    const budget = fakePiBudget();
+    const inventory = fakeInventory();
 
     expect(() =>
+      validateEntryPointsArtifact({
+        artifact: entryPoints,
+        budget,
+        inventory,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateSensitiveSinksArtifact({
+        artifact: sensitiveSinks,
+        budget,
+        inventory,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateDataFlowsArtifact({
+        artifact: dataFlows,
+        budget,
+        entryPoints,
+        inventory,
+        sensitiveSinks,
+      }),
+    ).not.toThrow();
+    expect(() =>
       validateProjectUnderstanding({
-        artifact,
-        budget: {
-          max_env_entries: 15,
-          max_fact_gaps: 10,
-          max_important_files: 20,
-          max_observed_surfaces: 12,
-        },
-        inventory: fakeInventory(),
+        artifact: projectUnderstanding,
+        budget,
+        dataFlows,
+        entryPoints,
+        inventory,
+        sensitiveSinks,
       }),
     ).not.toThrow();
   });
 
-  it("TP1.6 rejects hallucinated paths, invalid JSON shape, raw secrets, and over-budget output", async () => {
+  it("TP1.6 rejects hallucinated paths, invalid JSON, raw secrets, and over-budget output", async () => {
+    const budget = fakePiBudget();
+    const inventory = fakeInventory();
+    const entryPoints = fakeEntryPoints();
+    const firstEntryPoint = entryPoints.entry_points[0];
+    if (firstEntryPoint === undefined) {
+      throw new Error("Expected fake entry point fixture to contain at least one entry.");
+    }
+    const sensitiveSinks = fakeSensitiveSinks();
+    const firstSensitiveSink = sensitiveSinks.sinks[0];
+    if (firstSensitiveSink === undefined) {
+      throw new Error("Expected fake sensitive sink fixture to contain at least one sink.");
+    }
+    const dataFlows = fakeDataFlows();
+
     expect(() =>
-      validateProjectUnderstanding({
+      validateEntryPointsArtifact({
         artifact: {
-          ...fakeProjectUnderstanding(),
-          map: {
-            ...fakeProjectUnderstanding().map,
-            entrypoints: [
-              {
-                evidence: ["src/not-real.ts:1"],
-                kind: "server",
-                path: "src/not-real.ts",
-                summary: "Hallucinated.",
-              },
-            ],
-          },
+          ...entryPoints,
+          entry_points: [
+            {
+              ...firstEntryPoint,
+              evidence: ["src/not-real.ts:1"],
+              location: "src/not-real.ts",
+            },
+          ],
         },
-        budget: {
-          max_env_entries: 15,
-          max_fact_gaps: 10,
-          max_important_files: 20,
-          max_observed_surfaces: 12,
-        },
-        inventory: fakeInventory(),
+        budget,
+        inventory,
       }),
     ).toThrow(/Evidence path/);
 
@@ -349,13 +630,11 @@ describe("Phase 1 acceptance", () => {
             text: "api_key=sk-test-secret-value",
           },
         },
-        budget: {
-          max_env_entries: 15,
-          max_fact_gaps: 10,
-          max_important_files: 20,
-          max_observed_surfaces: 12,
-        },
-        inventory: fakeInventory(),
+        budget,
+        dataFlows,
+        entryPoints,
+        inventory,
+        sensitiveSinks,
       }),
     ).toThrow(/secret-like/);
 
@@ -368,19 +647,19 @@ describe("Phase 1 acceptance", () => {
     expect(() =>
       validateProjectUnderstanding({
         artifact: overBudget,
-        budget: {
-          max_env_entries: 15,
-          max_fact_gaps: 10,
-          max_important_files: 20,
-          max_observed_surfaces: 12,
-        },
-        inventory: fakeInventory(),
+        budget,
+        dataFlows,
+        entryPoints,
+        inventory,
+        sensitiveSinks,
       }),
     ).toThrow(/fact_gaps exceeds budget/);
 
     const provider = (
       await createProvider({
-        projectUnderstandingOutput: () => "not a project-understanding object",
+        piOutputs: {
+          "entry-points.v1": { rawText: "not valid json" },
+        },
       })
     ).provider;
     const result = await runScan({
@@ -389,10 +668,59 @@ describe("Phase 1 acceptance", () => {
       sandboxProvider: provider,
     });
     expect(result.exitCode).toBe(1);
-    const run = await readJson<{ error: { stage: string } }>(
-      path.join(expectRunDir(result), "run.json"),
+    const run = await readJson<{
+      artifacts: { baseline_summary?: string; entry_points?: string; pi_context_pack?: string };
+      error: { stage: string };
+      steps: Array<{ jobs: Array<{ artifacts: string[]; name: string }> }>;
+    }>(path.join(expectRunDir(result), "run.json"));
+    expect(run.error.stage).toBe("entry-points-validation");
+    expect(run.artifacts.baseline_summary).toBe("outputs/baseline-summary.v1.json");
+    expect(run.artifacts.pi_context_pack).toBe("outputs/pi-context-pack.v1.json");
+    expect(run.artifacts.entry_points).toBeUndefined();
+    expect(run.steps.at(-1)?.jobs[0]?.name).toBe("pi-entry-points");
+    expect(run.steps.at(-1)?.jobs[0]?.artifacts).toContain(
+      "outputs/pi/entry-points/entry-points.raw.redacted.txt",
     );
-    expect(run.error.stage).toBe("project-understanding-validation");
+
+    const semanticFailureProvider = (
+      await createProvider({
+        piOutputs: {
+          "sensitive-sinks.v1:semantic-evaluation": fakeSemanticEvaluation({
+            accepted: false,
+            issues: [
+              {
+                evidence: ["src/db.ts:2"],
+                item_id: firstSensitiveSink.id,
+                reason: "Evaluator could not confirm the candidate sink claim from evidence.",
+                required_change: "Revise the sensitive sink artifact with supporting evidence.",
+              },
+            ],
+            stage: "sensitive-sinks.v1",
+            summary: "Sensitive sinks candidate rejected by semantic evaluator.",
+          }),
+        },
+      })
+    ).provider;
+    const semanticFailure = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: semanticFailureProvider,
+    });
+    expect(semanticFailure.exitCode).toBe(1);
+    const semanticFailureRun = await readJson<{
+      artifacts: { entry_points?: string; sensitive_sinks?: string };
+      error: { stage: string };
+    }>(path.join(expectRunDir(semanticFailure), "run.json"));
+    expect(semanticFailureRun.error.stage).toBe("sensitive-sinks-validation");
+    expect(semanticFailureRun.artifacts.entry_points).toBe("outputs/entry-points.v1.json");
+    expect(semanticFailureRun.artifacts.sensitive_sinks).toBeUndefined();
+    await expectPath(
+      path.join(
+        expectRunDir(semanticFailure),
+        "outputs",
+        "sensitive-sinks-semantic-evaluation.v1.json",
+      ),
+    );
   });
 
   it("TP1.7 builds a human-useful report from artifacts", async () => {
@@ -405,15 +733,18 @@ describe("Phase 1 acceptance", () => {
 
     expect(result.exitCode).toBe(0);
     const report = await readFile(path.join(expectRunDir(result), "report.md"), "utf8");
-    expect(report).toContain("Project summary");
-    expect(report).toContain("Deterministic baseline overview");
-    expect(report).toContain("Entrypoints");
-    expect(report).toContain("Important files");
-    expect(report).toContain("Observed surfaces");
-    expect(report).toContain("Coverage gaps");
-    expect(report).toContain("Fact gaps");
+    expect(report).toContain("POST /api/spam");
+    expect(report).toContain("src/server.ts:5");
+    expect(report).toContain("sql_or_orm_query db.query insert statement");
+    expect(report).toContain("ep-http -> sink-db: direct observed");
+    expect(report).toContain(
+      "Runtime behavior - The route was mapped from source but not executed with a real request.",
+    );
     expect(report).toContain("outputs/baseline-summary.v1.json");
     expect(report).toContain("outputs/pi-context-pack.v1.json");
+    expect(report).toContain("outputs/entry-points.v1.json");
+    expect(report).toContain("outputs/sensitive-sinks.v1.json");
+    expect(report).toContain("outputs/data-flows.v1.json");
   });
 
   it("TP1.8 emits stage-level progress and stores redacted diagnostics", async () => {
@@ -447,11 +778,57 @@ describe("Phase 1 acceptance", () => {
 
     const runDir = stdout.join("").match(/Run directory: (?<runDir>.+)\n/)?.groups?.runDir ?? "";
     const rawPiOutput = await readFile(
-      path.join(runDir, "outputs", "pi", "project-understanding.raw.redacted.txt"),
+      path.join(
+        runDir,
+        "outputs",
+        "pi",
+        "project-understanding",
+        "project-understanding.raw.redacted.txt",
+      ),
       "utf8",
     );
     expect(rawPiOutput).toContain("[REDACTED]");
     expect(rawPiOutput).not.toContain("sk-test-secret-value");
+  });
+
+  it("TP1.8 emits concise deterministic baseline lifecycle progress", async () => {
+    const fullProvider = (await createProvider()).provider;
+    const fullEvents: Array<{ job: string | undefined; type: string }> = [];
+
+    const fullResult = await runScan({
+      onProgress: (event) => {
+        if (event.stage === "deterministic-baseline") {
+          fullEvents.push({ job: event.job, type: event.type });
+        }
+      },
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: fullProvider,
+    });
+
+    expect(fullResult.exitCode).toBe(0);
+    expect(fullEvents.filter((event) => event.job === "trivy").map((event) => event.type)).toEqual([
+      "baseline.job.started",
+    ]);
+
+    const minimalProvider = (await createProvider({ minimal: true })).provider;
+    const minimalEvents: Array<{ job: string | undefined; type: string }> = [];
+
+    const minimalResult = await runScan({
+      onProgress: (event) => {
+        if (event.stage === "deterministic-baseline") {
+          minimalEvents.push({ job: event.job, type: event.type });
+        }
+      },
+      repoUrlInput: minimalFixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: minimalProvider,
+    });
+
+    expect(minimalResult.exitCode).toBe(0);
+    expect(
+      minimalEvents.filter((event) => event.job === "actionlint").map((event) => event.type),
+    ).toEqual(["baseline.job.skipped"]);
   });
 });
 
@@ -459,6 +836,7 @@ async function createProvider(
   options: {
     failAt?: "baseline" | "clone" | "inventory" | "pi";
     minimal?: boolean;
+    piOutputs?: ConstructorParameters<typeof FakeDaytonaSandboxProvider>[0]["piOutputs"];
     projectUnderstandingOutput?: ConstructorParameters<
       typeof FakeDaytonaSandboxProvider
     >[0]["projectUnderstandingOutput"];
@@ -475,11 +853,21 @@ async function createProvider(
     fixtureRepos: new Map([[options.minimal ? minimalFixtureUrl : fixtureUrl, fixtureRepo]]),
     sandboxRoot,
   };
+  const piOutputs = options.minimal
+    ? options.piOutputs
+    : { ...fixturePiOutputs(), ...(options.piOutputs ?? {}) };
+  if (piOutputs !== undefined) {
+    providerOptions.piOutputs = piOutputs;
+  }
   if (options.failAt !== undefined) {
     providerOptions.failAt = options.failAt;
   }
   if (options.projectUnderstandingOutput !== undefined) {
     providerOptions.projectUnderstandingOutput = options.projectUnderstandingOutput;
+    providerOptions.piOutputs = {
+      ...(providerOptions.piOutputs ?? {}),
+      "project-understanding.v1": options.projectUnderstandingOutput,
+    };
   }
   if (options.unavailableTools !== undefined) {
     providerOptions.unavailableTools = options.unavailableTools;
@@ -493,7 +881,10 @@ async function createProvider(
 
 async function createPhase1FixtureGitRepo(): Promise<string> {
   const repoDir = await createTempRoot("vibeshield-phase1-fixture-");
+  await mkdir(path.join(repoDir, "src", "jobs"), { recursive: true });
+  await mkdir(path.join(repoDir, "src", "parsers"), { recursive: true });
   await mkdir(path.join(repoDir, "src", "routes"), { recursive: true });
+  await mkdir(path.join(repoDir, "src", "services"), { recursive: true });
   await mkdir(path.join(repoDir, ".github", "workflows"), { recursive: true });
   await mkdir(path.join(repoDir, "infra"), { recursive: true });
   await writeFile(path.join(repoDir, "README.md"), "# Phase 1 fixture\n");
@@ -510,7 +901,89 @@ async function createPhase1FixtureGitRepo(): Promise<string> {
     )}\n`,
   );
   await writeFile(path.join(repoDir, ".env.example"), "API_BASE_URL=\nSESSION_SECRET=\n");
-  await writeFile(path.join(repoDir, "src", "server.ts"), "import './routes/api';\n");
+  await writeFile(
+    path.join(repoDir, "src", "server.ts"),
+    [
+      "import express from 'express';",
+      "import { saveMessage } from './db';",
+      "const app = express();",
+      "app.use(express.json());",
+      "app.post('/api/spam', async (req, res) => { await saveMessage(req.body.text); res.json({ ok: true }); });",
+      "export { app };",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(repoDir, "src", "cli.ts"),
+    [
+      "import { Command } from 'commander';",
+      "const program = new Command();",
+      "program.command('scan').action(() => console.log('scan'));",
+      "program.parse();",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(repoDir, "src", "jobs", "cleanup.ts"),
+    [
+      "import cron from 'node-cron';",
+      "import { auditLog } from '../logger';",
+      "cron.schedule('0 * * * *', () => auditLog('cleanup'));",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(repoDir, "src", "parsers", "json.ts"),
+    ["export function parsePayload(input: string) {", "  return JSON.parse(input);", "}", ""].join(
+      "\n",
+    ),
+  );
+  await writeFile(
+    path.join(repoDir, "src", "db.ts"),
+    [
+      "export async function saveMessage(text: string) {",
+      "  return db.query('insert into messages values ($1)', [text]);",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(repoDir, "src", "files.ts"),
+    [
+      "import { writeFile } from 'node:fs/promises';",
+      "import path from 'node:path';",
+      "export async function writeUpload(name: string, body: string) {",
+      "  return writeFile(path.join('/tmp/uploads', name), body);",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(repoDir, "src", "http.ts"),
+    [
+      "export async function notifyWebhook(baseUrl: string, id: string) {",
+      "  const url = new URL('/hook/' + id, baseUrl);",
+      "  return fetch(url);",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(repoDir, "src", "logger.ts"),
+    ["export function auditLog(value: unknown) {", "  console.log('audit', value);", "}", ""].join(
+      "\n",
+    ),
+  );
+  await writeFile(
+    path.join(repoDir, "src", "services", "spam.ts"),
+    [
+      "import { writeUpload } from '../files';",
+      "export async function persistSpamReport(name: string, body: string) {",
+      "  return writeUpload(name, body);",
+      "}",
+      "",
+    ].join("\n"),
+  );
   await writeFile(path.join(repoDir, "src", "routes", "api.ts"), "export const route = '/api';\n");
   await writeFile(
     path.join(repoDir, ".github", "workflows", "ci.yml"),
@@ -587,13 +1060,48 @@ function expectRunDir(result: { runDir?: string }): string {
   return result.runDir ?? "";
 }
 
+function fixturePiOutputs(): NonNullable<
+  ConstructorParameters<typeof FakeDaytonaSandboxProvider>[0]["piOutputs"]
+> {
+  return {
+    "data-flows.v1": fakeDataFlows(),
+    "entry-points.v1": fakeEntryPoints(),
+    "project-understanding.v1": fakeProjectUnderstanding(),
+    "sensitive-sinks.v1": fakeSensitiveSinks(),
+  };
+}
+
+function fakePiBudget() {
+  return {
+    max_data_flows: 60,
+    max_entry_points: 50,
+    max_fact_gaps: 10,
+    max_important_files: 20,
+    max_sensitive_sinks: 80,
+  };
+}
+
 function fakeInventory(): InventoryArtifact {
   return {
     artifact_version: 1,
-    directories: [{ path: "src" }, { path: "src/routes" }],
+    directories: [
+      { path: "src" },
+      { path: "src/jobs" },
+      { path: "src/parsers" },
+      { path: "src/routes" },
+      { path: "src/services" },
+    ],
     files: [
       { line_count: 8, path: "package.json", size_bytes: 100, type: "file" },
-      { line_count: 1, path: "src/server.ts", size_bytes: 30, type: "file" },
+      { line_count: 6, path: "src/server.ts", size_bytes: 220, type: "file" },
+      { line_count: 4, path: "src/cli.ts", size_bytes: 120, type: "file" },
+      { line_count: 3, path: "src/jobs/cleanup.ts", size_bytes: 120, type: "file" },
+      { line_count: 3, path: "src/parsers/json.ts", size_bytes: 80, type: "file" },
+      { line_count: 3, path: "src/db.ts", size_bytes: 100, type: "file" },
+      { line_count: 5, path: "src/files.ts", size_bytes: 140, type: "file" },
+      { line_count: 4, path: "src/http.ts", size_bytes: 130, type: "file" },
+      { line_count: 3, path: "src/logger.ts", size_bytes: 80, type: "file" },
+      { line_count: 4, path: "src/services/spam.ts", size_bytes: 120, type: "file" },
       { line_count: 1, path: "src/routes/api.ts", size_bytes: 30, type: "file" },
       { line_count: 2, path: ".env.example", size_bytes: 24, type: "file" },
     ],
@@ -612,10 +1120,10 @@ function fakeInventory(): InventoryArtifact {
       url: fixtureUrl,
     },
     summary: {
-      directory_count: 2,
-      file_count: 4,
+      directory_count: 5,
+      file_count: 11,
       manifest_files: ["package.json"],
-      total_file_bytes: 184,
+      total_file_bytes: 1144,
     },
   };
 }
@@ -659,30 +1167,303 @@ function fakeBaselineSummary(): BaselineSummaryArtifact {
   };
 }
 
+function fakePiMetadata(step: string): ProjectUnderstandingArtifact["metadata"] {
+  return {
+    pi: {
+      input_context_artifact: "outputs/pi-context-pack.v1.json",
+      invocation: { command: "pi", provider: "openrouter" },
+      model: "fake",
+      provider: "openrouter",
+      step,
+      version: "fake",
+    },
+  };
+}
+
+function fakeSemanticEvaluation(
+  input: Partial<PiSemanticEvaluationArtifact> & {
+    accepted: boolean;
+    stage: PiSemanticEvaluationArtifact["stage"];
+  },
+): PiSemanticEvaluationArtifact {
+  return {
+    accepted: input.accepted,
+    artifact_version: 1,
+    attempt_count: input.attempt_count ?? 1,
+    candidate_kind:
+      input.candidate_kind ?? (input.stage as PiSemanticEvaluationArtifact["candidate_kind"]),
+    generated_at: input.generated_at ?? "2026-06-12T00:00:00.000Z",
+    generated_by: "pi",
+    issues: input.issues ?? [],
+    kind: "pi-semantic-evaluation.v1",
+    missing_coverage: input.missing_coverage ?? [],
+    overclaims: input.overclaims ?? [],
+    repo: input.repo ?? {
+      commit_sha: "abc123",
+      url: fixtureUrl,
+    },
+    stage: input.stage,
+    summary:
+      input.summary ??
+      (input.accepted ? "Fake semantic evaluator accepted." : "Fake semantic evaluator rejected."),
+  };
+}
+
+function fakeEntryPoints(): EntryPointsArtifact {
+  return {
+    artifact_version: 1,
+    coverage: {
+      not_covered: [{ area: "Runtime-registered routes", reason: "Fixture Pi is static only." }],
+      reviewed: [
+        { area: "HTTP routes", evidence: ["src/server.ts:5"] },
+        { area: "CLI commands", evidence: ["src/cli.ts:3"] },
+        { area: "Scheduled jobs", evidence: ["src/jobs/cleanup.ts:3"] },
+        { area: "External parsers", evidence: ["src/parsers/json.ts:2"] },
+      ],
+    },
+    entry_points: [
+      {
+        confidence: "high",
+        evidence: ["src/server.ts:5"],
+        id: "ep-http",
+        kind: "http_route",
+        location: "src/server.ts",
+        method: "POST",
+        name: "POST /api/spam",
+        route: "/api/spam",
+      },
+      {
+        command: "scan",
+        confidence: "high",
+        evidence: ["src/cli.ts:3"],
+        id: "ep-cli",
+        kind: "cli_command",
+        location: "src/cli.ts",
+        name: "scan command",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/jobs/cleanup.ts:3"],
+        id: "ep-cron",
+        kind: "cron_job",
+        location: "src/jobs/cleanup.ts",
+        name: "hourly cleanup job",
+        schedule: "0 * * * *",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/parsers/json.ts:2"],
+        id: "ep-parser",
+        kind: "external_format_parser",
+        location: "src/parsers/json.ts",
+        name: "JSON payload parser",
+      },
+    ],
+    generated_at: "2026-06-12T00:00:00.000Z",
+    generated_by: "pi",
+    kind: "entry-points.v1",
+    metadata: fakePiMetadata("entry-points.v1"),
+    repo: {
+      commit_sha: "abc123",
+      url: fixtureUrl,
+    },
+  };
+}
+
+function fakeSensitiveSinks(): SensitiveSinksArtifact {
+  return {
+    artifact_version: 1,
+    coverage: {
+      not_covered: [{ area: "Runtime-only operations", reason: "Fixture Pi is static only." }],
+      reviewed: [
+        { area: "Database operations", evidence: ["src/db.ts:2"] },
+        { area: "Filesystem operations", evidence: ["src/files.ts:4"] },
+        { area: "Outbound HTTP construction", evidence: ["src/http.ts:3"] },
+        { area: "Logging", evidence: ["src/logger.ts:2"] },
+      ],
+    },
+    generated_at: "2026-06-12T00:00:00.000Z",
+    generated_by: "pi",
+    kind: "sensitive-sinks.v1",
+    metadata: fakePiMetadata("sensitive-sinks.v1"),
+    repo: {
+      commit_sha: "abc123",
+      url: fixtureUrl,
+    },
+    sinks: [
+      {
+        confidence: "high",
+        evidence: ["src/db.ts:2"],
+        id: "sink-db",
+        input_variables: ["text"],
+        kind: "sql_or_orm_query",
+        location: "src/db.ts",
+        operation: "db.query insert statement",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/files.ts:4"],
+        id: "sink-fs",
+        input_variables: ["name", "body"],
+        kind: "filesystem_operation",
+        location: "src/files.ts",
+        operation: "writeFile path.join write",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/http.ts:3"],
+        id: "sink-http",
+        input_variables: ["baseUrl", "id"],
+        kind: "outbound_http_or_sdk_url",
+        location: "src/http.ts",
+        operation: "fetch URL constructed from variables",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/logger.ts:2"],
+        id: "sink-log",
+        input_variables: ["value"],
+        kind: "logging",
+        location: "src/logger.ts",
+        operation: "console.log audit value",
+      },
+    ],
+  };
+}
+
+function fakeDataFlows(): DataFlowsArtifact {
+  return {
+    artifact_version: 1,
+    coverage: {
+      not_covered: [{ area: "Runtime request bodies", reason: "Fixture Pi is static only." }],
+      reviewed: [
+        { area: "HTTP to DB", evidence: ["src/server.ts:5", "src/db.ts:2"] },
+        {
+          area: "HTTP to filesystem helper",
+          evidence: ["src/server.ts:5", "src/services/spam.ts:2", "src/files.ts:4"],
+        },
+      ],
+    },
+    flows: [
+      {
+        id: "flow-direct",
+        intermediate_functions: [],
+        sink: "sink-db",
+        sink_evidence: ["src/db.ts:2"],
+        source_entrypoint: "ep-http",
+        source_evidence: ["src/server.ts:5"],
+        trace_status: "direct observed",
+      },
+      {
+        id: "flow-multi",
+        intermediate_functions: [
+          { evidence: ["src/services/spam.ts:2"], name: "persistSpamReport" },
+        ],
+        sink: "sink-fs",
+        sink_evidence: ["src/files.ts:4"],
+        source_entrypoint: "ep-http",
+        source_evidence: ["src/server.ts:5"],
+        trace_status: "multi-step inferred",
+      },
+      {
+        breakpoint: { evidence: ["src/cli.ts:3"], reason: "CLI handler target is not followed." },
+        id: "flow-break",
+        intermediate_functions: [],
+        sink: "sink-http",
+        sink_evidence: ["src/http.ts:3"],
+        source_entrypoint: "ep-cli",
+        source_evidence: ["src/cli.ts:3"],
+        trace_status: "not traced beyond path:line",
+      },
+      {
+        breakpoint: {
+          evidence: ["src/jobs/cleanup.ts:3", "src/logger.ts:2"],
+          reason:
+            "No data dependency between scheduled job input and logger argument was established.",
+        },
+        id: "flow-not-established",
+        intermediate_functions: [],
+        sink: "sink-log",
+        sink_evidence: ["src/logger.ts:2"],
+        source_entrypoint: "ep-cron",
+        source_evidence: ["src/jobs/cleanup.ts:3"],
+        trace_status: "not established",
+      },
+    ],
+    generated_at: "2026-06-12T00:00:00.000Z",
+    generated_by: "pi",
+    inputs: {
+      entry_points_artifact: "outputs/entry-points.v1.json",
+      sensitive_sinks_artifact: "outputs/sensitive-sinks.v1.json",
+    },
+    kind: "data-flows.v1",
+    metadata: fakePiMetadata("data-flows.v1"),
+    repo: {
+      commit_sha: "abc123",
+      url: fixtureUrl,
+    },
+  };
+}
+
 function fakeProjectUnderstanding(): ProjectUnderstandingArtifact {
   return {
     artifact_version: 1,
     coverage: {
       not_covered: [{ area: "Runtime behavior", reason: "Phase 1 does not execute the app." }],
-      reviewed: [{ area: "Repository structure", evidence: ["package.json:1"] }],
+      reviewed: [{ area: "Prior Pi mapping artifacts", evidence: ["src/server.ts:5"] }],
     },
-    env_and_config_surface: [
+    data_flow_groups: [
       {
-        evidence: [".env.example:1"],
-        name: ".env.example",
-        observed_use: "Environment variables are declared for local configuration.",
+        evidence: ["src/server.ts:5", "src/db.ts:2"],
+        flow_ids: ["flow-direct", "flow-multi"],
+        name: "HTTP request handling flows",
+        summary: "HTTP entrypoints connect to observed DB and filesystem operation sinks.",
+        trace_statuses: ["direct observed", "multi-step inferred"],
+      },
+      {
+        evidence: ["src/cli.ts:3", "src/jobs/cleanup.ts:3"],
+        flow_ids: ["flow-break", "flow-not-established"],
+        name: "Unresolved static traces",
+        summary: "Some entrypoint-to-sink relationships remain incomplete in static mapping.",
+        trace_statuses: ["not traced beyond path:line", "not established"],
+      },
+    ],
+    entry_point_groups: [
+      {
+        entry_point_ids: ["ep-http"],
+        evidence: ["src/server.ts:5"],
+        name: "HTTP API",
+        summary: "Express route receives POST /api/spam.",
+      },
+      {
+        entry_point_ids: ["ep-cli", "ep-cron", "ep-parser"],
+        evidence: ["src/cli.ts:3", "src/jobs/cleanup.ts:3", "src/parsers/json.ts:2"],
+        name: "Non-HTTP entrypoints",
+        summary: "CLI, scheduled job, and JSON parser are exposed entry surfaces.",
+      },
+    ],
+    fact_gaps: [
+      {
+        area: "Runtime behavior",
+        evidence: ["src/server.ts:5"],
+        missing_fact: "The route was mapped from source but not executed with a real request.",
       },
     ],
     generated_at: "2026-06-12T00:00:00.000Z",
     generated_by: "pi",
+    inputs: {
+      data_flows_artifact: "outputs/data-flows.v1.json",
+      entry_points_artifact: "outputs/entry-points.v1.json",
+      sensitive_sinks_artifact: "outputs/sensitive-sinks.v1.json",
+    },
     kind: "project-understanding.v1",
     map: {
-      entrypoints: [
+      components: [
         {
-          evidence: ["src/server.ts:1"],
-          kind: "server",
-          path: "src/server.ts",
-          summary: "Server entrypoint imports API routes.",
+          evidence: ["src/server.ts:5"],
+          kind: "backend",
+          name: "Express API",
+          summary: "HTTP route delegates to application operations.",
         },
       ],
       important_files: [
@@ -692,35 +1473,26 @@ function fakeProjectUnderstanding(): ProjectUnderstandingArtifact {
           reason: "Defines runtime dependencies.",
         },
       ],
-      observed_surfaces: [
-        {
-          evidence: ["src/routes/api.ts:1"],
-          kind: "api",
-          path: "src/routes/api.ts",
-          summary: "API route surface.",
-        },
-      ],
     },
-    metadata: {
-      pi: {
-        input_context_artifact: "outputs/pi-context-pack.v1.json",
-        invocation: { command: "pi", provider: "openrouter" },
-        model: "fake",
-        provider: "openrouter",
-        version: "fake",
-      },
-    },
-    fact_gaps: [
-      {
-        area: "Runtime behavior",
-        evidence: ["src/routes/api.ts:1"],
-        missing_fact: "The route was mapped from source but not executed.",
-      },
-    ],
+    metadata: fakePiMetadata("project-understanding.v1"),
     repo: {
       commit_sha: "abc123",
       url: fixtureUrl,
     },
+    sensitive_sink_groups: [
+      {
+        evidence: ["src/db.ts:2", "src/files.ts:4"],
+        name: "Persistence operations",
+        sensitive_sink_ids: ["sink-db", "sink-fs"],
+        summary: "Database and filesystem operation sinks are present.",
+      },
+      {
+        evidence: ["src/http.ts:3", "src/logger.ts:2"],
+        name: "Outbound and diagnostic operations",
+        sensitive_sink_ids: ["sink-http", "sink-log"],
+        summary: "Outbound URL construction and logging operation sinks are present.",
+      },
+    ],
     stack: [{ evidence: ["package.json:1"], name: "Node.js", role: "runtime" }],
     summary: {
       confidence: "medium",

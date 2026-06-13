@@ -9,11 +9,14 @@ export type RunStage =
   | "context"
   | "create_run"
   | "create_sandbox"
+  | "data-flows-validation"
   | "deterministic-baseline"
+  | "entry-points-validation"
   | "inventory"
   | "pi"
   | "project-understanding-validation"
-  | "report";
+  | "report"
+  | "sensitive-sinks-validation";
 
 export interface RunError {
   diagnostics?: string[];
@@ -37,12 +40,12 @@ export interface ScanRunState {
     inventory?: string;
     inventory_legacy?: string;
     outputs_dir: string;
+    data_flows?: string;
+    entry_points?: string;
     pi_context_pack?: string;
-    pi_progress?: string;
-    pi_raw_output?: string;
-    pi_stderr?: string;
     project_understanding?: string;
     report?: string;
+    sensitive_sinks?: string;
   };
   commit_sha?: string;
   created_at: string;
@@ -62,6 +65,7 @@ export interface ScanRunState {
 
 export interface RunEvent {
   artifact?: string;
+  details?: Record<string, unknown>;
   diagnostics?: string[];
   job?: string;
   message: string;

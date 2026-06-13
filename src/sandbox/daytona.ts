@@ -14,6 +14,7 @@ import type {
   PrepareBaselineToolsResult,
   PullFileContext,
   RuntimeJobInput,
+  RuntimeJobProgressEvent,
   RuntimeJobResult,
   SandboxArtifact,
   SandboxCreateContext,
@@ -390,7 +391,7 @@ export class DaytonaSandboxSession implements SandboxSession {
         message: "Missing OPENROUTER_API_KEY.",
         stage: "pi",
         userMessage:
-          "Pi project understanding requires OPENROUTER_API_KEY. Set it in .env or the shell.",
+          "Pi repository mapping requires OPENROUTER_API_KEY. Set it in .env or the shell.",
       });
     }
 
@@ -409,16 +410,26 @@ export class DaytonaSandboxSession implements SandboxSession {
 
     const startedAt = new Date().toISOString();
     const command = buildPiRunnerCommand({
+      artifactSubdir: input.pi.artifactSubdir,
       artifactDir: this.options.sandboxArtifactDir,
+      ...(input.pi.attempt === undefined ? {} : { attempt: input.pi.attempt }),
       contextPack: input.pi.contextPack,
       inputContextArtifact: input.pi.inputContextArtifact,
+      jobName: input.name,
       model: input.pi.model,
+      outputBaseName: input.pi.outputBaseName,
       prompt: input.pi.prompt,
       provider: input.pi.provider,
       repoPath: this.options.repoPath,
+      step: input.pi.step,
+      tools: input.pi.tools,
     });
-    const exitCode = await this.runLongRunningPiCommand(command, apiKey);
-    const artifacts = piRuntimeArtifacts(this.options.sandboxArtifactDir);
+    const exitCode = await this.runLongRunningPiCommand(command, apiKey, input.onProgress);
+    const artifacts = piRuntimeArtifacts({
+      artifactDir: this.options.sandboxArtifactDir,
+      artifactSubdir: input.pi.artifactSubdir,
+      outputBaseName: input.pi.outputBaseName,
+    });
 
     return {
       artifacts,
@@ -435,28 +446,32 @@ export class DaytonaSandboxSession implements SandboxSession {
           "--no-prompt-templates",
           "--no-themes",
           "--tools",
-          "read,grep,find,ls",
+          input.pi.tools.join(","),
           "--provider",
           input.pi.provider,
           "--model",
           input.pi.model,
           "--thinking",
           "low",
+          "--mode",
+          "json",
           "<prompt>",
         ],
         command: "pi",
         cwd: this.options.repoPath,
         metadata: {
           package: "@earendil-works/pi-coding-agent",
+          tools: input.pi.tools,
           verified_help_version: "0.79.1",
         },
         provider: input.pi.provider,
       },
-      kind: "pi-project-understanding",
+      kind: "pi-repository-mapping",
       metadata: {
         input_context_artifact: input.pi.inputContextArtifact,
         model: input.pi.model,
         provider: input.pi.provider,
+        step: input.pi.step,
       },
       observations: [],
       startedAt,
@@ -464,11 +479,15 @@ export class DaytonaSandboxSession implements SandboxSession {
     };
   }
 
-  private async runLongRunningPiCommand(command: string, apiKey: string): Promise<number> {
+  private async runLongRunningPiCommand(
+    command: string,
+    apiKey: string,
+    onProgress?: (event: RuntimeJobProgressEvent) => unknown | Promise<unknown>,
+  ): Promise<number> {
     const processApi = this.sandbox.process;
     const sessionApi = readSessionProcessApi(processApi);
     if (sessionApi !== null) {
-      return this.runPiCommandInSession(command, sessionApi);
+      return this.runPiCommandInSession(command, sessionApi, onProgress);
     }
 
     const response = await processApi
@@ -488,6 +507,7 @@ export class DaytonaSandboxSession implements SandboxSession {
   private async runPiCommandInSession(
     command: string,
     processApi: DaytonaSessionProcessApi,
+    onProgress?: (event: RuntimeJobProgressEvent) => unknown | Promise<unknown>,
   ): Promise<number> {
     const sessionId = `vibeshield-pi-${randomUUID()}`;
     await processApi.createSession(sessionId);
@@ -511,15 +531,25 @@ export class DaytonaSandboxSession implements SandboxSession {
       }
 
       let logsSettled = false;
+      let progressQueue: Promise<unknown> = Promise.resolve();
+      const progressParser = createPiProgressParser((event) => {
+        if (onProgress === undefined) {
+          return;
+        }
+        progressQueue = progressQueue.then(() =>
+          Promise.resolve(onProgress(event)).catch(() => undefined),
+        );
+      });
       const logsPromise = processApi
         .getSessionCommandLogs(
           sessionId,
           started.cmdId,
-          () => {},
+          (chunk) => progressParser.consume(chunk),
           () => {},
         )
         .catch(() => undefined)
         .finally(() => {
+          progressParser.flush();
           logsSettled = true;
         });
 
@@ -531,6 +561,7 @@ export class DaytonaSandboxSession implements SandboxSession {
       });
 
       await Promise.race([logsPromise, sleep(5_000)]);
+      await progressQueue;
       return exitCode;
     } finally {
       await processApi.deleteSession(sessionId).catch(() => undefined);
@@ -625,7 +656,7 @@ function buildToolAvailabilityScript(input: {
   return `
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 
 const config = ${config};
 fs.mkdirSync(config.toolBinDir, { recursive: true });
@@ -914,7 +945,7 @@ function buildBaselineToolScript(input: {
   return `
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 
 const config = ${config};
 const startedAt = new Date().toISOString();
@@ -1160,22 +1191,28 @@ fs.writeFileSync(
 }
 
 function buildPiRunnerCommand(input: {
+  artifactSubdir: string;
   artifactDir: string;
+  attempt?: number;
   contextPack: unknown;
   inputContextArtifact: string;
+  jobName: string;
   model: string;
+  outputBaseName: string;
   prompt: string;
   provider: "openrouter";
   repoPath: string;
+  step: string;
+  tools: string[];
 }): string {
   const runnerSource = String.raw`
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 
 const config = __VIBESHIELD_PI_CONFIG__;
 const startedAt = new Date().toISOString();
-const piDir = path.join(config.artifactDir, "pi");
+const piDir = path.join(config.artifactDir, "pi", config.artifactSubdir);
 fs.mkdirSync(piDir, { recursive: true });
 
 const secret = process.env.OPENROUTER_API_KEY || "";
@@ -1189,19 +1226,260 @@ const redact = (value) => {
     .replace(/((?:api[_-]?key|secret|token|password|passwd|pwd)\s*[:=]\s*)(["']?)[^"'\s,}]{6,}\2/gi, "$1[REDACTED]");
 };
 
-const rawPath = path.join(piDir, "project-understanding.raw.redacted.txt");
+const rawPath = path.join(piDir, config.outputBaseName + ".raw.redacted.txt");
 const stderrPath = path.join(piDir, "stderr.redacted.log");
 const progressPath = path.join(piDir, "progress.jsonl");
 const metadataPath = path.join(piDir, "metadata.json");
 
 const progressEvents = [];
+const progressPrefix = "__VIBESHIELD_PROGRESS__";
 const emitProgress = (type, message, details = undefined) => {
-  progressEvents.push({ details, message, timestamp: new Date().toISOString(), type });
+  const event = { details, job: config.jobName, message, timestamp: new Date().toISOString(), type };
+  progressEvents.push(event);
+  process.stdout.write(progressPrefix + JSON.stringify(event) + "\n");
 };
 
 function commandExists(command) {
   const result = spawnSync(command, ["--version"], { encoding: "utf8", timeout: 30000 });
   return result.error === undefined && result.status === 0;
+}
+
+function textFromAssistantMessage(message) {
+  if (!message || message.role !== "assistant" || !Array.isArray(message.content)) {
+    return "";
+  }
+  return message.content
+    .filter((part) => part && part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("");
+}
+
+function actorLabel() {
+  const stage = String(config.step || "pi").replace(/:semantic-evaluation$/, "");
+  const role = String(config.step || "").endsWith(":semantic-evaluation") ? "evaluator" : "collector";
+  const attempt = typeof config.attempt === "number" ? " attempt " + config.attempt : "";
+  return stage + " " + role + attempt;
+}
+
+function compactValue(value, maxLength = 96) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  const text = redact(String(value)).replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return text.slice(0, maxLength - 3) + "...";
+}
+
+function readToolArguments(toolCall) {
+  if (!toolCall || typeof toolCall !== "object") {
+    return {};
+  }
+  const rawArgs = toolCall.arguments ?? toolCall.partialArgs;
+  if (rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)) {
+    return rawArgs;
+  }
+  if (typeof rawArgs === "string" && rawArgs.trim()) {
+    try {
+      const parsed = JSON.parse(rawArgs);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function toolCallFromAssistantEvent(assistantEvent) {
+  if (!assistantEvent || typeof assistantEvent !== "object") {
+    return undefined;
+  }
+  if (assistantEvent.toolCall) {
+    return assistantEvent.toolCall;
+  }
+  return assistantEvent.partial?.content?.[assistantEvent.contentIndex];
+}
+
+function summarizeToolCall(toolCall) {
+  const tool = compactValue(toolCall?.name || "tool", 40) || "tool";
+  const args = readToolArguments(toolCall);
+  const pathValue = compactValue(
+    args.path ?? args.file ?? args.cwd ?? args.directory ?? args.paths ?? args.files,
+    96,
+  );
+  const patternValue = compactValue(
+    args.pattern ?? args.query ?? args.regex ?? args.glob ?? args.include,
+    96,
+  );
+
+  if (tool === "read" && pathValue) {
+    return { target: pathValue, text: "read " + pathValue, tool };
+  }
+  if (tool === "grep") {
+    const pattern = patternValue ? '"' + patternValue.replace(/"/g, '\\"') + '"' : "pattern";
+    const target = pathValue ? " in " + pathValue : "";
+    return { target: (patternValue + " " + pathValue).trim(), text: "grep " + pattern + target, tool };
+  }
+  if (tool === "find") {
+    const target = patternValue || pathValue;
+    return { target, text: target ? "find " + target : "find", tool };
+  }
+  if (tool === "ls") {
+    return { target: pathValue, text: pathValue ? "ls " + pathValue : "ls", tool };
+  }
+
+  return { target: pathValue || patternValue, text: "called " + tool, tool };
+}
+
+function eventMessageForPiEvent(event) {
+  if (!event || typeof event !== "object") {
+    return undefined;
+  }
+
+  if (event.type === "turn_start") {
+    return { message: actorLabel() + ": thinking...", type: "pi.thinking" };
+  }
+
+  const assistantEvent = event.assistantMessageEvent;
+  if (!assistantEvent || typeof assistantEvent !== "object") {
+    return undefined;
+  }
+
+  if (assistantEvent.type === "toolcall_end") {
+    const summary = summarizeToolCall(toolCallFromAssistantEvent(assistantEvent));
+    return {
+      details: { target: summary.target, tool: summary.tool },
+      message: actorLabel() + ": " + summary.text + ".",
+      type: "pi.tool.called",
+    };
+  }
+  if (assistantEvent.type === "text_start") {
+    return { message: actorLabel() + ": writing structured output.", type: "pi.output.started" };
+  }
+
+  return undefined;
+}
+
+function runPiJsonStream(command, args) {
+  return new Promise((resolve) => {
+    let stdoutBuffer = "";
+    let stderr = "";
+    let finalText = "";
+    let rawJsonlBytes = 0;
+    let emittedOutputStarted = false;
+    let toolCallCount = 0;
+    let childError;
+    let timedOut = false;
+
+    const child = spawn(command, args, {
+      cwd: config.repoPath,
+      env: {
+        ...process.env,
+        PI_CODING_AGENT_DIR: "/tmp/vibeshield-pi-agent",
+        PI_CODING_AGENT_SESSION_DIR: "/tmp/vibeshield-pi-sessions",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      emitProgress("pi.timeout", "Pi " + config.step + " exceeded runtime timeout.", { step: config.step });
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 5000).unref();
+    }, 900000);
+    timeout.unref();
+
+    const heartbeat = setInterval(() => {
+      emitProgress("pi.heartbeat", actorLabel() + ": still running.", {
+        raw_jsonl_bytes: rawJsonlBytes,
+        stderr_bytes: Buffer.byteLength(stderr, "utf8"),
+        step: config.step,
+        tool_calls: toolCallCount,
+      });
+    }, 30000);
+    heartbeat.unref();
+
+    const processLine = (line) => {
+      if (!line.trim()) {
+        return;
+      }
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
+      }
+
+      const text = textFromAssistantMessage(event.message);
+      if (text) {
+        finalText = text;
+      }
+      if (event.type === "agent_end" && Array.isArray(event.messages)) {
+        const assistantMessages = event.messages.filter((message) => message && message.role === "assistant");
+        const lastText = textFromAssistantMessage(assistantMessages[assistantMessages.length - 1]);
+        if (lastText) {
+          finalText = lastText;
+        }
+      }
+
+      const progress = eventMessageForPiEvent(event);
+      if (progress === undefined) {
+        return;
+      }
+
+      if (progress.type === "pi.output.started") {
+        if (emittedOutputStarted) {
+          return;
+        }
+        emittedOutputStarted = true;
+      }
+      if (progress.type === "pi.tool.called") {
+        toolCallCount += 1;
+      }
+
+      emitProgress(progress.type, progress.message, {
+        ...(progress.details || {}),
+        step: config.step,
+      });
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      rawJsonlBytes += Buffer.byteLength(chunk, "utf8");
+      stdoutBuffer += chunk;
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() || "";
+      for (const line of lines) {
+        processLine(line);
+      }
+    });
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += redact(chunk);
+    });
+
+    child.on("error", (error) => {
+      childError = error;
+    });
+
+    child.on("close", (code, signal) => {
+      clearTimeout(timeout);
+      clearInterval(heartbeat);
+      if (stdoutBuffer.trim()) {
+        processLine(stdoutBuffer);
+      }
+      resolve({
+        error: childError,
+        finalText,
+        rawJsonlBytes,
+        signal,
+        status: timedOut ? 124 : code,
+        stderr,
+      });
+    });
+  });
 }
 
 const piArgs = [
@@ -1213,17 +1491,19 @@ const piArgs = [
   "--no-prompt-templates",
   "--no-themes",
   "--tools",
-  "read,grep,find,ls",
+  config.tools.join(","),
   "--provider",
   config.provider,
   "--model",
   config.model,
   "--thinking",
   "low",
+  "--mode",
+  "json",
   config.prompt,
 ];
 
-emitProgress("runner.started", "Preparing Pi project-understanding runner.");
+emitProgress("runner.started", "Running Pi " + config.step + ".", { step: config.step });
 const usePnpm = commandExists("pnpm");
 const command = usePnpm ? "pnpm" : "npm";
 const args = usePnpm
@@ -1243,7 +1523,6 @@ const versionArgs = usePnpm
   ? ["--config.ignore-scripts=true", "dlx", "@earendil-works/pi-coding-agent", "--version"]
   : ["exec", "--ignore-scripts", "--yes", "--package", "@earendil-works/pi-coding-agent", "--", "pi", "--version"];
 
-emitProgress("pi.starting", "Starting Pi project-understanding run.");
 const versionResult = spawnSync(command, versionArgs, {
   cwd: config.repoPath,
   encoding: "utf8",
@@ -1252,101 +1531,115 @@ const versionResult = spawnSync(command, versionArgs, {
 });
 const version = redact((versionResult.stdout || versionResult.stderr || "").trim().split(/\r?\n/)[0] || "");
 
-const result = spawnSync(command, args, {
-  cwd: config.repoPath,
-  encoding: "utf8",
-  env: {
-    ...process.env,
-    PI_CODING_AGENT_DIR: "/tmp/vibeshield-pi-agent",
-    PI_CODING_AGENT_SESSION_DIR: "/tmp/vibeshield-pi-sessions",
-  },
-  maxBuffer: 20 * 1024 * 1024,
-  timeout: 900000,
-});
+runPiJsonStream(command, args)
+  .then((result) => {
+    const stdout = redact(result.finalText || "");
+    const stderr = redact(result.stderr || (result.error ? result.error.message : ""));
+    fs.writeFileSync(rawPath, stdout);
+    fs.writeFileSync(stderrPath, stderr);
+    emitProgress(result.status === 0 ? "pi.completed" : "pi.failed", result.status === 0 ? "Pi " + config.step + " completed." : "Pi " + config.step + " exited non-zero.", { signal: result.signal, step: config.step });
+    fs.writeFileSync(progressPath, progressEvents.map((event) => JSON.stringify(event)).join("\n") + "\n");
 
-const stdout = redact(result.stdout || "");
-const stderr = redact(result.stderr || (result.error ? result.error.message : ""));
-fs.writeFileSync(rawPath, stdout);
-fs.writeFileSync(stderrPath, stderr);
-emitProgress(result.status === 0 ? "pi.completed" : "pi.failed", result.status === 0 ? "Pi completed." : "Pi exited non-zero.");
-fs.writeFileSync(progressPath, progressEvents.map((event) => JSON.stringify(event)).join("\n") + "\n");
+    const metadata = {
+      input_context_artifact: config.inputContextArtifact,
+      invocation: {
+        args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--tools", config.tools.join(","), "--provider", config.provider, "--model", config.model, "--thinking", "low", "--mode", "json", "<prompt>"],
+        command,
+        cwd: config.repoPath,
+        metadata: { tools: config.tools },
+        provider: config.provider,
+      },
+      model: config.model,
+      pi_exit_code: result.status,
+      prompt_bytes: Buffer.byteLength(config.prompt, "utf8"),
+      provider: config.provider,
+      raw_jsonl_bytes: result.rawJsonlBytes,
+      runner_package: "@earendil-works/pi-coding-agent",
+      stderr_bytes: Buffer.byteLength(stderr, "utf8"),
+      stdout_bytes: Buffer.byteLength(stdout, "utf8"),
+      step: config.step,
+      version,
+    };
+    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2) + "\n");
 
-const metadata = {
-  input_context_artifact: config.inputContextArtifact,
-  invocation: {
-    args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--tools", "read,grep,find,ls", "--provider", config.provider, "--model", config.model, "--thinking", "low", "<prompt>"],
-    command,
-    cwd: config.repoPath,
-    provider: config.provider,
-  },
-  model: config.model,
-  pi_exit_code: result.status,
-  prompt_bytes: Buffer.byteLength(config.prompt, "utf8"),
-  provider: config.provider,
-  runner_package: "@earendil-works/pi-coding-agent",
-  version,
-};
-fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2) + "\n");
+    const runtimeResult = {
+      artifacts: [
+        { relativePath: "pi/" + config.artifactSubdir + "/" + config.outputBaseName + ".raw.redacted.txt", sandboxPath: rawPath },
+        { relativePath: "pi/" + config.artifactSubdir + "/stderr.redacted.log", sandboxPath: stderrPath },
+        { relativePath: "pi/" + config.artifactSubdir + "/progress.jsonl", sandboxPath: progressPath },
+        { relativePath: "pi/" + config.artifactSubdir + "/metadata.json", sandboxPath: metadataPath },
+      ],
+      diagnostics: result.status === 0 ? [] : ["Pi exited with code " + result.status + "."],
+      exitCode: result.status,
+      finishedAt: new Date().toISOString(),
+      invocation: metadata.invocation,
+      kind: "pi-repository-mapping",
+      metadata,
+      observations: [],
+      startedAt,
+      status: result.status === 0 ? "completed" : "failed",
+      ...(version ? { version } : {}),
+    };
 
-const runtimeResult = {
-  artifacts: [
-    { relativePath: "pi/project-understanding.raw.redacted.txt", sandboxPath: rawPath },
-    { relativePath: "pi/stderr.redacted.log", sandboxPath: stderrPath },
-    { relativePath: "pi/progress.jsonl", sandboxPath: progressPath },
-    { relativePath: "pi/metadata.json", sandboxPath: metadataPath },
-  ],
-  diagnostics: result.status === 0 ? [] : ["Pi exited with code " + result.status + "."],
-  exitCode: result.status,
-  finishedAt: new Date().toISOString(),
-  invocation: metadata.invocation,
-  kind: "pi-project-understanding",
-  metadata,
-  observations: [],
-  startedAt,
-  status: result.status === 0 ? "completed" : "failed",
-  ...(version ? { version } : {}),
-};
+    if (result.status !== 0) {
+      process.exitCode = result.status ?? 1;
+    }
 
-if (result.status !== 0) {
-  process.exitCode = result.status ?? 1;
-}
-
-process.stdout.write(JSON.stringify(runtimeResult));
+    process.stdout.write(JSON.stringify(runtimeResult));
+  })
+  .catch((error) => {
+    const stderr = redact(error && error.message ? error.message : String(error));
+    fs.writeFileSync(rawPath, "");
+    fs.writeFileSync(stderrPath, stderr);
+    emitProgress("pi.failed", "Pi " + config.step + " runner failed.", { step: config.step });
+    fs.writeFileSync(progressPath, progressEvents.map((event) => JSON.stringify(event)).join("\n") + "\n");
+    process.exitCode = 1;
+  });
 `;
 
   const rendered = runnerSource.replace(
     "__VIBESHIELD_PI_CONFIG__",
     JSON.stringify({
+      artifactSubdir: input.artifactSubdir,
       artifactDir: input.artifactDir,
+      attempt: input.attempt,
       contextPack: input.contextPack,
       inputContextArtifact: input.inputContextArtifact,
+      jobName: input.jobName,
       model: input.model,
+      outputBaseName: input.outputBaseName,
       prompt: input.prompt,
       provider: input.provider,
       repoPath: input.repoPath,
+      step: input.step,
+      tools: input.tools,
     }),
   );
 
   return `node <<'NODE'\n${rendered}\nNODE`;
 }
 
-function piRuntimeArtifacts(artifactDir: string): SandboxArtifact[] {
+function piRuntimeArtifacts(input: {
+  artifactDir: string;
+  artifactSubdir: string;
+  outputBaseName: string;
+}): SandboxArtifact[] {
   return [
     {
-      relativePath: "pi/project-understanding.raw.redacted.txt",
-      sandboxPath: `${artifactDir}/pi/project-understanding.raw.redacted.txt`,
+      relativePath: `pi/${input.artifactSubdir}/${input.outputBaseName}.raw.redacted.txt`,
+      sandboxPath: `${input.artifactDir}/pi/${input.artifactSubdir}/${input.outputBaseName}.raw.redacted.txt`,
     },
     {
-      relativePath: "pi/stderr.redacted.log",
-      sandboxPath: `${artifactDir}/pi/stderr.redacted.log`,
+      relativePath: `pi/${input.artifactSubdir}/stderr.redacted.log`,
+      sandboxPath: `${input.artifactDir}/pi/${input.artifactSubdir}/stderr.redacted.log`,
     },
     {
-      relativePath: "pi/progress.jsonl",
-      sandboxPath: `${artifactDir}/pi/progress.jsonl`,
+      relativePath: `pi/${input.artifactSubdir}/progress.jsonl`,
+      sandboxPath: `${input.artifactDir}/pi/${input.artifactSubdir}/progress.jsonl`,
     },
     {
-      relativePath: "pi/metadata.json",
-      sandboxPath: `${artifactDir}/pi/metadata.json`,
+      relativePath: `pi/${input.artifactSubdir}/metadata.json`,
+      sandboxPath: `${input.artifactDir}/pi/${input.artifactSubdir}/metadata.json`,
     },
   ];
 }
@@ -1370,6 +1663,72 @@ function readSessionProcessApi(
     executeSessionCommand: processApi.executeSessionCommand.bind(processApi),
     getSessionCommand: processApi.getSessionCommand.bind(processApi),
     getSessionCommandLogs: processApi.getSessionCommandLogs.bind(processApi),
+  };
+}
+
+const piProgressPrefix = "__VIBESHIELD_PROGRESS__";
+
+function createPiProgressParser(onProgress: (event: RuntimeJobProgressEvent) => void): {
+  consume(chunk: string): void;
+  flush(): void;
+} {
+  let buffer = "";
+  const seen = new Set<string>();
+
+  const processLine = (line: string) => {
+    const markerIndex = line.indexOf(piProgressPrefix);
+    if (markerIndex < 0) {
+      return;
+    }
+
+    const payload = line.slice(markerIndex + piProgressPrefix.length).trim();
+    if (payload === "" || seen.has(payload)) {
+      return;
+    }
+    seen.add(payload);
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return;
+    }
+
+    const event = parsed as Record<string, unknown>;
+    if (typeof event.message !== "string" || typeof event.type !== "string") {
+      return;
+    }
+    const details =
+      event.details !== null && typeof event.details === "object" && !Array.isArray(event.details)
+        ? (event.details as Record<string, unknown>)
+        : undefined;
+
+    onProgress({
+      ...(details === undefined ? {} : { details }),
+      job: typeof event.job === "string" && event.job.trim() !== "" ? event.job : "pi",
+      message: event.message,
+      type: event.type,
+    });
+  };
+
+  return {
+    consume(chunk: string) {
+      buffer += chunk;
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        processLine(line);
+      }
+    },
+    flush() {
+      if (buffer !== "") {
+        processLine(buffer);
+        buffer = "";
+      }
+    },
   };
 }
 

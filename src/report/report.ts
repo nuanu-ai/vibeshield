@@ -2,7 +2,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   BaselineSummaryArtifact,
+  DataFlowsArtifact,
+  EntryPointsArtifact,
   ProjectUnderstandingArtifact,
+  SensitiveSinksArtifact,
 } from "../artifacts/contracts.js";
 import type { ScanRunState } from "../run/types.js";
 
@@ -19,9 +22,18 @@ export async function writeSuccessReport(input: {
     runDir,
     input.run.artifacts.project_understanding,
   );
+  const entryPoints = await readArtifact<EntryPointsArtifact>(
+    runDir,
+    input.run.artifacts.entry_points,
+  );
+  const sensitiveSinks = await readArtifact<SensitiveSinksArtifact>(
+    runDir,
+    input.run.artifacts.sensitive_sinks,
+  );
+  const dataFlows = await readArtifact<DataFlowsArtifact>(runDir, input.run.artifacts.data_flows);
   const sandboxCleanup = input.run.sandbox?.cleanup;
   const lines = [
-    "# VibeShield Phase 1 project understanding",
+    "# VibeShield Phase 1 repository mapping",
     "",
     "Status: success",
     `Run ID: ${input.run.run_id}`,
@@ -31,7 +43,7 @@ export async function writeSuccessReport(input: {
     `Sandbox deleted: ${sandboxCleanup?.deleted === true ? "yes" : "unknown"}`,
     "",
     "Phase 0 intake and inventory is included in this run.",
-    "This is a Phase 1 project-understanding report, not a security audit.",
+    "This is a Phase 1 repository-mapping report, not a security audit.",
     "No security findings or verdict are produced in Phase 1.",
     "",
     "## Project summary",
@@ -48,8 +60,28 @@ export async function writeSuccessReport(input: {
     "",
     "## Entrypoints",
     ...formatEntries(
-      projectUnderstanding?.map.entrypoints.map(
-        (entry) => `${entry.path} - ${entry.summary} (${entry.evidence.join(", ")})`,
+      entryPoints?.entry_points.map(
+        (entry) =>
+          `${entry.kind} ${entry.name} at ${entry.location}${entry.route ? ` ${entry.route}` : ""} (${entry.evidence.join(", ")})`,
+      ),
+    ),
+    "",
+    "## Sensitive sinks",
+    ...formatEntries(
+      sensitiveSinks?.sinks.map(
+        (sink) =>
+          `${sink.kind} ${sink.operation} at ${sink.location} (${sink.evidence.join(", ")})`,
+      ),
+    ),
+    "",
+    "## Data flows",
+    ...formatEntries(
+      dataFlows?.flows.map(
+        (flow) =>
+          `${flow.source_entrypoint} -> ${flow.sink}: ${flow.trace_status} (${[
+            ...flow.source_evidence,
+            ...flow.sink_evidence,
+          ].join(", ")})`,
       ),
     ),
     "",
@@ -57,21 +89,6 @@ export async function writeSuccessReport(input: {
     ...formatEntries(
       projectUnderstanding?.map.important_files.map(
         (entry) => `${entry.path} - ${entry.reason} (${entry.evidence.join(", ")})`,
-      ),
-    ),
-    "",
-    "## Observed surfaces",
-    ...formatEntries(
-      projectUnderstanding?.map.observed_surfaces.map(
-        (surface) =>
-          `${surface.kind}${surface.path ? ` ${surface.path}` : ""} - ${surface.summary} (${surface.evidence.join(", ")})`,
-      ),
-    ),
-    "",
-    "## Env and config facts",
-    ...formatEntries(
-      projectUnderstanding?.env_and_config_surface.map(
-        (entry) => `${entry.name} - ${entry.observed_use} (${entry.evidence.join(", ")})`,
       ),
     ),
     "",
@@ -158,16 +175,17 @@ function formatArtifactLinks(run: ScanRunState): string[] {
     run.artifacts.baseline_tool_availability,
     run.artifacts.baseline_summary,
     run.artifacts.pi_context_pack,
+    run.artifacts.entry_points,
+    run.artifacts.sensitive_sinks,
+    run.artifacts.data_flows,
     run.artifacts.project_understanding,
-    run.artifacts.pi_progress,
-    run.artifacts.pi_raw_output,
-    run.artifacts.pi_stderr,
     run.artifacts.events,
+    ...(run.steps?.flatMap((step) => step.jobs.flatMap((job) => job.artifacts)) ?? []),
   ].filter((artifact): artifact is string => artifact !== undefined);
 
   if (artifacts.length === 0) {
     return ["- No artifacts were recorded."];
   }
 
-  return artifacts.map((artifact) => `- ${artifact}`);
+  return [...new Set(artifacts)].map((artifact) => `- ${artifact}`);
 }
