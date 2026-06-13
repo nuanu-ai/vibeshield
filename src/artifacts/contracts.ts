@@ -171,9 +171,10 @@ export interface PiArtifactMetadata {
       provider?: string;
     };
     model: string;
+    output_bytes?: number;
+    output_file?: string;
     provider: string;
     stderr_bytes?: number;
-    stdout_bytes?: number;
     step: string;
     version?: string;
   };

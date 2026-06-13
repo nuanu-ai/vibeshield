@@ -27,7 +27,7 @@ import type {
 
 const defaultPiModel = "moonshotai/kimi-k2.7-code";
 const defaultPiProvider = "openrouter";
-const collectorTools = ["read", "grep", "find", "ls"];
+const collectorTools = ["read", "grep", "find", "ls", "write"];
 
 const repoMapPaths = {
   authConfigSecrets: "outputs/repo-map/auth-config-secrets.json",
@@ -328,13 +328,11 @@ export async function runPiRepositoryMapping(
 
   const priorMapArtifacts = {
     artifacts: {
-      auth_config_secrets: authConfigSecrets.artifact,
-      coverage_structure: coverageStructure.artifact,
-      data_flows: dataFlows.artifact,
-      entrypoints: entrypoints.artifact,
-      operation_sinks: operationSinks.artifact,
-      stack_build_deps: stackBuildDeps.artifact,
-      storage_integrations_infra: storageIntegrationsInfra.artifact,
+      auth_config_secrets: piHandoffArtifact(authConfigSecrets.artifact),
+      data_flows: piHandoffArtifact(dataFlows.artifact),
+      entrypoints: piHandoffArtifact(entrypoints.artifact),
+      operation_sinks: piHandoffArtifact(operationSinks.artifact),
+      storage_integrations_infra: piHandoffArtifact(storageIntegrationsInfra.artifact),
     },
     paths: priorMapArtifactPaths(),
     repo: input.contextPack.repo,
@@ -361,7 +359,6 @@ export async function runPiRepositoryMapping(
       outputBaseName: "trust-boundaries",
       prompt: buildTrustBoundariesPrompt(priorMapArtifacts),
       step: "trust-boundaries",
-      tools: [],
       validateSchema: (artifact) =>
         validateTrustBoundariesArtifact({
           artifact,
@@ -373,8 +370,14 @@ export async function runPiRepositoryMapping(
 
   const repositoryMapContext = {
     artifacts: {
-      ...priorMapArtifacts.artifacts,
-      trust_boundaries: trustBoundaries.artifact,
+      auth_config_secrets: piHandoffArtifact(authConfigSecrets.artifact),
+      coverage_structure: piHandoffArtifact(coverageStructure.artifact),
+      data_flows: piHandoffArtifact(dataFlows.artifact),
+      entrypoints: piHandoffArtifact(entrypoints.artifact),
+      operation_sinks: piHandoffArtifact(operationSinks.artifact),
+      stack_build_deps: piHandoffArtifact(stackBuildDeps.artifact),
+      storage_integrations_infra: piHandoffArtifact(storageIntegrationsInfra.artifact),
+      trust_boundaries: piHandoffArtifact(trustBoundaries.artifact),
     },
     paths: allMapArtifactPaths(),
     repo: input.contextPack.repo,
@@ -402,7 +405,6 @@ export async function runPiRepositoryMapping(
       outputBaseName: "repository-map",
       prompt: buildRepositoryMapPrompt(repositoryMapContext),
       step: "repository-map",
-      tools: [],
       validateSchema: (artifact) =>
         validateRepositoryMapArtifact({
           artifact,
@@ -449,8 +451,12 @@ async function runPiStage<TArtifact extends PiStructuredArtifact>(
       contextPack: stage.contextPack,
       inputContextArtifact: stage.contextArtifactLabel,
       model: defaultPiModel,
+      outputFile: piAgentOutputFile(stage.outputBaseName),
       outputBaseName: stage.outputBaseName,
-      prompt: stage.prompt,
+      prompt: withPiOutputFileInstruction({
+        outputFile: piAgentOutputFile(stage.outputBaseName),
+        prompt: stage.prompt,
+      }),
       provider: defaultPiProvider,
       step: stage.step,
       tools: stage.tools ?? collectorTools,
@@ -498,6 +504,43 @@ async function runPiStage<TArtifact extends PiStructuredArtifact>(
     await stage.input.onJobFinished?.(jobState);
     throw error;
   }
+}
+
+function piHandoffArtifact(artifact: PiStructuredArtifact): unknown {
+  return stripHandoffMetadata(artifact);
+}
+
+function piAgentOutputFile(outputBaseName: PiStructuredArtifact["kind"]): string {
+  return `.vibeshield-pi-output/${outputBaseName}.json`;
+}
+
+function withPiOutputFileInstruction(input: { outputFile: string; prompt: string }): string {
+  return `${input.prompt}
+
+Output file contract:
+- The JSON artifact MUST be written to this file using the write tool: ${input.outputFile}
+- This file is the primary result consumed by VibeShield.
+- Write exactly one JSON object to the file.
+- Do not write markdown fences or explanatory text to the file.
+- Do not modify any repository file other than this output file.`;
+}
+
+function stripHandoffMetadata(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripHandoffMetadata(item));
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  const output: Record<string, unknown> = {};
+  for (const [key, childValue] of Object.entries(value)) {
+    if (key === "metadata") {
+      continue;
+    }
+    output[key] = stripHandoffMetadata(childValue);
+  }
+  return output;
 }
 
 function assertPiJobCompleted(result: RuntimeJobResult, step: string): void {
@@ -1053,7 +1096,7 @@ Depth bounds:
 - Do not inspect every source file.
 - Do not list individual files except as representative evidence for a directory role.
 
-Return ONLY valid JSON matching coverage-structure:
+Write ONLY valid JSON matching coverage-structure:
 {
   "kind": "coverage-structure",
   "generated_at": "ISO timestamp",
@@ -1116,7 +1159,7 @@ Depth bounds:
 - Do not expand transitive dependencies manually. If a lockfile exists, record that transitive dependencies are available through it.
 - Commands are declarations found in manifests/config, not commands you ran.
 
-Return ONLY valid JSON matching stack-build-deps:
+Write ONLY valid JSON matching stack-build-deps:
 {
   "kind": "stack-build-deps",
   "generated_at": "ISO timestamp",
@@ -1176,7 +1219,7 @@ Depth bounds:
 - Include handler or callback name/path when observable.
 - If a framework generates many equivalent routes, group only when necessary and explain the gap in coverage.not_covered.
 
-Return ONLY valid JSON matching entrypoints:
+Write ONLY valid JSON matching entrypoints:
 {
   "kind": "entrypoints",
   "generated_at": "ISO timestamp",
@@ -1233,7 +1276,7 @@ Depth bounds:
 - Do not output secret values, connection strings, cookies, tokens, private keys, or passwords. Use only names and set value_redacted true for secret_references.
 - Do not root-cause configuration behavior.
 
-Return ONLY valid JSON matching auth-config-secrets:
+Write ONLY valid JSON matching auth-config-secrets:
 {
   "kind": "auth-config-secrets",
   "generated_at": "ISO timestamp",
@@ -1288,7 +1331,7 @@ Depth bounds:
 - Do not trace integration call chains; record declarations and direct client setup at map level.
 - Do not infer data sensitivity beyond field/schema names.
 
-Return ONLY valid JSON matching storage-integrations-infra:
+Write ONLY valid JSON matching storage-integrations-infra:
 {
   "kind": "storage-integrations-infra",
   "generated_at": "ISO timestamp",
@@ -1348,7 +1391,7 @@ Depth bounds:
 - Do not perform root-cause or full business-logic analysis.
 - Cite operation lines or nearby variable construction lines that directly support classification.
 
-Return ONLY valid JSON matching operation-sinks:
+Write ONLY valid JSON matching operation-sinks:
 {
   "kind": "operation-sinks",
   "generated_at": "ISO timestamp",
@@ -1399,7 +1442,7 @@ Rules:
 - Use "not traced beyond path:line" or "not established" when deeper analysis would be required.
 - Every row with a connection across functions or files must set inference true.
 
-Return ONLY valid JSON matching data-flows:
+Write ONLY valid JSON matching data-flows:
 {
   "kind": "data-flows",
   "generated_at": "ISO timestamp",
@@ -1449,7 +1492,7 @@ Rules:
 - Base boundaries primarily on entrypoints, operation sinks, and data flows. Use storage/integration facts only to name the internal side when already present.
 - Use evidence already present in prior artifacts.
 
-Return ONLY valid JSON matching trust-boundaries:
+Write ONLY valid JSON matching trust-boundaries:
 {
   "kind": "trust-boundaries",
   "generated_at": "ISO timestamp",
@@ -1500,7 +1543,7 @@ Rules:
 - Summary is a compact map-level inference and must set inference true.
 - Keep this as an index and orientation artifact, not a report and not an audit.
 
-Return ONLY valid JSON matching repository-map:
+Write ONLY valid JSON matching repository-map:
 {
   "kind": "repository-map",
   "generated_at": "ISO timestamp",
@@ -1551,13 +1594,15 @@ Forbidden:
 - Do not perform exhaustive code review, line-by-line handler analysis, full control-flow tracing, framework internals tracing, or root-cause analysis.
 - Do not trust README, docs, examples, comments, or marketing text as truth about actual code behavior. Use them only as evidence that documentation exists or claims something.
 - Do not run the application, tests, builds, package scripts, migrations, Docker build/run, dependency installation, generators, or network calls.
-- Do not modify files.
+- Do not modify analyzed repository files.
+- You may write only the requested VibeShield JSON output file.
 
 Allowed collector tools:
 - read
 - grep
 - find
 - ls
+- write, only for the requested VibeShield JSON output file
 
 Evidence rules:
 - Every claimed fact must have evidence as relative/path:line or relative/path:start-end.
@@ -1576,7 +1621,8 @@ Evidence rules:
 - Do not output full secret, token, private key, cookie, password, or connection string values; use names only or redacted previews.
 
 Output rules:
-- Return exactly one JSON object.
+- Save exactly one JSON object to the output file named at the end of this prompt.
+- The saved file is the result consumed by VibeShield.
 - Do not wrap JSON in markdown fences.
 - Keep output compact. Use short factual phrases, not paragraphs.
 - Do not enumerate repeated files, routes, helpers, dependencies, or operation calls exhaustively.
@@ -1638,10 +1684,10 @@ function parseJsonObjectFromText(
   const trimmed = text.trim();
   if (trimmed === "") {
     throw new ScanStageError({
-      diagnostics: [`Pi ${step} completed but returned empty stdout.`],
-      message: `Pi ${step} completed but returned empty stdout.`,
+      diagnostics: [`Pi ${step} output file was empty.`],
+      message: `Pi ${step} output file was empty.`,
       stage: asRunStage(validationStage),
-      userMessage: `VibeShield rejected Pi ${step} output because Pi returned empty stdout.`,
+      userMessage: `VibeShield rejected Pi ${step} output because the output file was empty.`,
     });
   }
 
@@ -1772,9 +1818,10 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
   normalizeParsedArtifact(input.kind, parsed);
   const metadata = input.metadata as {
     model?: unknown;
+    output_bytes?: unknown;
+    output_file?: unknown;
     provider?: unknown;
     stderr_bytes?: unknown;
-    stdout_bytes?: unknown;
     step?: unknown;
     version?: unknown;
   };
@@ -1790,12 +1837,13 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
         input_context_artifact: input.contextPath,
         invocation: input.result.invocation,
         model: typeof metadata.model === "string" ? metadata.model : defaultPiModel,
+        ...(typeof metadata.output_bytes === "number"
+          ? { output_bytes: metadata.output_bytes }
+          : {}),
+        ...(typeof metadata.output_file === "string" ? { output_file: metadata.output_file } : {}),
         provider: typeof metadata.provider === "string" ? metadata.provider : defaultPiProvider,
         ...(typeof metadata.stderr_bytes === "number"
           ? { stderr_bytes: metadata.stderr_bytes }
-          : {}),
-        ...(typeof metadata.stdout_bytes === "number"
-          ? { stdout_bytes: metadata.stdout_bytes }
           : {}),
         step: typeof metadata.step === "string" ? metadata.step : input.step,
         ...(typeof metadata.version === "string" && metadata.version !== ""

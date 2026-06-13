@@ -395,7 +395,8 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
 
     await input.onProgress?.({
       job: input.name,
-      message: `Running Pi ${input.pi.step}.`,
+      message: piStepStartMessage(input.pi.step),
+      details: { step: input.pi.step },
       type: "runner.started",
     });
 
@@ -406,6 +407,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
     const stderrPath = path.join(stepDir, "stderr.redacted.log");
     const progressPath = path.join(stepDir, "progress.jsonl");
     const metadataPath = path.join(stepDir, "metadata.json");
+    const piToolArgs = input.pi.tools.length > 0 ? ["--tools", input.pi.tools.join(",")] : [];
 
     await writeFile(
       rawPath,
@@ -429,18 +431,19 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
         {
           input_context_artifact: input.pi.inputContextArtifact,
           invocation: {
-            args: ["-p", "--tools", input.pi.tools.join(",")],
+            args: ["-p", ...piToolArgs],
             command: "pi",
             cwd: this.repoPath,
-            metadata: { tools: input.pi.tools },
+            metadata: { output_file: input.pi.outputFile, tools: input.pi.tools },
             provider: "openrouter",
           },
           model: input.pi.model,
-          provider: input.pi.provider,
-          stderr_bytes: "fake pi completed\n".length,
-          stdout_bytes: isFakeRawPiOutput(output)
+          output_bytes: isFakeRawPiOutput(output)
             ? output.rawText.length
             : JSON.stringify(output, null, 2).length + 1,
+          output_file: input.pi.outputFile,
+          provider: input.pi.provider,
+          stderr_bytes: "fake pi completed\n".length,
           step: input.pi.step,
           version: "fake-pi-0.0.0",
         },
@@ -452,7 +455,8 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
 
     await input.onProgress?.({
       job: input.name,
-      message: `Pi ${input.pi.step} completed.`,
+      message: piStepDoneMessage(input.pi.step),
+      details: { step: input.pi.step },
       type: "pi.completed",
     });
 
@@ -479,10 +483,10 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       exitCode: 0,
       finishedAt: new Date().toISOString(),
       invocation: {
-        args: ["-p", "--tools", input.pi.tools.join(",")],
+        args: ["-p", ...piToolArgs],
         command: "pi",
         cwd: this.repoPath,
-        metadata: { tools: input.pi.tools },
+        metadata: { output_file: input.pi.outputFile, tools: input.pi.tools },
         provider: "openrouter",
       },
       kind: "pi-repository-mapping",
@@ -1315,6 +1319,56 @@ function fakeRepoMapCoverage(area: string, evidence: string[]) {
   };
 }
 
+function piStepStartMessage(step: string): string {
+  switch (step) {
+    case "coverage-structure":
+      return "Mapping repository coverage and structure.";
+    case "stack-build-deps":
+      return "Collecting stack, build, and dependency facts.";
+    case "entrypoints":
+      return "Collecting externally reachable entrypoints.";
+    case "auth-config-secrets":
+      return "Mapping auth, config, and secret references.";
+    case "storage-integrations-infra":
+      return "Collecting storage, integration, and infrastructure facts.";
+    case "operation-sinks":
+      return "Collecting observable operation sinks.";
+    case "data-flows":
+      return "Tracing bounded entrypoint-to-sink flows.";
+    case "trust-boundaries":
+      return "Synthesizing trust boundaries from accepted map facts.";
+    case "repository-map":
+      return "Assembling the final repository map.";
+    default:
+      return "Running repository-map collection.";
+  }
+}
+
+function piStepDoneMessage(step: string): string {
+  switch (step) {
+    case "coverage-structure":
+      return "Coverage and structure map completed.";
+    case "stack-build-deps":
+      return "Stack, build, and dependency facts completed.";
+    case "entrypoints":
+      return "Entrypoint collection completed.";
+    case "auth-config-secrets":
+      return "Auth, config, and secret-reference map completed.";
+    case "storage-integrations-infra":
+      return "Storage, integration, and infrastructure facts completed.";
+    case "operation-sinks":
+      return "Operation sink inventory completed.";
+    case "data-flows":
+      return "Bounded data-flow tracing completed.";
+    case "trust-boundaries":
+      return "Trust-boundary synthesis completed.";
+    case "repository-map":
+      return "Final repository map assembled.";
+    default:
+      return "Repository-map collection completed.";
+  }
+}
+
 function fakeRepoFromInput(input: RuntimeJobInput): { commit_sha: string | null; url: string } {
   const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
   return {
@@ -1330,13 +1384,15 @@ function fakeManifestPath(input: RuntimeJobInput): string {
 
 function fakePiMetadata(input: RuntimeJobInput): RepositoryMapArtifact["metadata"]["pi"] {
   const tools = input.pi?.tools ?? ["read", "grep", "find", "ls"];
+  const toolArgs = tools.length > 0 ? ["--tools", tools.join(",")] : [];
+  const outputFile = input.pi?.outputFile ?? ".vibeshield-pi-output/fake.json";
   return {
     input_context_artifact: input.pi?.inputContextArtifact ?? "outputs/pi-context-pack.json",
     invocation: {
-      args: ["-p", "--tools", tools.join(",")],
+      args: ["-p", ...toolArgs],
       command: "pi",
       cwd: "repo",
-      metadata: { tools },
+      metadata: { output_file: outputFile, tools },
       provider: "openrouter",
     },
     model: input.pi?.model ?? "fake",

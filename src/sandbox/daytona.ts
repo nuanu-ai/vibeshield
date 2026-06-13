@@ -471,6 +471,7 @@ export class DaytonaSandboxSession implements SandboxSession {
       inputContextArtifact: input.pi.inputContextArtifact,
       jobName: input.name,
       model: input.pi.model,
+      outputFile: input.pi.outputFile,
       outputBaseName: input.pi.outputBaseName,
       prompt: input.pi.prompt,
       provider: input.pi.provider,
@@ -484,6 +485,7 @@ export class DaytonaSandboxSession implements SandboxSession {
       artifactSubdir: input.pi.artifactSubdir,
       outputBaseName: input.pi.outputBaseName,
     });
+    const piToolArgs = input.pi.tools.length > 0 ? ["--tools", input.pi.tools.join(",")] : [];
 
     return {
       artifacts,
@@ -499,8 +501,7 @@ export class DaytonaSandboxSession implements SandboxSession {
           "--no-skills",
           "--no-prompt-templates",
           "--no-themes",
-          "--tools",
-          input.pi.tools.join(","),
+          ...piToolArgs,
           "--provider",
           input.pi.provider,
           "--model",
@@ -514,6 +515,7 @@ export class DaytonaSandboxSession implements SandboxSession {
         command: "pi",
         cwd: this.options.repoPath,
         metadata: {
+          output_file: input.pi.outputFile,
           package: "@earendil-works/pi-coding-agent",
           tools: input.pi.tools,
           verified_help_version: "0.79.1",
@@ -1239,6 +1241,7 @@ function buildPiRunnerCommand(input: {
   inputContextArtifact: string;
   jobName: string;
   model: string;
+  outputFile: string;
   outputBaseName: string;
   prompt: string;
   provider: "openrouter";
@@ -1271,6 +1274,8 @@ const rawPath = path.join(piDir, config.outputBaseName + ".raw.redacted.txt");
 const stderrPath = path.join(piDir, "stderr.redacted.log");
 const progressPath = path.join(piDir, "progress.jsonl");
 const metadataPath = path.join(piDir, "metadata.json");
+const agentOutputPath = path.resolve(config.repoPath, config.outputFile);
+fs.mkdirSync(path.dirname(agentOutputPath), { recursive: true });
 
 const progressEvents = [];
 const progressPrefix = "__VIBESHIELD_PROGRESS__";
@@ -1300,6 +1305,81 @@ function actorLabel() {
   const role = "collector";
   const attempt = typeof config.attempt === "number" ? " attempt " + config.attempt : "";
   return stage + " " + role + attempt;
+}
+
+function piStepStartMessage(step) {
+  switch (step) {
+    case "coverage-structure":
+      return "Mapping repository coverage and structure.";
+    case "stack-build-deps":
+      return "Collecting stack, build, and dependency facts.";
+    case "entrypoints":
+      return "Collecting externally reachable entrypoints.";
+    case "auth-config-secrets":
+      return "Mapping auth, config, and secret references.";
+    case "storage-integrations-infra":
+      return "Collecting storage, integration, and infrastructure facts.";
+    case "operation-sinks":
+      return "Collecting observable operation sinks.";
+    case "data-flows":
+      return "Tracing bounded entrypoint-to-sink flows.";
+    case "trust-boundaries":
+      return "Synthesizing trust boundaries from accepted map facts.";
+    case "repository-map":
+      return "Assembling the final repository map.";
+    default:
+      return "Running repository-map collection.";
+  }
+}
+
+function piStepDoneMessage(step) {
+  switch (step) {
+    case "coverage-structure":
+      return "Coverage and structure map completed.";
+    case "stack-build-deps":
+      return "Stack, build, and dependency facts completed.";
+    case "entrypoints":
+      return "Entrypoint collection completed.";
+    case "auth-config-secrets":
+      return "Auth, config, and secret-reference map completed.";
+    case "storage-integrations-infra":
+      return "Storage, integration, and infrastructure facts completed.";
+    case "operation-sinks":
+      return "Operation sink inventory completed.";
+    case "data-flows":
+      return "Bounded data-flow tracing completed.";
+    case "trust-boundaries":
+      return "Trust-boundary synthesis completed.";
+    case "repository-map":
+      return "Final repository map assembled.";
+    default:
+      return "Repository-map collection completed.";
+  }
+}
+
+function piStepFailedMessage(step) {
+  switch (step) {
+    case "coverage-structure":
+      return "Coverage and structure mapping failed.";
+    case "stack-build-deps":
+      return "Stack, build, and dependency collection failed.";
+    case "entrypoints":
+      return "Entrypoint collection failed.";
+    case "auth-config-secrets":
+      return "Auth, config, and secret-reference mapping failed.";
+    case "storage-integrations-infra":
+      return "Storage, integration, and infrastructure collection failed.";
+    case "operation-sinks":
+      return "Operation sink collection failed.";
+    case "data-flows":
+      return "Bounded data-flow tracing failed.";
+    case "trust-boundaries":
+      return "Trust-boundary synthesis failed.";
+    case "repository-map":
+      return "Final repository map assembly failed.";
+    default:
+      return "Repository-map collection failed.";
+  }
 }
 
 function compactValue(value, maxLength = 96) {
@@ -1523,6 +1603,10 @@ function runPiJsonStream(command, args) {
   });
 }
 
+const toolArgs = Array.isArray(config.tools) && config.tools.length > 0
+  ? ["--tools", config.tools.join(",")]
+  : [];
+
 const piArgs = [
   "-p",
   "--no-session",
@@ -1531,8 +1615,7 @@ const piArgs = [
   "--no-skills",
   "--no-prompt-templates",
   "--no-themes",
-  "--tools",
-  config.tools.join(","),
+  ...toolArgs,
   "--provider",
   config.provider,
   "--model",
@@ -1544,7 +1627,7 @@ const piArgs = [
   config.prompt,
 ];
 
-emitProgress("runner.started", "Running Pi " + config.step + ".", { step: config.step });
+emitProgress("runner.started", piStepStartMessage(config.step), { step: config.step });
 const usePnpm = commandExists("pnpm");
 const command = usePnpm ? "pnpm" : "npm";
 const args = usePnpm
@@ -1574,30 +1657,40 @@ const version = redact((versionResult.stdout || versionResult.stderr || "").trim
 
 runPiJsonStream(command, args)
   .then((result) => {
-    const stdout = redact(result.finalText || "");
+    let outputText = "";
+    let outputReadError = "";
+    try {
+      outputText = fs.readFileSync(agentOutputPath, "utf8");
+    } catch (error) {
+      outputReadError = error && error.message ? error.message : String(error);
+    }
+    const output = redact(outputText);
     const stderr = redact(result.stderr || (result.error ? result.error.message : ""));
-    fs.writeFileSync(rawPath, stdout);
+    fs.writeFileSync(rawPath, output);
     fs.writeFileSync(stderrPath, stderr);
-    emitProgress(result.status === 0 ? "pi.completed" : "pi.failed", result.status === 0 ? "Pi " + config.step + " completed." : "Pi " + config.step + " exited non-zero.", { signal: result.signal, step: config.step });
+    const completed = result.status === 0 && outputReadError === "";
+    emitProgress(completed ? "pi.completed" : "pi.failed", completed ? piStepDoneMessage(config.step) : piStepFailedMessage(config.step), { signal: result.signal, step: config.step });
     fs.writeFileSync(progressPath, progressEvents.map((event) => JSON.stringify(event)).join("\n") + "\n");
 
     const metadata = {
       input_context_artifact: config.inputContextArtifact,
       invocation: {
-        args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--tools", config.tools.join(","), "--provider", config.provider, "--model", config.model, "--thinking", "low", "--mode", "json", "<prompt>"],
+        args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", ...toolArgs, "--provider", config.provider, "--model", config.model, "--thinking", "low", "--mode", "json", "<prompt>"],
         command,
         cwd: config.repoPath,
-        metadata: { tools: config.tools },
+        metadata: { output_file: config.outputFile, tools: config.tools },
         provider: config.provider,
       },
       model: config.model,
+      output_bytes: Buffer.byteLength(output, "utf8"),
+      output_file: config.outputFile,
+      output_read_error: outputReadError,
       pi_exit_code: result.status,
       prompt_bytes: Buffer.byteLength(config.prompt, "utf8"),
       provider: config.provider,
       raw_jsonl_bytes: result.rawJsonlBytes,
       runner_package: "@earendil-works/pi-coding-agent",
       stderr_bytes: Buffer.byteLength(stderr, "utf8"),
-      stdout_bytes: Buffer.byteLength(stdout, "utf8"),
       step: config.step,
       version,
     };
@@ -1610,20 +1703,25 @@ runPiJsonStream(command, args)
         { relativePath: "pi/" + config.artifactSubdir + "/progress.jsonl", sandboxPath: progressPath },
         { relativePath: "pi/" + config.artifactSubdir + "/metadata.json", sandboxPath: metadataPath },
       ],
-      diagnostics: result.status === 0 ? [] : ["Pi exited with code " + result.status + "."],
-      exitCode: result.status,
+      diagnostics: completed
+        ? []
+        : [
+            ...(result.status === 0 ? [] : ["Pi exited with code " + result.status + "."]),
+            ...(outputReadError === "" ? [] : ["Pi did not write output file " + config.outputFile + ": " + redact(outputReadError)]),
+          ],
+      exitCode: completed ? result.status : result.status === 0 ? 1 : result.status,
       finishedAt: new Date().toISOString(),
       invocation: metadata.invocation,
       kind: "pi-repository-mapping",
       metadata,
       observations: [],
       startedAt,
-      status: result.status === 0 ? "completed" : "failed",
+      status: completed ? "completed" : "failed",
       ...(version ? { version } : {}),
     };
 
-    if (result.status !== 0) {
-      process.exitCode = result.status ?? 1;
+    if (!completed) {
+      process.exitCode = result.status === 0 ? 1 : result.status ?? 1;
     }
 
     process.stdout.write(JSON.stringify(runtimeResult));
@@ -1648,6 +1746,7 @@ runPiJsonStream(command, args)
       inputContextArtifact: input.inputContextArtifact,
       jobName: input.jobName,
       model: input.model,
+      outputFile: input.outputFile,
       outputBaseName: input.outputBaseName,
       prompt: input.prompt,
       provider: input.provider,

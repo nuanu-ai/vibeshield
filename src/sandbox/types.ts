@@ -79,6 +79,7 @@ export interface RuntimeJobInput {
     contextPack: unknown;
     inputContextArtifact: string;
     model: string;
+    outputFile: string;
     outputBaseName: string;
     prompt: string;
     provider: "openrouter";
