@@ -860,7 +860,6 @@ function needsBlankLineBefore(line: string): boolean {
 
 function formatArtifactLinks(run: ScanRunState): string[] {
   const artifacts = [
-    run.artifacts.inventory_legacy,
     run.artifacts.inventory,
     run.artifacts.baseline_tool_availability,
     run.artifacts.baseline_summary,

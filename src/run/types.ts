@@ -54,7 +54,6 @@ export interface ScanRunState {
     };
     events: string;
     inventory?: string;
-    inventory_legacy?: string;
     outputs_dir: string;
     pi_context_pack?: string;
     report?: string;

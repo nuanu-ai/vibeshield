@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, copyFile, readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   BaselineSummaryArtifact,
@@ -189,7 +189,6 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   const eventsPath = path.join(runDir, "events.jsonl");
   const reportPath = path.join(runDir, "report.md");
   const inventoryPath = path.join(outputsDir, "inventory.json");
-  const legacyInventoryPath = path.join(outputsDir, "repo-inventory.json");
   const store = new ArtifactStore(runDir, outputsDir);
 
   await ensureDirectory(outputsDir);
@@ -293,9 +292,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
       artifact: inventoryArtifact.relativePath,
       stage: "inventory",
     });
-    await copyFile(inventoryPath, legacyInventoryPath);
     run.artifacts.inventory = relativeArtifactPath(runDir, inventoryPath);
-    run.artifacts.inventory_legacy = relativeArtifactPath(runDir, legacyInventoryPath);
     store.register({
       id: "inventory",
       kind: "inventory",
@@ -410,18 +407,22 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
       generatedAt: new Date().toISOString(),
       inventory,
       onJobFinished: async (jobState) => {
-        piStep.jobs.push(jobState);
+        upsertRunJob(piStep, jobState);
         await persistRun();
       },
-      onProgress: (event) =>
-        appendEvent({
+      onProgress: async (event) => {
+        if (event.job !== undefined && ensureRunningRunJob(piStep, event.job)) {
+          await persistRun();
+        }
+        await appendEvent({
           ...(event.details === undefined ? {} : { details: event.details }),
           job: event.job,
           message: event.message,
           sandbox_id: activeSandbox.id,
           stage: "pi",
           type: event.type,
-        }),
+        });
+      },
       outputsDir,
       runDir,
       sandbox,
@@ -542,7 +543,6 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
   const eventsPath = path.join(runDir, "events.jsonl");
   const reportPath = path.join(runDir, "report.md");
   const inventoryPath = path.join(outputsDir, "inventory.json");
-  const legacyInventoryPath = path.join(outputsDir, "repo-inventory.json");
   const sandboxProvider = options.sandboxProvider ?? createDefaultSandboxProvider();
   const store = new ArtifactStore(runDir, outputsDir);
 
@@ -682,9 +682,7 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
         artifact: inventoryArtifact.relativePath,
         stage: "inventory",
       });
-      await copyFile(inventoryPath, legacyInventoryPath);
       run.artifacts.inventory = relativeArtifactPath(runDir, inventoryPath);
-      run.artifacts.inventory_legacy = relativeArtifactPath(runDir, legacyInventoryPath);
       store.register({
         id: "inventory",
         kind: "inventory",
@@ -816,18 +814,22 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
         generatedAt: new Date().toISOString(),
         inventory,
         onJobFinished: async (jobState) => {
-          piStep.jobs.push(jobState);
+          upsertRunJob(piStep, jobState);
           await persistRun();
         },
-        onProgress: (event) =>
-          appendEvent({
+        onProgress: async (event) => {
+          if (event.job !== undefined && ensureRunningRunJob(piStep, event.job)) {
+            await persistRun();
+          }
+          await appendEvent({
             ...(event.details === undefined ? {} : { details: event.details }),
             job: event.job,
             message: event.message,
             sandbox_id: activeSandbox.id,
             stage: "pi",
             type: event.type,
-          }),
+          });
+        },
         outputsDir,
         runDir,
         sandbox,
@@ -1242,6 +1244,39 @@ function markRunningStepFailed(run: ScanRunState, failure: ScanStageError): void
   runningStep.finished_at = new Date().toISOString();
   runningStep.diagnostics =
     failure.diagnostics.length > 0 ? failure.diagnostics : [failure.message];
+  for (const job of runningStep.jobs) {
+    if (job.status !== "running") {
+      continue;
+    }
+    job.status = "failed";
+    job.finished_at = runningStep.finished_at;
+    job.diagnostics = runningStep.diagnostics;
+  }
+}
+
+function ensureRunningRunJob(step: RunStepState, jobName: string): boolean {
+  if (step.jobs.some((job) => job.name === jobName)) {
+    return false;
+  }
+
+  step.jobs.push({
+    artifacts: [],
+    diagnostics: [],
+    name: jobName,
+    observations: 0,
+    started_at: new Date().toISOString(),
+    status: "running",
+  });
+  return true;
+}
+
+function upsertRunJob(step: RunStepState, jobState: RunJobState): void {
+  const existingIndex = step.jobs.findIndex((job) => job.name === jobState.name);
+  if (existingIndex === -1) {
+    step.jobs.push(jobState);
+    return;
+  }
+  step.jobs[existingIndex] = jobState;
 }
 
 function syncKnownArtifacts(run: ScanRunState, store: ArtifactStore): void {

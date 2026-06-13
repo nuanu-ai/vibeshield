@@ -125,19 +125,6 @@ export interface ToolAvailabilityArtifact {
 }
 
 export interface PiContextPackArtifact {
-  budget: {
-    max_auth_config_secrets?: number;
-    max_coverage_structure?: number;
-    max_data_flows: number;
-    max_entry_points?: number;
-    max_entrypoints?: number;
-    max_fact_gaps: number;
-    max_important_files: number;
-    max_operation_sinks?: number;
-    max_stack_build_deps?: number;
-    max_storage_integrations_infra?: number;
-    max_trust_boundaries?: number;
-  };
   inventory: {
     candidate_entrypoints: string[];
     env_and_config_candidates: string[];

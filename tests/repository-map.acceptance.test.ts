@@ -338,7 +338,7 @@ describe("AppSec repository map acceptance", () => {
     });
 
     expect(contextPath).toBe("outputs/pi-context-pack.json");
-    expect(Object.keys(contextPack).sort()).toEqual(["budget", "inventory", "repo"]);
+    expect(Object.keys(contextPack).sort()).toEqual(["inventory", "repo"]);
     expect(JSON.stringify(contextPack)).not.toContain("sk-test-secret-value");
     expect(JSON.stringify(contextPack)).not.toContain("raw-scanner-dump");
     expect(JSON.stringify(contextPack)).not.toContain("baseline-summary");
@@ -359,11 +359,11 @@ describe("AppSec repository map acceptance", () => {
     const { provider } = await createProvider({
       piOutputs: {
         "data-flows": () =>
-          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithUnknownIds(),
+          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithInvalidSchema(),
         "repo-map-data-flows": () =>
-          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithUnknownIds(),
+          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithInvalidSchema(),
         "repo-map/data-flows": () =>
-          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithUnknownIds(),
+          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithInvalidSchema(),
       },
     });
     const runsRoot = await createTempRoot("vibeshield-runs-");
@@ -736,12 +736,18 @@ function minimalRepoMapOutputs(): NonNullable<
       },
     },
     entrypoints: { ...minimalSection("entrypoints"), entrypoints: [] },
-    "operation-sinks": { ...minimalSection("operation-sinks"), sinks: [] },
+    "operation-sinks": { ...minimalSection("operation-sinks"), operation_sinks: [], sinks: [] },
     "repository-map": minimalMap,
-    "stack-build-deps": minimalSection("stack-build-deps"),
+    "stack-build-deps": {
+      ...minimalSection("stack-build-deps"),
+      build: { commands: [], lockfiles: [], manifests: [] },
+      dependencies: [],
+      stack: [],
+    },
     "storage-integrations-infra": {
       ...minimalSection("storage-integrations-infra"),
       ci: [],
+      infra: [],
       infrastructure: [],
       integrations: [],
       storage: [],
@@ -751,7 +757,7 @@ function minimalRepoMapOutputs(): NonNullable<
 }
 
 function minimalSection(kind: string) {
-  return {
+  const section = {
     coverage: {
       not_covered: [],
       reviewed: [{ area: "Minimal fixture", evidence: ["README.md:1"] }],
@@ -762,6 +768,7 @@ function minimalSection(kind: string) {
     metadata: fakeRepoMapMetadata(kind),
     repo: { commit_sha: "abc123", url: minimalFixtureUrl },
   };
+  return kind === "coverage-structure" ? { ...section, repository_structure: [] } : section;
 }
 
 function fakeInventory(): InventoryArtifact {
@@ -1250,17 +1257,9 @@ function fakeRepoMapDataFlows(): DataFlowsArtifact {
   };
 }
 
-function fakeRepoMapDataFlowsWithUnknownIds(): DataFlowsArtifact {
+function fakeRepoMapDataFlowsWithInvalidSchema(): unknown {
   const artifact = fakeRepoMapDataFlows();
-  const firstFlow = artifact.flows[0];
-  if (firstFlow === undefined) {
-    throw new Error("Expected fake data-flow fixture to contain one flow.");
-  }
-  artifact.flows[0] = {
-    ...firstFlow,
-    operation_sink: "sink-invented",
-    source_entrypoint: "entry-invented",
-  };
+  (artifact as unknown as Record<string, unknown>).flows = "invalid";
   return artifact;
 }
 

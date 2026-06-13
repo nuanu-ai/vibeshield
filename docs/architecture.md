@@ -40,7 +40,6 @@ vibeshield scan <github-url>
   -> build Pi context pack
        -> compact repo/inventory facts
        -> baseline summary signal
-       -> budget limits
        -> no raw scanner output/debug noise
 
   -> facts-only AppSec repository map
@@ -95,8 +94,7 @@ The context pack includes:
 
 - repository URL and commit SHA;
 - inventory summaries, language/LOC summary, and candidate paths;
-- baseline summary signal;
-- budget limits for Pi artifacts.
+- baseline summary signal.
 
 ## Repository Map Pipeline
 
@@ -154,8 +152,8 @@ collector Pi
   -> write final artifact
 ```
 
-The deterministic validator only checks JSON/schema/shape and budgets. It does
-not try to prove whether a claim is semantically correct.
+The deterministic validator only checks JSON/schema/shape. It does not try to
+prove whether a claim is semantically correct.
 
 There is no semantic evaluator loop in the current implementation. A Pi job is:
 collector run -> deterministic validation -> accepted artifact or failed run.

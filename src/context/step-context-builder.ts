@@ -20,12 +20,8 @@ type RepositoryMapPiContextPackArtifact = PiContextPackArtifact & {
   };
 };
 
-const contextBudget = {
-  max_data_flows: 60,
-  max_entry_points: 50,
-  max_fact_gaps: 10,
-  max_important_files: 20,
-  max_operation_sinks: 80,
+const contextLimits = {
+  envAndConfigCandidates: 20,
 } as const;
 
 const sourceFileExtensions = new Set([
@@ -155,7 +151,7 @@ export async function buildPiContextPack(
     .map((file) => file.path)
     .filter(isEnvOrConfigCandidate)
     .sort((left, right) => left.localeCompare(right))
-    .slice(0, contextBudget.max_important_files);
+    .slice(0, contextLimits.envAndConfigCandidates);
   const entrypointCandidates = candidateEntrypoints(input.inventory).slice(0, 30);
   const authConfigSecretFiles = candidateFilesByKeywords(input.inventory, [
     ".env",
@@ -226,7 +222,6 @@ export async function buildPiContextPack(
   ]).slice(0, 60);
 
   const contextPack: RepositoryMapPiContextPackArtifact = {
-    budget: contextBudget,
     inventory: {
       candidate_entrypoints: entrypointCandidates,
       candidate_groups: {

@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type {
-  InventoryArtifact,
-  PiContextPackArtifact,
-  StackBuildDepsArtifact,
-} from "../src/artifacts/contracts.js";
+import type { StackBuildDepsArtifact } from "../src/artifacts/contracts.js";
 import { validateStackBuildDepsArtifact } from "../src/pi/repository-map.js";
 
 describe("repo-map validation", () => {
-  it("accepts fact gaps without invented evidence", () => {
+  it("accepts a valid stack/build/deps schema without evidence policing", () => {
     expect(() =>
       validateStackBuildDepsArtifact({
         artifact: {
@@ -49,45 +45,10 @@ describe("repo-map validation", () => {
             },
           ],
         },
-        budget: fakeBudget(),
-        inventory: fakeInventory(),
       }),
     ).not.toThrow();
   });
 });
-
-function fakeInventory(): InventoryArtifact {
-  return {
-    directories: [],
-    files: [{ line_count: 1, path: "requirements.txt", size_bytes: 10, type: "file" }],
-    generated_at: "2026-06-13T00:00:00.000Z",
-    generated_by: "vibeshield-inventory",
-    kind: "inventory",
-    sandbox: { id: "sandbox", inventory_location: "inside_sandbox" },
-    source: {
-      commit_sha: "abc123",
-      owner: "example",
-      repo: "repo",
-      type: "github",
-      url: "https://github.com/example/repo",
-    },
-    summary: {
-      directory_count: 0,
-      file_count: 1,
-      manifest_files: ["requirements.txt"],
-      total_file_bytes: 10,
-    },
-  };
-}
-
-function fakeBudget(): PiContextPackArtifact["budget"] {
-  return {
-    max_data_flows: 10,
-    max_fact_gaps: 10,
-    max_important_files: 10,
-    max_stack_build_deps: 10,
-  };
-}
 
 function fakeMetadata(step: string): StackBuildDepsArtifact["metadata"] {
   return {

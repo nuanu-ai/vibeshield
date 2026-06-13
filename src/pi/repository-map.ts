@@ -8,7 +8,6 @@ import type {
   InventoryArtifact,
   OperationSinksArtifact,
   PiContextPackArtifact,
-  PiRepositoryMapArtifactKind,
   RepositoryMapArtifact,
   StackBuildDepsArtifact,
   StorageIntegrationsInfraArtifact,
@@ -17,7 +16,7 @@ import type {
 import type { ArtifactStore } from "../artifacts/store.js";
 import { errorMessage, ScanStageError } from "../run/errors.js";
 import { relativeArtifactPath } from "../run/file-io.js";
-import { containsSecretLikeValue, redactDeep } from "../run/redaction.js";
+import { redactDeep } from "../run/redaction.js";
 import type { RunJobState, RunStage } from "../run/types.js";
 import type {
   RuntimeJobProgressEvent,
@@ -161,12 +160,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "coverage-structure",
       prompt: buildCoverageStructurePrompt(input.contextPack),
       step: "coverage-structure",
-      validateSchema: (artifact) =>
-        validateCoverageStructureArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          inventory: input.inventory,
-        }),
+      validateSchema: (artifact) => validateCoverageStructureArtifact({ artifact }),
       validationStage: "coverage-structure-validation",
     }));
 
@@ -184,12 +178,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "stack-build-deps",
       prompt: buildStackBuildDepsPrompt(input.contextPack),
       step: "stack-build-deps",
-      validateSchema: (artifact) =>
-        validateStackBuildDepsArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          inventory: input.inventory,
-        }),
+      validateSchema: (artifact) => validateStackBuildDepsArtifact({ artifact }),
       validationStage: "stack-build-deps-validation",
     }));
 
@@ -207,17 +196,11 @@ export async function runPiRepositoryMapping(
       outputBaseName: "entrypoints",
       prompt: buildEntrypointsPrompt(input.contextPack),
       step: "entrypoints",
-      validateSchema: (artifact) =>
-        validateEntrypointsArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          inventory: input.inventory,
-        }),
+      validateSchema: (artifact) => validateEntrypointsArtifact({ artifact }),
       validationStage: "entrypoints-validation",
     }));
 
   const authConfigContext = {
-    budget: input.contextPack.budget,
     inputs: {
       entrypoints: entrypoints.artifact,
     },
@@ -238,12 +221,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "auth-config-secrets",
       prompt: buildAuthConfigSecretsPrompt(authConfigContext),
       step: "auth-config-secrets",
-      validateSchema: (artifact) =>
-        validateAuthConfigSecretsArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          inventory: input.inventory,
-        }),
+      validateSchema: (artifact) => validateAuthConfigSecretsArtifact({ artifact }),
       validationStage: "auth-config-secrets-validation",
     }));
 
@@ -261,12 +239,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "storage-integrations-infra",
       prompt: buildStorageIntegrationsInfraPrompt(input.contextPack),
       step: "storage-integrations-infra",
-      validateSchema: (artifact) =>
-        validateStorageIntegrationsInfraArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          inventory: input.inventory,
-        }),
+      validateSchema: (artifact) => validateStorageIntegrationsInfraArtifact({ artifact }),
       validationStage: "storage-integrations-infra-validation",
     }));
 
@@ -284,17 +257,11 @@ export async function runPiRepositoryMapping(
       outputBaseName: "operation-sinks",
       prompt: buildOperationSinksPrompt(input.contextPack),
       step: "operation-sinks",
-      validateSchema: (artifact) =>
-        validateOperationSinksArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          inventory: input.inventory,
-        }),
+      validateSchema: (artifact) => validateOperationSinksArtifact({ artifact }),
       validationStage: "operation-sinks-validation",
     }));
 
   const dataFlowContext = {
-    budget: input.contextPack.budget,
     inputs: {
       entrypoints: entrypoints.artifact,
       operation_sinks: operationSinks.artifact,
@@ -315,14 +282,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "data-flows",
       prompt: buildDataFlowsPrompt(dataFlowContext),
       step: "data-flows",
-      validateSchema: (artifact) =>
-        validateDataFlowsArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          entrypoints: entrypoints.artifact,
-          inventory: input.inventory,
-          operationSinks: operationSinks.artifact,
-        }),
+      validateSchema: (artifact) => validateDataFlowsArtifact({ artifact }),
       validationStage: "data-flows-validation",
     }));
 
@@ -359,12 +319,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "trust-boundaries",
       prompt: buildTrustBoundariesPrompt(priorMapArtifacts),
       step: "trust-boundaries",
-      validateSchema: (artifact) =>
-        validateTrustBoundariesArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          inventory: input.inventory,
-        }),
+      validateSchema: (artifact) => validateTrustBoundariesArtifact({ artifact }),
       validationStage: "trust-boundaries-validation",
     }));
 
@@ -405,12 +360,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "repository-map",
       prompt: buildRepositoryMapPrompt(repositoryMapContext),
       step: "repository-map",
-      validateSchema: (artifact) =>
-        validateRepositoryMapArtifact({
-          artifact,
-          budget: input.contextPack.budget,
-          inventory: input.inventory,
-        }),
+      validateSchema: (artifact) => validateRepositoryMapArtifact({ artifact }),
       validationStage: "repository-map-validation",
     }));
 
@@ -440,29 +390,32 @@ export async function runPiRepositoryMapping(
 async function runPiStage<TArtifact extends PiStructuredArtifact>(
   stage: PiStageInput<TArtifact>,
 ): Promise<PiStageResult<TArtifact>> {
-  const result = await stage.input.sandbox.runJob({
-    generatedAt: stage.generatedAt,
-    kind: "pi-repository-mapping",
-    name: stage.jobName,
-    ...(stage.input.onProgress === undefined ? {} : { onProgress: stage.input.onProgress }),
-    pi: {
-      artifactSubdir: stage.outputBaseName,
-      attempt: 1,
-      contextPack: stage.contextPack,
-      inputContextArtifact: stage.contextArtifactLabel,
-      model: defaultPiModel,
-      outputFile: piAgentOutputFile(stage.outputBaseName),
-      outputBaseName: stage.outputBaseName,
-      prompt: withPiOutputFileInstruction({
+  const heartbeat = startPiStageHeartbeat(stage);
+  const result = await stage.input.sandbox
+    .runJob({
+      generatedAt: stage.generatedAt,
+      kind: "pi-repository-mapping",
+      name: stage.jobName,
+      ...(stage.input.onProgress === undefined ? {} : { onProgress: stage.input.onProgress }),
+      pi: {
+        artifactSubdir: stage.outputBaseName,
+        attempt: 1,
+        contextPack: stage.contextPack,
+        inputContextArtifact: stage.contextArtifactLabel,
+        model: defaultPiModel,
         outputFile: piAgentOutputFile(stage.outputBaseName),
-        prompt: stage.prompt,
-      }),
-      provider: defaultPiProvider,
-      step: stage.step,
-      tools: stage.tools ?? collectorTools,
-    },
-    stage: "pi",
-  });
+        outputBaseName: stage.outputBaseName,
+        prompt: withPiOutputFileInstruction({
+          outputFile: piAgentOutputFile(stage.outputBaseName),
+          prompt: stage.prompt,
+        }),
+        provider: defaultPiProvider,
+        step: stage.step,
+        tools: stage.tools ?? collectorTools,
+      },
+      stage: "pi",
+    })
+    .finally(() => heartbeat.stop());
 
   const artifactPaths = await pullRuntimeArtifacts({
     jobName: stage.jobName,
@@ -504,6 +457,36 @@ async function runPiStage<TArtifact extends PiStructuredArtifact>(
     await stage.input.onJobFinished?.(jobState);
     throw error;
   }
+}
+
+function startPiStageHeartbeat<TArtifact extends PiStructuredArtifact>(
+  stage: PiStageInput<TArtifact>,
+): { stop: () => Promise<void> } {
+  if (stage.input.onProgress === undefined) {
+    return { stop: async () => undefined };
+  }
+
+  let progressQueue: Promise<unknown> = Promise.resolve();
+  const timer = setInterval(() => {
+    progressQueue = progressQueue.then(() =>
+      Promise.resolve(
+        stage.input.onProgress?.({
+          details: { heartbeat_source: "host", step: stage.step },
+          job: stage.jobName,
+          message: `${stage.step} collector: still running in Daytona sandbox.`,
+          type: "pi.host.heartbeat",
+        }),
+      ).catch(() => undefined),
+    );
+  }, 60_000);
+  timer.unref();
+
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      await progressQueue;
+    },
+  };
 }
 
 function piHandoffArtifact(artifact: PiStructuredArtifact): unknown {
@@ -592,485 +575,102 @@ async function readPiStructuredArtifact<TArtifact extends PiStructuredArtifact>(
 
 export function validateCoverageStructureArtifact(input: {
   artifact: CoverageStructureArtifact;
-  budget: PiContextPackArtifact["budget"];
-  inventory: InventoryArtifact;
 }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "coverage-structure", errors);
-
-  const repositoryStructure = optionalArrayField(artifact, "repository_structure");
-  const coverageTargets = optionalArrayField(artifact, "coverage_targets");
-  const importantFiles = optionalArrayField(artifact, "important_files");
-  const topLevelTree = optionalArrayField(artifact, "top_level_tree");
-  const reviewedDirectories = optionalArrayField(artifact, "reviewed_directories");
-  const excludedDirectories = optionalArrayField(artifact, "excluded_directories");
-  const accessGaps = optionalArrayField(artifact, "access_gaps");
-  checkBudget(
-    "coverage-structure records",
-    repositoryStructure.length +
-      coverageTargets.length +
-      topLevelTree.length +
-      reviewedDirectories.length +
-      excludedDirectories.length +
-      accessGaps.length,
-    budgetLimit(input.budget, ["max_coverage_structure"], input.budget.max_important_files * 2),
-    errors,
-  );
-  checkBudget("important_files", importantFiles.length, input.budget.max_important_files, errors);
-
-  validateEvidenceBackedRecords("repository_structure", repositoryStructure, errors, ["path"]);
-  validateEvidenceBackedRecords("coverage_targets", coverageTargets, errors, ["area", "reason"]);
-  validateEvidenceBackedRecords("important_files", importantFiles, errors, ["path", "reason"]);
-  validateEvidenceBackedRecords("top_level_tree", topLevelTree, errors, ["path"]);
-  validateEvidenceBackedRecords("reviewed_directories", reviewedDirectories, errors, ["path"]);
-  validateEvidenceBackedRecords(
-    "excluded_directories",
-    excludedDirectories,
-    errors,
-    ["path", "reason"],
-    { allowEmptyEvidence: true },
-  );
-  validateEvidenceBackedRecords("access_gaps", accessGaps, errors, ["area", "reason"], {
-    allowEmptyEvidence: true,
-  });
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectCoverageStructureEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireArrayProperty(artifact, "repository_structure", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
-export function validateStackBuildDepsArtifact(input: {
-  artifact: StackBuildDepsArtifact;
-  budget: PiContextPackArtifact["budget"];
-  inventory: InventoryArtifact;
-}): void {
+export function validateStackBuildDepsArtifact(input: { artifact: StackBuildDepsArtifact }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "stack-build-deps", errors);
-
-  const stack = [
-    ...optionalArrayField(artifact, "stack"),
-    ...optionalArrayField(artifact, "languages"),
-    ...optionalArrayField(artifact, "runtimes"),
-    ...optionalArrayField(artifact, "package_managers"),
-  ];
-  const dependencies = optionalArrayField(artifact, "dependencies");
-  const rawBuild = (artifact as unknown as Record<string, unknown>).build;
-  const commands = Array.isArray(rawBuild)
-    ? rawBuild
-    : optionalArrayField(rawBuild ?? {}, "commands");
-  const manifests = optionalArrayField(artifact.build ?? {}, "manifests");
-  const lockfiles = optionalArrayField(artifact.build ?? {}, "lockfiles");
-  const ci = optionalArrayField(artifact, "ci");
-  checkBudget(
-    "stack-build-deps records",
-    stack.length + dependencies.length + commands.length + ci.length,
-    budgetLimit(input.budget, ["max_stack_build_deps"], input.budget.max_important_files * 2),
-    errors,
-  );
-
-  checkUniqueIds("stack", stack, errors);
-  checkUniqueIds("dependencies", dependencies, errors);
-  checkUniqueIds("build.commands", commands, errors);
-  checkUniqueIds("ci", ci, errors);
-  validateEvidenceBackedRecords("stack", stack, errors, []);
-  validateEvidenceBackedRecords("dependencies", dependencies, errors, []);
-  validateEvidenceBackedRecords("build.commands", commands, errors, []);
-  validateEvidenceBackedRecords("build.manifests", manifests, errors, ["path"]);
-  validateEvidenceBackedRecords("build.lockfiles", lockfiles, errors, ["path"]);
-  validateEvidenceBackedRecords("ci", ci, errors, []);
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectStackBuildDepsEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireArrayProperty(artifact, "stack", errors);
+  requireArrayProperty(artifact, "dependencies", errors);
+  requireObjectProperty(artifact, "build", errors);
+  requireArrayProperty(artifact.build, "commands", errors);
+  requireArrayProperty(artifact.build, "manifests", errors);
+  requireArrayProperty(artifact.build, "lockfiles", errors);
+  requireOptionalArrayProperty(artifact, "ci", errors);
+  requireOptionalArrayProperty(artifact, "dependency_notes", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
-export function validateEntrypointsArtifact(input: {
-  artifact: EntrypointsArtifact;
-  budget: PiContextPackArtifact["budget"];
-  inventory: InventoryArtifact;
-}): void {
+export function validateEntrypointsArtifact(input: { artifact: EntrypointsArtifact }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "entrypoints", errors);
-
-  const entrypoints = arrayField(artifact, "entrypoints", errors);
-  checkBudget(
-    "entrypoints",
-    entrypoints.length,
-    budgetLimit(input.budget, ["max_entrypoints", "max_entry_points"], 50),
-    errors,
-  );
-  checkUniqueIds("entrypoints", entrypoints, errors);
-  validateEvidenceBackedRecords("entrypoints", entrypoints, errors, ["id", "kind"]);
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectEntrypointsEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireArrayProperty(artifact, "entrypoints", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
 export function validateAuthConfigSecretsArtifact(input: {
   artifact: AuthConfigSecretsArtifact;
-  budget: PiContextPackArtifact["budget"];
-  inventory: InventoryArtifact;
 }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "auth-config-secrets", errors);
-
-  const auth = optionalArrayField(artifact, "auth");
-  const config = optionalArrayField(artifact, "config");
-  const secretReferences = [
-    ...optionalArrayField(artifact, "secret_references"),
-    ...optionalArrayField(artifact, "secret_locations"),
-  ];
-  const entrypointAccess = optionalArrayField(artifact, "entrypoint_access");
-  checkBudget(
-    "auth-config-secrets records",
-    auth.length + config.length + secretReferences.length + entrypointAccess.length,
-    budgetLimit(input.budget, ["max_auth_config_secrets"], input.budget.max_important_files * 2),
-    errors,
-  );
-  checkUniqueIds("auth", auth, errors);
-  checkUniqueIds("config", config, errors);
-  checkUniqueIds("secret_references", secretReferences, errors);
-  validateEvidenceBackedRecords("auth", auth, errors, ["id"]);
-  validateEvidenceBackedRecords("config", config, errors, ["id"]);
-  validateEvidenceBackedRecords("secret_references", secretReferences, errors, ["id"]);
-  validateEvidenceBackedRecords("entrypoint_access", entrypointAccess, errors, [
-    "entrypoint_id",
-    "status",
-  ]);
-  const allowedAccessStatuses = new Set(["protected", "public", "unknown"]);
-  for (const access of entrypointAccess) {
-    if (!allowedAccessStatuses.has(String(access.status))) {
-      errors.push(`entrypoint_access.${String(access.entrypoint_id ?? "")} has invalid status.`);
-    }
-  }
-  for (const secretReference of secretReferences) {
-    if (secretReference.value_redacted !== undefined && secretReference.value_redacted !== true) {
-      errors.push(`secret_references.${String(secretReference.id)} must set value_redacted true.`);
-    }
-  }
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectAuthConfigSecretsEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireArrayProperty(artifact, "auth", errors);
+  requireArrayProperty(artifact, "config", errors);
+  requireOptionalArrayProperty(artifact, "entrypoint_access", errors);
+  requireOptionalArrayProperty(artifact, "secret_locations", errors);
+  requireOptionalArrayProperty(artifact, "secret_references", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
 export function validateStorageIntegrationsInfraArtifact(input: {
   artifact: StorageIntegrationsInfraArtifact;
-  budget: PiContextPackArtifact["budget"];
-  inventory: InventoryArtifact;
 }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "storage-integrations-infra", errors);
-
-  const storage = optionalArrayField(artifact, "storage");
-  const integrations = optionalArrayField(artifact, "integrations");
-  const explicitInfra = optionalArrayField(artifact, "infra");
-  const infra =
-    explicitInfra.length > 0 ? explicitInfra : optionalArrayField(artifact, "infrastructure");
-  const ci = optionalArrayField(artifact, "ci");
-  checkBudget(
-    "storage-integrations-infra records",
-    storage.length + integrations.length + infra.length + ci.length,
-    budgetLimit(
-      input.budget,
-      ["max_storage_integrations_infra"],
-      input.budget.max_important_files * 2,
-    ),
-    errors,
-  );
-  checkUniqueIds("storage", storage, errors);
-  checkUniqueIds("integrations", integrations, errors);
-  checkUniqueIds("infra", infra, errors);
-  checkUniqueIds("ci", ci, errors);
-  validateEvidenceBackedRecords("storage", storage, errors, ["id"]);
-  validateEvidenceBackedRecords("integrations", integrations, errors, ["id"]);
-  validateEvidenceBackedRecords("infra", infra, errors, ["id"]);
-  validateEvidenceBackedRecords("ci", ci, errors, ["id"]);
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectStorageIntegrationsInfraEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireArrayProperty(artifact, "storage", errors);
+  requireArrayProperty(artifact, "integrations", errors);
+  requireArrayProperty(artifact, "infra", errors);
+  requireOptionalArrayProperty(artifact, "ci", errors);
+  requireOptionalArrayProperty(artifact, "infrastructure", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
-export function validateOperationSinksArtifact(input: {
-  artifact: OperationSinksArtifact;
-  budget: PiContextPackArtifact["budget"];
-  inventory: InventoryArtifact;
-}): void {
+export function validateOperationSinksArtifact(input: { artifact: OperationSinksArtifact }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "operation-sinks", errors);
-
-  const operationSinks = operationSinkRecords(artifact);
-  checkBudget(
-    "operation_sinks",
-    operationSinks.length,
-    budgetLimit(input.budget, ["max_operation_sinks"], 60),
-    errors,
-  );
-  checkUniqueIds("operation_sinks", operationSinks, errors);
-  validateEvidenceBackedRecords("operation_sinks", operationSinks, errors, [
-    "id",
-    "kind",
-    "operation",
-  ]);
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectOperationSinksEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireArrayProperty(artifact, "operation_sinks", errors);
+  requireOptionalArrayProperty(artifact, "sinks", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
-export function validateDataFlowsArtifact(input: {
-  artifact: DataFlowsArtifact;
-  budget: PiContextPackArtifact["budget"];
-  entrypoints: EntrypointsArtifact;
-  inventory: InventoryArtifact;
-  operationSinks: OperationSinksArtifact;
-}): void {
-  canonicalizeDataFlowTraceStatuses(input.artifact);
+export function validateDataFlowsArtifact(input: { artifact: DataFlowsArtifact }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "data-flows", errors);
-
-  const flows = arrayField(artifact, "flows", errors);
-  checkBudget("flows", flows.length, input.budget.max_data_flows, errors);
-  checkUniqueIds("flows", flows, errors);
-  if (artifact.inputs?.entrypoints_artifact !== repoMapPaths.entrypoints) {
-    errors.push("data-flows inputs.entrypoints_artifact is invalid.");
-  }
-  if (artifact.inputs?.operation_sinks_artifact !== repoMapPaths.operationSinks) {
-    errors.push("data-flows inputs.operation_sinks_artifact is invalid.");
-  }
-
-  const entrypointIds = new Set(input.entrypoints.entrypoints.map((entrypoint) => entrypoint.id));
-  const operationSinkIds = new Set(
-    operationSinkRecords(input.operationSinks).map((operationSink) => operationSink.id),
-  );
-  const statuses = new Set([
-    "direct observed",
-    "multi-step inferred",
-    "not established",
-    "not traced beyond path:line",
-  ]);
-
-  for (const flow of flows) {
-    requireString(flow, "id", "flows", errors);
-    const sourceEntrypoint = stringField(flow, "source_entrypoint", "source_entrypoint_id");
-    const operationSink = stringField(flow, "operation_sink", "sink_id");
-    if (sourceEntrypoint === undefined) {
-      errors.push(`flows.${String(flow.id)} must include source_entrypoint.`);
-    }
-    if (operationSink === undefined) {
-      errors.push(`flows.${String(flow.id)} must include operation_sink.`);
-    }
-    if ("inference" in flow && typeof (flow as Record<string, unknown>).inference !== "boolean") {
-      errors.push(`flows.${String(flow.id)}.inference must be a boolean.`);
-    }
-    if (sourceEntrypoint !== undefined && !entrypointIds.has(sourceEntrypoint)) {
-      errors.push(`flows.${String(flow.id)} references unknown source_entrypoint.`);
-    }
-    if (operationSink !== undefined && !operationSinkIds.has(operationSink)) {
-      errors.push(`flows.${String(flow.id)} references unknown operation_sink.`);
-    }
-    if (!statuses.has(String(flow.trace_status))) {
-      errors.push(`flows.${String(flow.id)} has invalid trace_status.`);
-    }
-    requireEvidenceList(flow.source_evidence, `flows.${String(flow.id)}.source_evidence`, errors);
-    const operationEvidence =
-      (flow as Record<string, unknown>).operation_sink_evidence ??
-      (flow as Record<string, unknown>).sink_evidence;
-    requireEvidenceList(
-      operationEvidence,
-      `flows.${String(flow.id)}.operation_sink_evidence`,
-      errors,
-    );
-    const intermediateFunctions = [
-      ...optionalArrayField(flow, "intermediate_functions"),
-      ...optionalArrayField(flow, "steps"),
-    ];
-    validateEvidenceBackedRecords(
-      `flows.${String(flow.id)}.intermediate_functions`,
-      intermediateFunctions,
-      errors,
-      ["name"],
-      { allowEmptyEvidence: false },
-    );
-    if (
-      flow.breakpoint !== undefined &&
-      flow.breakpoint !== null &&
-      (typeof flow.breakpoint !== "object" || Array.isArray(flow.breakpoint))
-    ) {
-      errors.push(`flows.${String(flow.id)}.breakpoint must be null or an object.`);
-    } else if (flow.breakpoint !== undefined && flow.breakpoint !== null) {
-      const breakpoint = flow.breakpoint as { evidence?: unknown; reason?: unknown };
-      requireString(breakpoint, "reason", `flows.${String(flow.id)}.breakpoint`, errors);
-      if (breakpoint.evidence !== undefined) {
-        requireEvidenceList(
-          breakpoint.evidence,
-          `flows.${String(flow.id)}.breakpoint.evidence`,
-          errors,
-        );
-      }
-    }
-  }
-
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectDataFlowEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireArrayProperty(artifact, "flows", errors);
+  requireObjectProperty(artifact, "inputs", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
 export function validateTrustBoundariesArtifact(input: {
   artifact: TrustBoundariesArtifact;
-  budget: PiContextPackArtifact["budget"];
-  inventory: InventoryArtifact;
 }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "trust-boundaries", errors);
-  validateKnownInputs(
-    artifact.inputs as Record<string, unknown> | undefined,
-    priorMapArtifactPaths(),
-    "trust-boundaries",
-    errors,
-  );
-
-  const boundaries = arrayField(artifact, "boundaries", errors);
-  checkBudget(
-    "trust-boundaries",
-    boundaries.length,
-    budgetLimit(input.budget, ["max_trust_boundaries"], input.budget.max_important_files),
-    errors,
-  );
-  checkUniqueIds("boundaries", boundaries, errors);
-  validateEvidenceBackedRecords("boundaries", boundaries, errors, ["id"]);
-  const priorArtifactIds = new Set<PiRepositoryMapArtifactKind>([
-    "auth-config-secrets",
-    "coverage-structure",
-    "data-flows",
-    "entrypoints",
-    "operation-sinks",
-    "stack-build-deps",
-    "storage-integrations-infra",
-  ]);
-  for (const boundary of boundaries) {
-    requireBooleanTrue(boundary, "inference", "boundaries", errors);
-    const sourceArtifactIds = optionalArrayField<PiRepositoryMapArtifactKind>(
-      boundary,
-      "source_artifact_ids",
-    );
-    for (const sourceArtifactId of sourceArtifactIds) {
-      if (!priorArtifactIds.has(sourceArtifactId)) {
-        errors.push(
-          `boundaries.${String(boundary.id)} references unknown source_artifact_id: ${String(
-            sourceArtifactId,
-          )}`,
-        );
-      }
-    }
-  }
-
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectTrustBoundariesEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireArrayProperty(artifact, "boundaries", errors);
+  requireOptionalObjectProperty(artifact, "inputs", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
-export function validateRepositoryMapArtifact(input: {
-  artifact: RepositoryMapArtifact;
-  budget: PiContextPackArtifact["budget"];
-  inventory: InventoryArtifact;
-}): void {
+export function validateRepositoryMapArtifact(input: { artifact: RepositoryMapArtifact }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "repository-map", errors);
-  validateKnownInputs(
-    artifact.inputs as Record<string, unknown> | undefined,
-    allMapArtifactPaths(),
-    "repository-map",
-    errors,
-  );
-
-  requireString(artifact.summary, "text", "summary", errors);
-  requireEvidenceList(artifact.summary?.evidence, "summary.evidence", errors);
-
-  const sections = arrayField(artifact, "sections", errors);
-  validateEvidenceBackedRecords("sections", sections, errors, []);
-  const expectedSectionPaths = new Map<PiRepositoryMapArtifactKind, string>([
-    ["auth-config-secrets", repoMapPaths.authConfigSecrets],
-    ["coverage-structure", repoMapPaths.coverageStructure],
-    ["data-flows", repoMapPaths.dataFlows],
-    ["entrypoints", repoMapPaths.entrypoints],
-    ["operation-sinks", repoMapPaths.operationSinks],
-    ["repository-map", repoMapPaths.repositoryMap],
-    ["stack-build-deps", repoMapPaths.stackBuildDeps],
-    ["storage-integrations-infra", repoMapPaths.storageIntegrationsInfra],
-    ["trust-boundaries", repoMapPaths.trustBoundaries],
-  ]);
-  const seenSections = new Set<string>();
-  for (const section of sections) {
-    if (
-      section.item_count !== undefined &&
-      (typeof section.item_count !== "number" || section.item_count < 0)
-    ) {
-      errors.push(`sections.${String(section.artifact)} item_count must be a non-negative number.`);
-    }
-    if (section.artifact === undefined) {
-      continue;
-    }
-    if (typeof section.artifact !== "string") {
-      errors.push("sections.artifact must be a string.");
-      continue;
-    }
-    const expectedPath = expectedSectionPaths.get(section.artifact as PiRepositoryMapArtifactKind);
-    if (expectedPath === undefined) {
-      errors.push(`sections references unknown artifact: ${String(section.artifact)}`);
-      continue;
-    }
-    seenSections.add(section.artifact);
-    if (section.path !== expectedPath) {
-      errors.push(`sections.${section.artifact} path is invalid.`);
-    }
-  }
-  void seenSections;
-
-  validateFactGaps(artifact, input.budget, errors);
-  finishArtifactValidation({
-    artifact,
-    errors,
-    evidenceValues: collectRepositoryMapEvidence(artifact),
-    inventory: input.inventory,
-  });
+  requireObjectProperty(artifact, "summary", errors);
+  requireArrayProperty(artifact, "sections", errors);
+  requireOptionalObjectProperty(artifact, "inputs", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
 function buildCoverageStructurePrompt(contextPack: PiContextPackArtifact): string {
@@ -1627,9 +1227,6 @@ Output rules:
 - Keep output compact. Use short factual phrases, not paragraphs.
 - Do not enumerate repeated files, routes, helpers, dependencies, or operation calls exhaustively.
 - Group repeated patterns by family and cite representative evidence.
-- Respect the budgets in Stage input. If the repository has more facts than the budget allows,
-  include the most important representative facts and record the rest as coverage.not_covered
-  or fact_gaps.
 - Do not include raw file inventories, full dependency lists, tool output, or progress logs.
 - Include coverage.reviewed, coverage.not_covered, and fact_gaps.`;
 }
@@ -1954,7 +1551,7 @@ function normalizeParsedArtifact(
         ...sections,
         {
           artifact: "repository-map",
-          evidence: collectEvidenceDeep(parsed.summary).slice(0, 3),
+          evidence: [],
           item_count: sections.length,
           path: repoMapPaths.repositoryMap,
           summary: "Final repository map index.",
@@ -1975,109 +1572,53 @@ function validateBasePiArtifact(
   if (artifact.generated_by !== "pi") {
     errors.push(`${kind} must be generated_by pi.`);
   }
-  validateCoverage(artifact, kind, errors);
-}
-
-function validateCoverage(
-  artifact: PiStructuredArtifact,
-  kind: PiStructuredArtifact["kind"],
-  errors: string[],
-): void {
-  const reviewed = arrayField(artifact.coverage ?? {}, "reviewed", errors);
-  const notCovered = arrayField(artifact.coverage ?? {}, "not_covered", errors);
-  for (const item of reviewed) {
-    requireString(item, "area", `${kind}.coverage.reviewed`, errors);
-    requireEvidenceList(item.evidence, `${kind}.coverage.reviewed.${String(item.area)}`, errors);
+  if (typeof artifact.generated_at !== "string" || artifact.generated_at.trim() === "") {
+    errors.push(`${kind}.generated_at must be a string.`);
   }
-  for (const item of notCovered) {
-    requireString(item, "area", `${kind}.coverage.not_covered`, errors);
-    requireString(item, "reason", `${kind}.coverage.not_covered`, errors);
+  if (!isRecord(artifact.repo)) {
+    errors.push(`${kind}.repo must be an object.`);
   }
-}
-
-function validateFactGaps(
-  artifact: PiStructuredArtifact,
-  budget: PiContextPackArtifact["budget"],
-  errors: string[],
-): void {
-  const factGaps = arrayField(artifact, "fact_gaps", errors);
-  checkBudget("fact_gaps", factGaps.length, budget.max_fact_gaps, errors);
-  for (const gap of factGaps) {
-    requireString(gap, "area", "fact_gaps", errors);
-    requireString(gap, "missing_fact", "fact_gaps", errors);
-    if (
-      gap.evidence !== undefined &&
-      (!Array.isArray(gap.evidence) || gap.evidence.some((item) => typeof item !== "string"))
-    ) {
-      errors.push(`fact_gaps.${String(gap.area)} evidence must be a string array when present.`);
-    }
+  if (!isRecord(artifact.metadata)) {
+    errors.push(`${kind}.metadata must be an object.`);
+  }
+  if (artifact.coverage !== undefined) {
+    requireObjectProperty(artifact, "coverage", errors);
+    requireArrayProperty(artifact.coverage, "reviewed", errors);
+    requireArrayProperty(artifact.coverage, "not_covered", errors);
+  }
+  if (artifact.fact_gaps !== undefined && !Array.isArray(artifact.fact_gaps)) {
+    errors.push(`${kind}.fact_gaps must be an array.`);
   }
 }
 
-function finishArtifactValidation(input: {
-  artifact: PiStructuredArtifact;
-  errors: string[];
-  evidenceValues: string[];
-  inventory: InventoryArtifact;
-}): void {
-  const evidenceValues = Array.from(
-    new Set([...input.evidenceValues, ...collectEvidenceDeep(input.artifact)]),
-  );
-  void input.inventory;
-  rejectIfNoEvidence(input.artifact.kind, evidenceValues, input.errors);
-  rejectSecrets(input.artifact.kind, input.artifact, input.errors);
-  throwIfValidationErrors(
-    input.errors,
-    validationStageForKind(input.artifact.kind),
-    input.artifact.kind,
-  );
+function requireArrayProperty(value: unknown, field: string, errors: string[]): void {
+  if (!isRecord(value) || !Array.isArray(value[field])) {
+    errors.push(`${field} must be an array.`);
+  }
 }
 
-function checkBudget(
-  section: string,
-  count: number | undefined,
-  limit: number,
-  errors: string[],
-): void {
-  if (count === undefined) {
-    errors.push(`${section} is missing.`);
+function requireOptionalArrayProperty(value: unknown, field: string, errors: string[]): void {
+  if (!isRecord(value) || value[field] === undefined) {
     return;
   }
-  if (count > limit) {
-    errors.push(`${section} exceeds budget: ${count}/${limit}.`);
+  if (!Array.isArray(value[field])) {
+    errors.push(`${field} must be an array.`);
   }
 }
 
-function budgetLimit(
-  budget: PiContextPackArtifact["budget"],
-  keys: string[],
-  fallback: number,
-): number {
-  const budgetRecord = budget as Record<string, unknown>;
-  for (const key of keys) {
-    const value = budgetRecord[key];
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      return value;
-    }
+function requireObjectProperty(value: unknown, field: string, errors: string[]): void {
+  if (!isRecord(value) || !isRecord(value[field])) {
+    errors.push(`${field} must be an object.`);
   }
-  return Math.max(1, fallback);
 }
 
-function arrayField<T = Record<string, unknown>>(
-  value: unknown,
-  field: string,
-  errors: string[],
-): T[] {
-  if (value === null || typeof value !== "object") {
-    errors.push(`${field} is missing.`);
-    return [];
+function requireOptionalObjectProperty(value: unknown, field: string, errors: string[]): void {
+  if (!isRecord(value) || value[field] === undefined) {
+    return;
   }
-  const candidate = (value as Record<string, unknown>)[field];
-  if (!Array.isArray(candidate)) {
-    errors.push(`${field} is missing.`);
-    return [];
+  if (!isRecord(value[field])) {
+    errors.push(`${field} must be an object.`);
   }
-  return candidate as T[];
 }
 
 function optionalArrayField<T = Record<string, unknown>>(value: unknown, field: string): T[] {
@@ -2086,258 +1627,6 @@ function optionalArrayField<T = Record<string, unknown>>(value: unknown, field: 
   }
   const candidate = (value as Record<string, unknown>)[field];
   return Array.isArray(candidate) ? (candidate as T[]) : [];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringField(value: unknown, ...fields: string[]): string | undefined {
-  if (value === null || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  for (const field of fields) {
-    const candidate = record[field];
-    if (typeof candidate === "string" && candidate.trim() !== "") {
-      return candidate;
-    }
-  }
-  return undefined;
-}
-
-function requireString(value: unknown, field: string, container: string, errors: string[]): void {
-  if (value === null || typeof value !== "object") {
-    errors.push(`${container}.${field} is missing.`);
-    return;
-  }
-  const candidate = (value as Record<string, unknown>)[field];
-  if (typeof candidate !== "string" || candidate.trim() === "") {
-    errors.push(`${container}.${field} must be a non-empty string.`);
-  }
-}
-
-function requireBooleanTrue(
-  value: unknown,
-  field: string,
-  container: string,
-  errors: string[],
-): void {
-  if (value === null || typeof value !== "object") {
-    errors.push(`${container}.${field} is missing.`);
-    return;
-  }
-  const candidate = (value as Record<string, unknown>)[field];
-  if (candidate !== true) {
-    errors.push(`${container}.${field} must be true.`);
-  }
-}
-
-function requireEvidenceList(value: unknown, label: string, errors: string[]): void {
-  if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    value.some((item) => typeof item !== "string")
-  ) {
-    errors.push(`${label} must include evidence.`);
-  }
-}
-
-function checkUniqueIds(label: string, values: Array<{ id?: unknown }>, errors: string[]): void {
-  const seen = new Set<string>();
-  for (const value of values) {
-    if (typeof value.id !== "string" || value.id.trim() === "") {
-      continue;
-    }
-    if (seen.has(value.id)) {
-      errors.push(`${label} contains duplicate id: ${value.id}`);
-    }
-    seen.add(value.id);
-  }
-}
-
-function validateEvidenceBackedRecords(
-  label: string,
-  records: Array<Record<string, unknown>>,
-  errors: string[],
-  requiredStringFields: string[],
-  options: { allowEmptyEvidence?: boolean } = {},
-): void {
-  for (const record of records) {
-    for (const field of requiredStringFields) {
-      requireString(record, field, label, errors);
-    }
-    if (options.allowEmptyEvidence !== true) {
-      requireEvidenceList(
-        record.evidence,
-        `${label}.${String(record.id ?? record.name ?? "")}`,
-        errors,
-      );
-    }
-  }
-}
-
-function validateKnownInputs(
-  actual: Record<string, unknown> | undefined,
-  expected: Record<string, string>,
-  label: string,
-  errors: string[],
-): void {
-  if (actual === undefined || actual === null || typeof actual !== "object") {
-    errors.push(`${label}.inputs is missing.`);
-    return;
-  }
-  for (const [key, value] of Object.entries(actual)) {
-    const expectedPath = expected[key];
-    if (expectedPath !== undefined && value !== expectedPath) {
-      errors.push(`${label}.inputs.${key} is invalid.`);
-    }
-  }
-}
-
-function operationSinkRecords(artifact: OperationSinksArtifact): Array<Record<string, unknown>> {
-  const operationSinks = optionalArrayField(artifact, "operation_sinks");
-  return operationSinks.length > 0 ? operationSinks : optionalArrayField(artifact, "sinks");
-}
-
-function canonicalizeDataFlowTraceStatuses(artifact: DataFlowsArtifact): void {
-  for (const flow of artifact.flows ?? []) {
-    if (
-      typeof flow.trace_status === "string" &&
-      /^not traced beyond\s+\S+:\d+(?:-\d+)?$/.test(flow.trace_status)
-    ) {
-      flow.trace_status = "not traced beyond path:line";
-    }
-  }
-}
-
-function collectCoverageStructureEvidence(artifact: CoverageStructureArtifact): string[] {
-  return [
-    ...(artifact.repository_structure ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.coverage_targets ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.important_files ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.top_level_tree ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.reviewed_directories ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.excluded_directories ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.access_gaps ?? []).flatMap((item) => item.evidence ?? []),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectStackBuildDepsEvidence(artifact: StackBuildDepsArtifact): string[] {
-  return [
-    ...(artifact.stack ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.dependencies ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.build?.commands ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.build?.manifests ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.build?.lockfiles ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.ci ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.dependency_notes ?? []).flatMap((item) => item.evidence ?? []),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectEntrypointsEvidence(artifact: EntrypointsArtifact): string[] {
-  return [
-    ...(artifact.entrypoints ?? []).flatMap((entrypoint) => entrypoint.evidence ?? []),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectAuthConfigSecretsEvidence(artifact: AuthConfigSecretsArtifact): string[] {
-  return [
-    ...(artifact.auth ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.config ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.entrypoint_access ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.secret_references ?? []).flatMap((item) => item.evidence ?? []),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectStorageIntegrationsInfraEvidence(
-  artifact: StorageIntegrationsInfraArtifact,
-): string[] {
-  return [
-    ...(artifact.storage ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.integrations ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.infra ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.infrastructure ?? []).flatMap((item) => item.evidence ?? []),
-    ...(artifact.ci ?? []).flatMap((item) => item.evidence ?? []),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectOperationSinksEvidence(artifact: OperationSinksArtifact): string[] {
-  return [
-    ...(artifact.operation_sinks ?? []).flatMap((operationSink) => operationSink.evidence ?? []),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectDataFlowEvidence(artifact: DataFlowsArtifact): string[] {
-  return [
-    ...(artifact.flows ?? []).flatMap((flow) => [
-      ...(flow.source_evidence ?? []),
-      ...(flow.intermediate_functions ?? []).flatMap((item) => item.evidence ?? []),
-      ...(flow.operation_sink_evidence ?? []),
-      ...(flow.breakpoint?.evidence ?? []),
-    ]),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectTrustBoundariesEvidence(artifact: TrustBoundariesArtifact): string[] {
-  return [
-    ...(artifact.boundaries ?? []).flatMap((boundary) => boundary.evidence ?? []),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectRepositoryMapEvidence(artifact: RepositoryMapArtifact): string[] {
-  return [
-    ...(artifact.summary?.evidence ?? []),
-    ...(artifact.sections ?? []).flatMap((section) => section.evidence ?? []),
-    ...collectFactGapEvidence(artifact),
-    ...collectCoverageEvidence(artifact),
-  ];
-}
-
-function collectFactGapEvidence(artifact: PiStructuredArtifact): string[] {
-  return (artifact.fact_gaps ?? []).flatMap((gap) => gap.evidence ?? []);
-}
-
-function collectCoverageEvidence(artifact: {
-  coverage?: { reviewed?: Array<{ evidence?: string[] }> };
-}): string[] {
-  return (artifact.coverage?.reviewed ?? []).flatMap((item) => item.evidence ?? []);
-}
-
-function collectEvidenceDeep(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => collectEvidenceDeep(item));
-  }
-  if (value === null || typeof value !== "object") {
-    return [];
-  }
-
-  const record = value as Record<string, unknown>;
-  const directEvidence = Array.isArray(record.evidence)
-    ? record.evidence.filter((item): item is string => typeof item === "string")
-    : [];
-  return [
-    ...directEvidence,
-    ...Object.entries(record)
-      .filter(([key]) => key !== "evidence")
-      .flatMap(([, entryValue]) => collectEvidenceDeep(entryValue)),
-  ];
 }
 
 function isCoverageShape(value: unknown): value is {
@@ -2352,16 +1641,8 @@ function isCoverageShape(value: unknown): value is {
   );
 }
 
-function rejectIfNoEvidence(kind: string, evidenceValues: string[], errors: string[]): void {
-  if (evidenceValues.length === 0) {
-    errors.push(`${kind} must include evidence-backed claims.`);
-  }
-}
-
-function rejectSecrets(kind: string, artifact: unknown, errors: string[]): void {
-  if (containsSecretLikeValue(artifact)) {
-    errors.push(`${kind} contains secret-like values that were not redacted.`);
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function throwIfValidationErrors(

@@ -163,7 +163,7 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     const inventory = await readJson<{
       files: Array<{ path: string }>;
       summary: { file_count: number; manifest_files: string[] };
-    }>(path.join(runDir, "outputs", "repo-inventory.json"));
+    }>(path.join(runDir, "outputs", "inventory.json"));
     const inventoryPaths = inventory.files.map((file) => file.path);
 
     expect(inventory.summary.file_count).toBeGreaterThan(0);
@@ -178,6 +178,7 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     expect(report).not.toContain("not a security audit");
     expect(report).not.toContain("No security findings or verdict");
     expect(report).not.toContain("outputs/repo-inventory.json");
+    expect(await pathExists(path.join(runDir, "outputs", "repo-inventory.json"))).toBe(false);
   });
 
   it("creates a fresh sandbox per run and keeps the checkout out of local artifacts", async () => {
