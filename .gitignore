@@ -25,7 +25,7 @@ __pycache__/
 
 # VibeShield generated artifacts
 runs/
-artifacts/
+/artifacts/
 tmp/
 
 # OS/editor

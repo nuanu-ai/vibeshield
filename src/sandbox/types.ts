@@ -16,6 +16,10 @@ export interface CloneRepositoryResult {
   repoPath: string;
 }
 
+export interface CloneRepositoryOptions {
+  commitSha?: string;
+}
+
 export interface GenerateInventoryInput {
   commitSha: string | null;
   generatedAt: string;
@@ -117,7 +121,10 @@ export interface SandboxCommandLogEntry {
 export interface SandboxSession {
   readonly id: string;
   readonly providerName: string;
-  cloneRepository(repo: GitHubRepoReference): Promise<CloneRepositoryResult>;
+  cloneRepository(
+    repo: GitHubRepoReference,
+    options?: CloneRepositoryOptions,
+  ): Promise<CloneRepositoryResult>;
   delete(): Promise<SandboxCleanupState>;
   generateInventory(input: GenerateInventoryInput): Promise<SandboxArtifact>;
   prepareBaselineTools(input: PrepareBaselineToolsInput): Promise<PrepareBaselineToolsResult>;
@@ -127,4 +134,5 @@ export interface SandboxSession {
 
 export interface SandboxProvider {
   createSandbox(context: SandboxCreateContext): Promise<SandboxSession>;
+  deleteSandboxById?(sandboxId: string): Promise<SandboxCleanupState>;
 }

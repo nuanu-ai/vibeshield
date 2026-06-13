@@ -8,6 +8,7 @@ import { errorMessage, ScanStageError } from "../run/errors.js";
 import type { SandboxCleanupState } from "../run/types.js";
 import { buildDaytonaInventoryScript } from "./daytona-inventory-script.js";
 import type {
+  CloneRepositoryOptions,
   CloneRepositoryResult,
   GenerateInventoryInput,
   PrepareBaselineToolsInput,
@@ -85,6 +86,7 @@ export interface DaytonaClientLike {
     params?: CreateSandboxFromSnapshotParams,
     options?: { timeout?: number },
   ): Promise<DaytonaSandboxLike>;
+  get?(sandboxId: string): Promise<DaytonaSandboxLike>;
 }
 
 interface DaytonaSessionProcessApi {
@@ -136,11 +138,11 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           ephemeral: true,
           labels: {
             app: "vibeshield",
-            phase: "1",
             run_id: context.runId,
             source: "github",
             source_owner: context.repo.owner,
             source_repo: context.repo.repo,
+            workflow: "repository-map",
           },
           language: CodeLanguage.TYPESCRIPT,
           public: false,
@@ -164,6 +166,35 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       sandboxArtifactDir: defaultArtifactDir,
       sandboxArtifactPath: defaultArtifactPath,
     });
+  }
+
+  async deleteSandboxById(sandboxId: string): Promise<SandboxCleanupState> {
+    const client = this.getClient();
+    if (client.get === undefined) {
+      return {
+        attempted: true,
+        deleted: false,
+        error: "Daytona client does not support get(sandboxId).",
+        success: false,
+      };
+    }
+
+    try {
+      const sandbox = await client.get(sandboxId);
+      await sandbox.delete(this.options.deleteTimeoutSeconds ?? 120);
+      return {
+        attempted: true,
+        deleted: true,
+        success: true,
+      };
+    } catch (error) {
+      return {
+        attempted: true,
+        deleted: false,
+        error: errorMessage(error),
+        success: false,
+      };
+    }
   }
 
   private getClient(): DaytonaClientLike {
@@ -220,7 +251,10 @@ export class DaytonaSandboxSession implements SandboxSession {
     return this.sandbox.id;
   }
 
-  async cloneRepository(repo: { url: string }): Promise<CloneRepositoryResult> {
+  async cloneRepository(
+    repo: { url: string },
+    options: CloneRepositoryOptions = {},
+  ): Promise<CloneRepositoryResult> {
     await this.sandbox.git.clone(repo.url, this.options.repoPath).catch((error: unknown) => {
       throw new ScanStageError({
         cause: error,
@@ -229,6 +263,26 @@ export class DaytonaSandboxSession implements SandboxSession {
         userMessage: `Could not clone repository inside Daytona sandbox: ${errorMessage(error)}`,
       });
     });
+
+    if (options.commitSha !== undefined) {
+      const checkoutResponse = await this.sandbox.process
+        .executeCommand(
+          `git checkout --detach ${options.commitSha}`,
+          this.options.repoPath,
+          {},
+          this.options.commandTimeoutSeconds,
+        )
+        .catch((error: unknown) => {
+          throw new ScanStageError({
+            cause: error,
+            message: errorMessage(error),
+            stage: "clone",
+            userMessage: `Could not checkout commit inside Daytona sandbox: ${errorMessage(error)}`,
+          });
+        });
+
+      assertSandboxCommandSucceeded(checkoutResponse, "clone", "checkout commit");
+    }
 
     const commitResponse = await this.sandbox.process
       .executeCommand(
@@ -278,7 +332,7 @@ export class DaytonaSandboxSession implements SandboxSession {
     assertSandboxCommandSucceeded(response, "inventory", "run read-only inventory");
 
     return {
-      relativePath: "inventory.v1.json",
+      relativePath: "inventory.json",
       sandboxPath: this.options.sandboxArtifactPath,
     };
   }
@@ -287,7 +341,7 @@ export class DaytonaSandboxSession implements SandboxSession {
     if (input.kind === "baseline-tool") {
       return this.runBaselineTool(input);
     }
-    return this.runPiProjectUnderstanding(input);
+    return this.runPiRepositoryMap(input);
   }
 
   async prepareBaselineTools(
@@ -377,7 +431,7 @@ export class DaytonaSandboxSession implements SandboxSession {
     }
   }
 
-  private async runPiProjectUnderstanding(input: RuntimeJobInput): Promise<RuntimeJobResult> {
+  private async runPiRepositoryMap(input: RuntimeJobInput): Promise<RuntimeJobResult> {
     if (input.pi === undefined) {
       throw new ScanStageError({
         message: "Missing Pi runtime input.",
@@ -863,9 +917,8 @@ function provision(tool) {
 }
 
 const availability = {
-  artifact_version: 1,
   generated_at: config.generatedAt,
-  kind: "tool-availability.v1",
+  kind: "tool-availability",
   tool_bin_dir: config.toolBinDir,
   tools: [],
 };
@@ -918,11 +971,11 @@ for (const requested of config.tools) {
   }
 }
 
-const artifactPath = path.join(config.artifactDir, "baseline", "tool-availability.v1.json");
+const artifactPath = path.join(config.artifactDir, "baseline", "tool-availability.json");
 fs.writeFileSync(artifactPath, JSON.stringify(availability, null, 2) + "\\n");
 process.stdout.write(JSON.stringify({
   artifact: {
-    relativePath: "baseline/tool-availability.v1.json",
+    relativePath: "baseline/tool-availability.json",
     sandboxPath: artifactPath,
   },
   availability,
@@ -983,7 +1036,7 @@ function workflowFileArgs() {
 function toolArgs() {
   switch (config.tool) {
     case "syft":
-      return ["dir:" + config.repoPath, "-o", "json"];
+      return ["dir:" + config.repoPath, "-o", "cyclonedx-json"];
     case "trivy":
       return config.sbomSandboxPath
         ? ["sbom", "--format", "json", config.sbomSandboxPath]
@@ -1048,7 +1101,6 @@ function findingExitCode(tool, exitCode) {
   return (
     exitCode === 0 ||
     ((tool === "gitleaks" ||
-      tool === "trivy" ||
       tool === "checkov") &&
       exitCode === 1) ||
     (tool === "actionlint" && exitCode === 1) ||
@@ -1107,18 +1159,7 @@ const resultPath = path.join(toolDir, "result.redacted.json");
 fs.writeFileSync(stdoutPath, stdout);
 fs.writeFileSync(stderrPath, stderr || diagnostics.join("\\n"));
 
-const observations =
-  status === "completed" && (stdout.trim() !== "" || (exitCode ?? 0) !== 0)
-    ? [
-        {
-          confidence: "low",
-          evidence: [],
-          kind: observationKind(config.tool),
-          message: config.tool + " produced output for normalized baseline review.",
-          severity: "unknown",
-        },
-      ]
-    : [];
+const observations = [];
 
 const artifacts = [
   {
@@ -1255,8 +1296,8 @@ function textFromAssistantMessage(message) {
 }
 
 function actorLabel() {
-  const stage = String(config.step || "pi").replace(/:semantic-evaluation$/, "");
-  const role = String(config.step || "").endsWith(":semantic-evaluation") ? "evaluator" : "collector";
+  const stage = String(config.step || "pi");
+  const role = "collector";
   const attempt = typeof config.attempt === "number" ? " attempt " + config.attempt : "";
   return stage + " " + role + attempt;
 }
@@ -1777,7 +1818,7 @@ async function waitForSessionCommandExit(input: {
             lastPollError,
           )}`,
     stage: "pi",
-    userMessage: "Timed out while waiting for Pi project understanding inside Daytona.",
+    userMessage: "Timed out while waiting for Pi repository mapping inside Daytona.",
   });
 }
 

@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   BaselineSummaryArtifact,
@@ -6,9 +7,11 @@ import type {
   InventoryArtifact,
 } from "../artifacts/contracts.js";
 import type { ArtifactStore } from "../artifacts/store.js";
+import { errorMessage } from "../run/errors.js";
 import { relativeArtifactPath } from "../run/file-io.js";
 import type { RunJobState } from "../run/types.js";
 import type { RuntimeJobResult, SandboxSession } from "../sandbox/types.js";
+import { normalizeBaselineObservations } from "./observations.js";
 
 const baselineToolOrder: BaselineToolName[] = [
   "syft",
@@ -80,9 +83,8 @@ export async function runDeterministicBaseline(
   });
   input.store.register({
     id: "baseline-tool-availability",
-    kind: "tool-availability.v1",
+    kind: "tool-availability",
     path: toolAvailabilityPath,
-    version: 1,
   });
 
   const availabilityByTool = new Map(
@@ -109,18 +111,26 @@ export async function runDeterministicBaseline(
             generatedAt: input.generatedAt,
             tool,
           })
-        : await input.sandbox.runJob({
-            baseline: {
-              hasGithubActions: githubActionsWorkflows.length > 0,
-              hasIacCandidates: iacCandidates.length > 0,
-              ...(sbomSandboxPath === undefined ? {} : { sbomSandboxPath }),
-              tool,
-            },
-            generatedAt: input.generatedAt,
-            kind: "baseline-tool",
-            name: tool,
-            stage: "deterministic-baseline",
-          });
+        : await input.sandbox
+            .runJob({
+              baseline: {
+                hasGithubActions: githubActionsWorkflows.length > 0,
+                hasIacCandidates: iacCandidates.length > 0,
+                ...(sbomSandboxPath === undefined ? {} : { sbomSandboxPath }),
+                tool,
+              },
+              generatedAt: input.generatedAt,
+              kind: "baseline-tool",
+              name: tool,
+              stage: "deterministic-baseline",
+            })
+            .catch((error: unknown) =>
+              buildFailedToolResult({
+                diagnostics: [`Could not run ${tool}: ${errorMessage(error)}`],
+                generatedAt: input.generatedAt,
+                tool,
+              }),
+            );
 
     const artifactPaths = await pullRuntimeArtifacts({
       job: tool,
@@ -128,6 +138,13 @@ export async function runDeterministicBaseline(
       result,
       runDir: input.runDir,
       sandbox: input.sandbox,
+    });
+    const observations = await readNormalizedObservations({
+      artifactPaths,
+      fallback: result.observations,
+      resultStatus: result.status,
+      runDir: input.runDir,
+      tool,
     });
 
     if (tool === "syft") {
@@ -140,7 +157,7 @@ export async function runDeterministicBaseline(
       artifacts: artifactPaths,
       diagnostics: result.diagnostics,
       invocation: result.invocation,
-      observations: result.observations,
+      observations,
       ...(result.exitCode === undefined ? {} : { exit_code: result.exitCode }),
       ...(result.skippedReason === undefined ? {} : { skipped_reason: result.skippedReason }),
       status: result.status,
@@ -155,7 +172,7 @@ export async function runDeterministicBaseline(
       finished_at: result.finishedAt,
       invocation: result.invocation,
       name: tool,
-      observations: result.observations.length,
+      observations: observations.length,
       ...(result.skippedReason === undefined ? {} : { skipped_reason: result.skippedReason }),
       started_at: result.startedAt,
       status: result.status === "completed" ? "success" : result.status,
@@ -173,9 +190,8 @@ export async function runDeterministicBaseline(
 
   const sbomArtifact = sbomArtifactPath(toolSummaries);
   const summary: BaselineSummaryArtifact = {
-    artifact_version: 1,
     generated_at: input.generatedAt,
-    kind: "baseline-summary.v1",
+    kind: "baseline-summary",
     source: {
       commit_sha: input.commitSha,
       url: input.sourceUrl,
@@ -195,9 +211,8 @@ export async function runDeterministicBaseline(
   const summaryPath = await input.store.writeJson({
     data: summary,
     id: "baseline-summary",
-    kind: "baseline-summary.v1",
-    relativePath: "outputs/baseline-summary.v1.json",
-    version: 1,
+    kind: "baseline-summary",
+    relativePath: "outputs/baseline-summary.json",
   });
 
   return {
@@ -224,6 +239,60 @@ function buildUnavailableToolResult(input: {
     startedAt: input.generatedAt,
     status: "failed",
   };
+}
+
+function buildFailedToolResult(input: {
+  diagnostics: string[];
+  generatedAt: string;
+  tool: BaselineToolName;
+}): RuntimeJobResult {
+  return {
+    artifacts: [],
+    diagnostics: input.diagnostics,
+    finishedAt: new Date().toISOString(),
+    invocation: {
+      command: input.tool,
+    },
+    kind: "baseline-tool",
+    observations: [],
+    startedAt: input.generatedAt,
+    status: "failed",
+  };
+}
+
+async function readNormalizedObservations(input: {
+  artifactPaths: string[];
+  fallback: BaselineToolSummary["observations"];
+  resultStatus: RuntimeJobResult["status"];
+  runDir: string;
+  tool: BaselineToolName;
+}): Promise<BaselineToolSummary["observations"]> {
+  const stdout = await readArtifactText(input.runDir, input.artifactPaths, "stdout.redacted.txt");
+  const stderr = await readArtifactText(input.runDir, input.artifactPaths, "stderr.redacted.log");
+  const observations = normalizeBaselineObservations({
+    status: input.resultStatus,
+    ...(stderr === undefined ? {} : { stderr }),
+    ...(stdout === undefined ? {} : { stdout }),
+    tool: input.tool,
+  });
+  return observations.length > 0 ? observations : input.fallback;
+}
+
+async function readArtifactText(
+  runDir: string,
+  artifactPaths: string[],
+  suffix: string,
+): Promise<string | undefined> {
+  const relativePath = artifactPaths.find((artifactPath) => artifactPath.endsWith(suffix));
+  if (relativePath === undefined) {
+    return undefined;
+  }
+
+  try {
+    return await readFile(path.join(runDir, relativePath), "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 async function pullRuntimeArtifacts(input: {

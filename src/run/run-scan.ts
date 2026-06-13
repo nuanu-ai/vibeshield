@@ -1,15 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, readFile } from "node:fs/promises";
+import { access, copyFile, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { InventoryArtifact } from "../artifacts/contracts.js";
+import type {
+  BaselineSummaryArtifact,
+  InventoryArtifact,
+  PiContextPackArtifact,
+} from "../artifacts/contracts.js";
 import { ArtifactStore } from "../artifacts/store.js";
 import { runDeterministicBaseline } from "../baseline/deterministic-baseline.js";
 import { buildPiContextPack } from "../context/step-context-builder.js";
-import { runPiRepositoryMapping } from "../pi/project-understanding.js";
+import { runPiRepositoryMapping } from "../pi/repository-map.js";
 import { writeFailureReport, writeSuccessReport } from "../report/report.js";
 import { createDefaultSandboxProvider } from "../sandbox/default-provider.js";
 import type { SandboxProvider, SandboxSession } from "../sandbox/types.js";
-import { ScanStageError, toScanStageError } from "./errors.js";
+import { errorMessage, ScanStageError, toScanStageError } from "./errors.js";
 import {
   appendJsonLine,
   ensureDirectory,
@@ -18,12 +22,18 @@ import {
 } from "./file-io.js";
 import { parseGitHubRepoUrl } from "./github-url.js";
 import { redactDeep } from "./redaction.js";
-import type { RunEvent, RunStepState, ScanRunState } from "./types.js";
+import type { RunEvent, RunJobState, RunStepState, ScanRunState } from "./types.js";
 
 export interface RunScanOptions {
   repoUrlInput: string;
   onProgress?: (event: RunEvent) => unknown | Promise<unknown>;
   runsRoot?: string;
+  sandboxProvider?: SandboxProvider;
+}
+
+export interface RunResumeOptions {
+  onProgress?: (event: RunEvent) => unknown | Promise<unknown>;
+  runDir: string;
   sandboxProvider?: SandboxProvider;
 }
 
@@ -41,6 +51,124 @@ export interface RunScanFailure {
 }
 
 export type RunScanResult = RunScanSuccess | RunScanFailure;
+
+export type RunResumeResult = RunScanResult;
+
+type JsonObject = Record<string, unknown>;
+
+type RepoMapRunArtifactKey = keyof NonNullable<ScanRunState["artifacts"]["repo_map"]>;
+
+type RepositoryMapExistingKey =
+  | "authConfigSecrets"
+  | "coverageStructure"
+  | "dataFlows"
+  | "entrypoints"
+  | "operationSinks"
+  | "repositoryMap"
+  | "stackBuildDeps"
+  | "storageIntegrationsInfra"
+  | "trustBoundaries";
+
+interface RepositoryMapArtifactDefinition {
+  existingKey: RepositoryMapExistingKey;
+  resultPathKeys: string[];
+  runKey?: RepoMapRunArtifactKey;
+  storeIds: string[];
+  path: string;
+}
+
+interface ExistingRepositoryMapArtifact {
+  artifact: JsonObject;
+  artifactPath: string;
+}
+
+type ExistingRepositoryMapArtifacts = Partial<
+  Record<RepositoryMapExistingKey, ExistingRepositoryMapArtifact>
+>;
+
+interface NormalizedRepositoryMapResult {
+  artifacts: Required<Record<RepositoryMapExistingKey, string>>;
+  jobStates: RunJobState[];
+}
+
+type RepositoryMapRunner = (input: {
+  contextPack: PiContextPackArtifact;
+  contextPath: string;
+  existing?: ExistingRepositoryMapArtifacts;
+  generatedAt: string;
+  inventory: InventoryArtifact;
+  onJobFinished?: (jobState: RunJobState) => unknown | Promise<unknown>;
+  onProgress?: Parameters<NonNullable<SandboxSession["runJob"]>>[0]["onProgress"];
+  outputsDir: string;
+  runDir: string;
+  sandbox: SandboxSession;
+  store: ArtifactStore;
+}) => Promise<unknown>;
+
+const repositoryMapArtifacts: RepositoryMapArtifactDefinition[] = [
+  {
+    existingKey: "coverageStructure",
+    path: "outputs/repo-map/coverage-structure.json",
+    resultPathKeys: ["coverageStructurePath", "coverage_structure_path"],
+    runKey: "coverage_structure",
+    storeIds: ["repo-map-coverage-structure", "coverage-structure"],
+  },
+  {
+    existingKey: "stackBuildDeps",
+    path: "outputs/repo-map/stack-build-deps.json",
+    resultPathKeys: ["stackBuildDepsPath", "stack_build_deps_path"],
+    runKey: "stack_build_deps",
+    storeIds: ["repo-map-stack-build-deps", "stack-build-deps"],
+  },
+  {
+    existingKey: "entrypoints",
+    path: "outputs/repo-map/entrypoints.json",
+    resultPathKeys: ["entrypointsPath", "entrypoints_path"],
+    runKey: "entrypoints",
+    storeIds: ["repo-map-entrypoints", "entrypoints"],
+  },
+  {
+    existingKey: "authConfigSecrets",
+    path: "outputs/repo-map/auth-config-secrets.json",
+    resultPathKeys: ["authConfigSecretsPath", "auth_config_secrets_path"],
+    runKey: "auth_config_secrets",
+    storeIds: ["repo-map-auth-config-secrets", "auth-config-secrets"],
+  },
+  {
+    existingKey: "storageIntegrationsInfra",
+    path: "outputs/repo-map/storage-integrations-infra.json",
+    resultPathKeys: ["storageIntegrationsInfraPath", "storage_integrations_infra_path"],
+    runKey: "storage_integrations_infra",
+    storeIds: ["repo-map-storage-integrations-infra", "storage-integrations-infra"],
+  },
+  {
+    existingKey: "operationSinks",
+    path: "outputs/repo-map/operation-sinks.json",
+    resultPathKeys: ["operationSinksPath", "operation_sinks_path"],
+    runKey: "operation_sinks",
+    storeIds: ["repo-map-operation-sinks", "operation-sinks"],
+  },
+  {
+    existingKey: "dataFlows",
+    path: "outputs/repo-map/data-flows.json",
+    resultPathKeys: ["dataFlowsPath", "data_flows_path"],
+    runKey: "data_flows",
+    storeIds: ["repo-map-data-flows", "data-flows"],
+  },
+  {
+    existingKey: "trustBoundaries",
+    path: "outputs/repo-map/trust-boundaries.json",
+    resultPathKeys: ["trustBoundariesPath", "trust_boundaries_path"],
+    runKey: "trust_boundaries",
+    storeIds: ["repo-map-trust-boundaries", "trust-boundaries"],
+  },
+  {
+    existingKey: "repositoryMap",
+    path: "outputs/repository-map.json",
+    resultPathKeys: ["repositoryMapPath", "repository_map_path"],
+    storeIds: ["repository-map", "repo-map"],
+  },
+];
 
 export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   const parsed = parseGitHubRepoUrl(options.repoUrlInput);
@@ -60,7 +188,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   const runJsonPath = path.join(runDir, "run.json");
   const eventsPath = path.join(runDir, "events.jsonl");
   const reportPath = path.join(runDir, "report.md");
-  const inventoryPath = path.join(outputsDir, "inventory.v1.json");
+  const inventoryPath = path.join(outputsDir, "inventory.json");
   const legacyInventoryPath = path.join(outputsDir, "repo-inventory.json");
   const store = new ArtifactStore(runDir, outputsDir);
 
@@ -170,9 +298,8 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     run.artifacts.inventory_legacy = relativeArtifactPath(runDir, legacyInventoryPath);
     store.register({
       id: "inventory",
-      kind: "inventory.v1",
+      kind: "inventory",
       path: run.artifacts.inventory,
-      version: 1,
     });
     await persistRun();
     await appendEvent({
@@ -277,7 +404,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
       stage: "pi",
       type: "pi.started",
     });
-    const piResult = await runPiRepositoryMapping({
+    const piResult = await executePiRepositoryMapping({
       contextPack: contextResult.contextPack,
       contextPath: contextResult.contextPath,
       generatedAt: new Date().toISOString(),
@@ -303,16 +430,13 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     piStep.jobs = piResult.jobStates;
     piStep.status = "success";
     piStep.finished_at = new Date().toISOString();
-    run.artifacts.entry_points = piResult.entryPointsPath;
-    run.artifacts.sensitive_sinks = piResult.sensitiveSinksPath;
-    run.artifacts.data_flows = piResult.dataFlowsPath;
-    run.artifacts.project_understanding = piResult.projectUnderstandingPath;
+    applyRepositoryMapArtifacts(run, piResult);
     await persistRun();
     await appendEvent({
-      artifact: piResult.projectUnderstandingPath,
+      artifact: piResult.artifacts.repositoryMap,
       message: "Staged Pi repository mapping artifacts accepted by quality gates.",
       sandbox_id: sandbox.id,
-      stage: "project-understanding-validation",
+      stage: "repository-map-validation",
       type: "artifact.written",
     });
 
@@ -411,6 +535,698 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   };
 }
 
+export async function runResume(options: RunResumeOptions): Promise<RunResumeResult> {
+  const runDir = path.resolve(options.runDir);
+  const outputsDir = path.join(runDir, "outputs");
+  const runJsonPath = path.join(runDir, "run.json");
+  const eventsPath = path.join(runDir, "events.jsonl");
+  const reportPath = path.join(runDir, "report.md");
+  const inventoryPath = path.join(outputsDir, "inventory.json");
+  const legacyInventoryPath = path.join(outputsDir, "repo-inventory.json");
+  const sandboxProvider = options.sandboxProvider ?? createDefaultSandboxProvider();
+  const store = new ArtifactStore(runDir, outputsDir);
+
+  let run: ScanRunState;
+  try {
+    run = JSON.parse(await readFile(runJsonPath, "utf8")) as ScanRunState;
+  } catch (error) {
+    return {
+      exitCode: 1,
+      userMessage: `Could not read run.json for resume: ${errorMessage(error)}`,
+    };
+  }
+
+  await ensureDirectory(outputsDir);
+
+  const persistRun = async () => writeJsonAtomic(runJsonPath, run);
+  const appendEvent = async (event: Omit<RunEvent, "timestamp">) => {
+    const eventWithTimestamp: RunEvent = redactDeep({
+      ...event,
+      timestamp: new Date().toISOString(),
+    });
+    await appendJsonLine(eventsPath, eventWithTimestamp);
+    await options.onProgress?.(eventWithTimestamp);
+  };
+
+  let sandbox: SandboxSession | undefined;
+  let failure: ScanStageError | undefined;
+
+  run.status = "running";
+  run.current_stage = "resume";
+  run.steps = run.steps ?? [];
+  delete run.error;
+  delete run.finished_at;
+  await persistRun();
+  await appendEvent({
+    message: "Resuming scan from durable local artifacts.",
+    stage: "resume",
+    type: "resume.started",
+  });
+
+  try {
+    if (!isValidCommitSha(run.commit_sha)) {
+      throw new ScanStageError({
+        message: "Cannot resume without a valid commit_sha in run.json.",
+        stage: "resume",
+        userMessage: "VibeShield cannot resume this run because run.json has no valid commit SHA.",
+      });
+    }
+
+    await cleanupPreviousSandboxBeforeResume({
+      appendEvent,
+      run,
+      sandboxProvider,
+    });
+
+    run.current_stage = "create_sandbox";
+    await persistRun();
+    await appendEvent({
+      message: "Creating fresh Daytona sandbox for resumed scan.",
+      stage: "create_sandbox",
+      type: "sandbox.create.started",
+    });
+    sandbox = await sandboxProvider.createSandbox({
+      repo: run.source,
+      runId: run.run_id,
+    });
+    run.sandbox = {
+      cleanup: {
+        attempted: false,
+        deleted: false,
+        success: false,
+      },
+      id: sandbox.id,
+      provider: sandbox.providerName,
+    };
+    await persistRun();
+    await appendEvent({
+      message: "Sandbox created.",
+      sandbox_id: sandbox.id,
+      stage: "create_sandbox",
+      type: "sandbox.created",
+    });
+
+    run.current_stage = "clone";
+    await persistRun();
+    await appendEvent({
+      message: "Cloning repository inside sandbox at original commit.",
+      sandbox_id: sandbox.id,
+      stage: "clone",
+      type: "clone.started",
+    });
+    const cloneResult = await sandbox.cloneRepository(run.source, { commitSha: run.commit_sha });
+    if (cloneResult.commitSha !== run.commit_sha) {
+      throw new ScanStageError({
+        message: `Resume checkout mismatch: expected ${run.commit_sha}, got ${cloneResult.commitSha ?? "unknown"}.`,
+        stage: "clone",
+        userMessage: "VibeShield could not checkout the original commit for resume.",
+      });
+    }
+    await appendEvent({
+      message: "Repository cloned at original commit inside sandbox.",
+      sandbox_id: sandbox.id,
+      stage: "clone",
+      type: "clone.completed",
+    });
+
+    let inventory = await readExistingArtifact<InventoryArtifact>(runDir, run.artifacts.inventory);
+    if (inventory !== undefined) {
+      const inventoryArtifactPath = run.artifacts.inventory ?? "outputs/inventory.json";
+      store.register({
+        id: "inventory",
+        kind: "inventory",
+        path: inventoryArtifactPath,
+      });
+      await appendEvent({
+        artifact: inventoryArtifactPath,
+        message: "Reusing accepted inventory artifact.",
+        sandbox_id: sandbox.id,
+        stage: "inventory",
+        type: "resume.artifact_reused",
+      });
+    } else {
+      run.current_stage = "inventory";
+      await persistRun();
+      await appendEvent({
+        message: "Inventory artifact missing; rebuilding inventory inside sandbox.",
+        sandbox_id: sandbox.id,
+        stage: "inventory",
+        type: "inventory.started",
+      });
+      const inventoryArtifact = await sandbox.generateInventory({
+        commitSha: cloneResult.commitSha,
+        generatedAt: new Date().toISOString(),
+        repo: run.source,
+      });
+      await sandbox.pullFile(inventoryArtifact.sandboxPath, inventoryPath, {
+        artifact: inventoryArtifact.relativePath,
+        stage: "inventory",
+      });
+      await copyFile(inventoryPath, legacyInventoryPath);
+      run.artifacts.inventory = relativeArtifactPath(runDir, inventoryPath);
+      run.artifacts.inventory_legacy = relativeArtifactPath(runDir, legacyInventoryPath);
+      store.register({
+        id: "inventory",
+        kind: "inventory",
+        path: run.artifacts.inventory,
+      });
+      inventory = JSON.parse(await readFile(inventoryPath, "utf8")) as InventoryArtifact;
+    }
+
+    let baseline = await readExistingArtifact<BaselineSummaryArtifact>(
+      runDir,
+      run.artifacts.baseline_summary,
+    );
+    if (baseline !== undefined && run.artifacts.baseline_summary !== undefined) {
+      store.register({
+        id: "baseline-summary",
+        kind: "baseline-summary",
+        path: run.artifacts.baseline_summary,
+      });
+      if (run.artifacts.baseline_tool_availability !== undefined) {
+        store.register({
+          id: "baseline-tool-availability",
+          kind: "tool-availability",
+          path: run.artifacts.baseline_tool_availability,
+        });
+      }
+      await appendEvent({
+        artifact: run.artifacts.baseline_summary,
+        message: "Reusing accepted deterministic baseline summary.",
+        sandbox_id: sandbox.id,
+        stage: "deterministic-baseline",
+        type: "resume.artifact_reused",
+      });
+    } else {
+      run.current_stage = "deterministic-baseline";
+      const baselineStep: RunStepState = {
+        diagnostics: [],
+        jobs: [],
+        name: "deterministic-baseline",
+        stage: "deterministic-baseline",
+        started_at: new Date().toISOString(),
+        status: "running",
+      };
+      run.steps.push(baselineStep);
+      await persistRun();
+      const activeSandbox = sandbox;
+      const baselineResult = await runDeterministicBaseline({
+        commitSha: cloneResult.commitSha,
+        generatedAt: new Date().toISOString(),
+        inventory,
+        onProgress: (event) =>
+          appendEvent({
+            ...(event.job === undefined ? {} : { job: event.job }),
+            message: event.message,
+            sandbox_id: activeSandbox.id,
+            stage: "deterministic-baseline",
+            type: event.type,
+          }),
+        outputsDir,
+        runDir,
+        sandbox,
+        sourceUrl: run.source.url,
+        store,
+      });
+      baselineStep.jobs = baselineResult.jobStates;
+      baselineStep.status = "success";
+      baselineStep.finished_at = new Date().toISOString();
+      run.artifacts.baseline_summary = baselineResult.summaryPath;
+      syncKnownArtifacts(run, store);
+      baseline = baselineResult.summary;
+    }
+
+    let contextPack = await readExistingArtifact<PiContextPackArtifact>(
+      runDir,
+      run.artifacts.pi_context_pack,
+    );
+    if (contextPack !== undefined && run.artifacts.pi_context_pack !== undefined) {
+      store.register({
+        id: "pi-context-pack",
+        kind: "pi-context-pack",
+        path: run.artifacts.pi_context_pack,
+      });
+      await appendEvent({
+        artifact: run.artifacts.pi_context_pack,
+        message: "Reusing accepted Pi context pack.",
+        sandbox_id: sandbox.id,
+        stage: "context",
+        type: "resume.artifact_reused",
+      });
+    } else {
+      run.current_stage = "context";
+      await persistRun();
+      const contextResult = await buildPiContextPack({
+        baseline,
+        inventory,
+        store,
+      });
+      contextPack = contextResult.contextPack;
+      run.artifacts.pi_context_pack = contextResult.contextPath;
+    }
+
+    const existingPi = await readExistingRepositoryMapArtifacts(runDir, run);
+    const needsPi = !hasCompleteRepositoryMapArtifacts(existingPi);
+
+    if (needsPi) {
+      const reusablePi = leadingExistingRepositoryMapArtifacts(existingPi);
+      clearRepositoryMapArtifactsAfterFirstMissing(run, existingPi);
+      run.current_stage = "pi";
+      const piStep: RunStepState = {
+        diagnostics: [],
+        jobs: [],
+        name: "pi-repository-mapping",
+        stage: "pi",
+        started_at: new Date().toISOString(),
+        status: "running",
+      };
+      run.steps.push(piStep);
+      await persistRun();
+      await appendEvent({
+        message: "Continuing staged Pi repository mapping from first missing artifact.",
+        sandbox_id: sandbox.id,
+        stage: "pi",
+        type: "pi.started",
+      });
+      const activeSandbox = sandbox;
+      const piResult = await executePiRepositoryMapping({
+        contextPack,
+        contextPath: run.artifacts.pi_context_pack ?? "outputs/pi-context-pack.json",
+        existing: reusablePi,
+        generatedAt: new Date().toISOString(),
+        inventory,
+        onJobFinished: async (jobState) => {
+          piStep.jobs.push(jobState);
+          await persistRun();
+        },
+        onProgress: (event) =>
+          appendEvent({
+            ...(event.details === undefined ? {} : { details: event.details }),
+            job: event.job,
+            message: event.message,
+            sandbox_id: activeSandbox.id,
+            stage: "pi",
+            type: event.type,
+          }),
+        outputsDir,
+        runDir,
+        sandbox,
+        store,
+      });
+      piStep.jobs = piResult.jobStates;
+      piStep.status = "success";
+      piStep.finished_at = new Date().toISOString();
+      applyRepositoryMapArtifacts(run, piResult);
+    } else {
+      applyCompleteExistingRepositoryMapArtifacts(run, existingPi);
+      await appendEvent({
+        message: "All Pi artifacts already accepted; only report will be regenerated.",
+        sandbox_id: sandbox.id,
+        stage: "pi",
+        type: "resume.artifact_reused",
+      });
+    }
+
+    run.status = "success";
+  } catch (error) {
+    const stage = run.current_stage;
+    failure = toScanStageError(error, stage);
+    run.status = "failed";
+    syncKnownArtifacts(run, store);
+    run.error = {
+      diagnostics: failure.diagnostics,
+      message: failure.message,
+      stage: failure.stage,
+      user_message: failure.userMessage,
+    };
+    markRunningStepFailed(run, failure);
+    const failureEvent: Omit<RunEvent, "timestamp"> = {
+      diagnostics: failure.diagnostics,
+      message: failure.userMessage,
+      stage: failure.stage,
+      type: "step.failed",
+    };
+    if (sandbox !== undefined) {
+      failureEvent.sandbox_id = sandbox.id;
+    }
+    await appendEvent(failureEvent);
+  }
+
+  if (sandbox !== undefined) {
+    run.current_stage = "cleanup";
+    await persistRun();
+    const cleanupResult = await sandbox.delete().catch((error: unknown) => ({
+      attempted: true,
+      deleted: false,
+      error: errorMessage(error),
+      success: false,
+    }));
+    if (run.sandbox !== undefined) {
+      run.sandbox.cleanup = cleanupResult;
+    }
+    await appendEvent({
+      message: cleanupResult.success ? "Sandbox deleted." : "Sandbox cleanup failed.",
+      sandbox_id: sandbox.id,
+      stage: "cleanup",
+      type: cleanupResult.success ? "sandbox.deleted" : "sandbox.cleanup_failed",
+    });
+    if (run.status === "success" && !cleanupResult.success) {
+      failure = new ScanStageError({
+        message: cleanupResult.error ?? "Sandbox cleanup failed.",
+        stage: "cleanup",
+        userMessage: "VibeShield completed resume, but sandbox cleanup failed.",
+      });
+      run.status = "failed";
+      run.error = {
+        message: failure.message,
+        stage: failure.stage,
+        user_message: failure.userMessage,
+      };
+    }
+  }
+
+  run.finished_at = new Date().toISOString();
+  run.artifacts.report = "report.md";
+
+  if (run.status === "success") {
+    run.current_stage = "report";
+    await persistRun();
+    await writeSuccessReport({ reportPath, run });
+    run.current_stage = "completed";
+    await persistRun();
+    return {
+      exitCode: 0,
+      run,
+      runDir,
+    };
+  }
+
+  await writeFailureReport({ reportPath, run });
+  await persistRun();
+
+  return {
+    exitCode: 1,
+    run,
+    runDir,
+    userMessage: failure?.userMessage ?? run.error?.user_message ?? "VibeShield resume failed.",
+  };
+}
+
+async function cleanupPreviousSandboxBeforeResume(input: {
+  appendEvent: (event: Omit<RunEvent, "timestamp">) => Promise<void>;
+  run: ScanRunState;
+  sandboxProvider: SandboxProvider;
+}): Promise<void> {
+  const previousSandbox = input.run.sandbox;
+  if (previousSandbox === undefined) {
+    return;
+  }
+
+  await input.appendEvent({
+    message: "Checking previous sandbox before resume.",
+    sandbox_id: previousSandbox.id,
+    stage: "resume",
+    type: "resume.previous_sandbox_cleanup.started",
+  });
+
+  if (input.sandboxProvider.deleteSandboxById === undefined) {
+    await input.appendEvent({
+      diagnostics: ["Sandbox provider does not support deleteSandboxById."],
+      message:
+        "Previous sandbox cleanup is not supported by this provider; continuing with a fresh sandbox.",
+      sandbox_id: previousSandbox.id,
+      stage: "resume",
+      type: "resume.previous_sandbox_cleanup.skipped",
+    });
+    return;
+  }
+
+  const cleanup = await input.sandboxProvider.deleteSandboxById(previousSandbox.id);
+  await input.appendEvent({
+    ...(cleanup.error === undefined ? {} : { diagnostics: [cleanup.error] }),
+    message: cleanup.success
+      ? "Previous sandbox cleanup completed."
+      : "Previous sandbox cleanup failed or sandbox was not found; continuing with a fresh sandbox.",
+    sandbox_id: previousSandbox.id,
+    stage: "resume",
+    type: cleanup.success
+      ? "resume.previous_sandbox_cleanup.completed"
+      : "resume.previous_sandbox_cleanup.failed",
+  });
+}
+
+async function executePiRepositoryMapping(input: {
+  contextPack: PiContextPackArtifact;
+  contextPath: string;
+  existing?: ExistingRepositoryMapArtifacts;
+  generatedAt: string;
+  inventory: InventoryArtifact;
+  onJobFinished?: (jobState: RunJobState) => unknown | Promise<unknown>;
+  onProgress?: Parameters<RepositoryMapRunner>[0]["onProgress"];
+  outputsDir: string;
+  runDir: string;
+  sandbox: SandboxSession;
+  store: ArtifactStore;
+}): Promise<NormalizedRepositoryMapResult> {
+  const runner = runPiRepositoryMapping as unknown as RepositoryMapRunner;
+  const result = await runner(input);
+  return normalizeRepositoryMapResult(result);
+}
+
+async function readExistingRepositoryMapArtifacts(
+  runDir: string,
+  run: ScanRunState,
+): Promise<ExistingRepositoryMapArtifacts> {
+  const existing: ExistingRepositoryMapArtifacts = {};
+
+  for (const definition of repositoryMapArtifacts) {
+    const recordedPath = repositoryMapArtifactPathForRun(run, definition);
+    const artifactPath = recordedPath ?? definition.path;
+    const artifact = await readExistingArtifact<JsonObject>(runDir, artifactPath);
+    if (artifact !== undefined) {
+      existing[definition.existingKey] = {
+        artifact,
+        artifactPath,
+      };
+    }
+  }
+
+  return existing;
+}
+
+function hasCompleteRepositoryMapArtifacts(input: ExistingRepositoryMapArtifacts): boolean {
+  return repositoryMapArtifacts.every((definition) => input[definition.existingKey] !== undefined);
+}
+
+function leadingExistingRepositoryMapArtifacts(
+  input: ExistingRepositoryMapArtifacts,
+): ExistingRepositoryMapArtifacts {
+  const reusable: ExistingRepositoryMapArtifacts = {};
+
+  for (const definition of repositoryMapArtifacts) {
+    const existing = input[definition.existingKey];
+    if (existing === undefined) {
+      break;
+    }
+    reusable[definition.existingKey] = existing;
+  }
+
+  return reusable;
+}
+
+function clearRepositoryMapArtifactsAfterFirstMissing(
+  run: ScanRunState,
+  input: ExistingRepositoryMapArtifacts,
+): void {
+  const firstMissingIndex = repositoryMapArtifacts.findIndex(
+    (definition) => input[definition.existingKey] === undefined,
+  );
+  if (firstMissingIndex === -1) {
+    return;
+  }
+
+  for (const definition of repositoryMapArtifacts.slice(firstMissingIndex)) {
+    if (definition.runKey === undefined) {
+      delete run.artifacts.repository_map;
+      continue;
+    }
+    if (run.artifacts.repo_map !== undefined) {
+      delete run.artifacts.repo_map[definition.runKey];
+    }
+  }
+
+  if (run.artifacts.repo_map !== undefined && Object.keys(run.artifacts.repo_map).length === 0) {
+    delete run.artifacts.repo_map;
+  }
+}
+
+function applyCompleteExistingRepositoryMapArtifacts(
+  run: ScanRunState,
+  input: ExistingRepositoryMapArtifacts,
+): void {
+  if (!hasCompleteRepositoryMapArtifacts(input)) {
+    throw new ScanStageError({
+      message: "Resume expected all repository map artifacts to exist.",
+      stage: "resume",
+      userMessage:
+        "VibeShield could not resume because accepted repository map artifacts are incomplete.",
+    });
+  }
+
+  for (const definition of repositoryMapArtifacts) {
+    const existing = input[definition.existingKey];
+    if (existing === undefined) {
+      continue;
+    }
+    if (definition.runKey === undefined) {
+      run.artifacts.repository_map = existing.artifactPath;
+    } else {
+      run.artifacts.repo_map = run.artifacts.repo_map ?? {};
+      run.artifacts.repo_map[definition.runKey] = existing.artifactPath;
+    }
+  }
+}
+
+function applyRepositoryMapArtifacts(
+  run: ScanRunState,
+  result: NormalizedRepositoryMapResult,
+): void {
+  for (const definition of repositoryMapArtifacts) {
+    const artifactPath = result.artifacts[definition.existingKey];
+    if (definition.runKey === undefined) {
+      run.artifacts.repository_map = artifactPath;
+      continue;
+    }
+    run.artifacts.repo_map = run.artifacts.repo_map ?? {};
+    run.artifacts.repo_map[definition.runKey] = artifactPath;
+  }
+}
+
+function normalizeRepositoryMapResult(result: unknown): NormalizedRepositoryMapResult {
+  if (result === null || typeof result !== "object") {
+    throw new ScanStageError({
+      message: "Pi repository mapping returned an invalid result.",
+      stage: "pi",
+      userMessage: "VibeShield could not read Pi repository mapping artifacts.",
+    });
+  }
+
+  const resultRecord = result as Record<string, unknown>;
+  const artifacts = {} as Required<Record<RepositoryMapExistingKey, string>>;
+  const missing: string[] = [];
+
+  for (const definition of repositoryMapArtifacts) {
+    const artifactPath = extractRepositoryMapResultPath(resultRecord, definition);
+    if (artifactPath === undefined) {
+      missing.push(definition.path);
+      continue;
+    }
+    artifacts[definition.existingKey] = artifactPath;
+  }
+
+  if (missing.length > 0) {
+    throw new ScanStageError({
+      diagnostics: missing.map((artifact) => `Missing Pi artifact path: ${artifact}`),
+      message: `Pi repository mapping result was missing artifact paths: ${missing.join(", ")}.`,
+      stage: "pi",
+      userMessage:
+        "VibeShield could not accept Pi repository mapping output because artifact paths were incomplete.",
+    });
+  }
+
+  const jobStates = Array.isArray(resultRecord.jobStates)
+    ? (resultRecord.jobStates as RunJobState[])
+    : [];
+
+  return {
+    artifacts,
+    jobStates,
+  };
+}
+
+function extractRepositoryMapResultPath(
+  result: Record<string, unknown>,
+  definition: RepositoryMapArtifactDefinition,
+): string | undefined {
+  for (const key of definition.resultPathKeys) {
+    const value = pathFromUnknown(result[key]);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  for (const containerKey of ["artifacts", "paths", "repoMap", "repo_map", "sectionPaths"]) {
+    const container = result[containerKey];
+    if (container === null || typeof container !== "object" || Array.isArray(container)) {
+      continue;
+    }
+    const record = container as Record<string, unknown>;
+    for (const key of [
+      definition.existingKey,
+      definition.runKey,
+      ...definition.resultPathKeys,
+    ].filter((key): key is string => key !== undefined)) {
+      const value = pathFromUnknown(record[key]);
+      if (value !== undefined) {
+        return value;
+      }
+    }
+  }
+
+  const nestedValue = pathFromUnknown(result[definition.existingKey]);
+  return nestedValue ?? pathFromUnknown(result[definition.runKey ?? definition.existingKey]);
+}
+
+function pathFromUnknown(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim() !== "") {
+    return value;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["artifactPath", "artifact_path", "path"]) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim() !== "") {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function repositoryMapArtifactPathForRun(
+  run: ScanRunState,
+  definition: RepositoryMapArtifactDefinition,
+): string | undefined {
+  if (definition.runKey === undefined) {
+    return run.artifacts.repository_map;
+  }
+  return run.artifacts.repo_map?.[definition.runKey];
+}
+
+async function readExistingArtifact<T>(
+  runDir: string,
+  relativePath: string | undefined,
+): Promise<T | undefined> {
+  if (relativePath === undefined) {
+    return undefined;
+  }
+
+  const absolutePath = path.join(runDir, relativePath);
+  try {
+    await access(absolutePath);
+    return JSON.parse(await readFile(absolutePath, "utf8")) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function isValidCommitSha(value: string | undefined): value is string {
+  return typeof value === "string" && /^[0-9a-f]{40}$/i.test(value);
+}
+
 function createRunId(date: Date): string {
   const timestamp = date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(".", "");
   return `run_${timestamp}_${randomUUID().slice(0, 8)}`;
@@ -441,20 +1257,29 @@ function syncKnownArtifacts(run: ScanRunState, store: ArtifactStore): void {
   if (context !== undefined) {
     run.artifacts.pi_context_pack = context.path;
   }
-  const entryPoints = store.get("entry-points");
-  if (entryPoints !== undefined) {
-    run.artifacts.entry_points = entryPoints.path;
+  for (const definition of repositoryMapArtifacts) {
+    const artifact = firstStoredArtifact(store, definition.storeIds);
+    if (artifact === undefined) {
+      continue;
+    }
+    if (definition.runKey === undefined) {
+      run.artifacts.repository_map = artifact.path;
+    } else {
+      run.artifacts.repo_map = run.artifacts.repo_map ?? {};
+      run.artifacts.repo_map[definition.runKey] = artifact.path;
+    }
   }
-  const sensitiveSinks = store.get("sensitive-sinks");
-  if (sensitiveSinks !== undefined) {
-    run.artifacts.sensitive_sinks = sensitiveSinks.path;
+}
+
+function firstStoredArtifact(
+  store: ArtifactStore,
+  ids: string[],
+): ReturnType<ArtifactStore["get"]> {
+  for (const id of ids) {
+    const artifact = store.get(id);
+    if (artifact !== undefined) {
+      return artifact;
+    }
   }
-  const dataFlows = store.get("data-flows");
-  if (dataFlows !== undefined) {
-    run.artifacts.data_flows = dataFlows.path;
-  }
-  const projectUnderstanding = store.get("project-understanding");
-  if (projectUnderstanding !== undefined) {
-    run.artifacts.project_understanding = projectUnderstanding.path;
-  }
+  return undefined;
 }

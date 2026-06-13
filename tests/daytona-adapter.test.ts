@@ -95,10 +95,10 @@ describe("Daytona production adapter boundary", () => {
           ephemeral: true,
           labels: expect.objectContaining({
             app: "vibeshield",
-            phase: "1",
             run_id: "run_test_123",
             source_owner: "octocat",
             source_repo: "Hello-World",
+            workflow: "repository-map",
           }),
           language: "typescript",
           public: false,
@@ -155,7 +155,7 @@ describe("Daytona production adapter boundary", () => {
     await expect(
       session.pullFile("vibeshield/artifacts/pi/metadata.json", localArtifactPath, {
         artifact: "pi/metadata.json",
-        job: "pi-project-understanding",
+        job: "pi-repository-map",
         stage: "pi",
       }),
     ).rejects.toMatchObject({

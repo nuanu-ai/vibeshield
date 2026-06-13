@@ -126,12 +126,11 @@ async function main() {
     .sort((left, right) => left.localeCompare(right));
 
   const inventory = {
-    artifact_version: 1,
     directories,
     files,
     generated_at: config.generatedAt,
-    generated_by: "vibeshield-phase1",
-    kind: "inventory.v1",
+    generated_by: "vibeshield-inventory",
+    kind: "inventory",
     sandbox: {
       id: config.sandboxId,
       inventory_location: "inside_sandbox",

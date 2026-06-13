@@ -16,10 +16,9 @@ export interface RepoInventoryDirectory {
 }
 
 export interface RepoInventory {
-  artifact_version: 1;
   generated_at: string;
-  generated_by: "vibeshield-phase1";
-  kind: "inventory.v1";
+  generated_by: "vibeshield-inventory";
+  kind: "inventory";
   sandbox: {
     id: string;
     inventory_location: "inside_sandbox";
@@ -75,12 +74,11 @@ export async function buildRepoInventory(input: {
     .sort((left, right) => left.localeCompare(right));
 
   return {
-    artifact_version: 1,
     directories,
     files,
     generated_at: input.generatedAt,
-    generated_by: "vibeshield-phase1",
-    kind: "inventory.v1",
+    generated_by: "vibeshield-inventory",
+    kind: "inventory",
     sandbox: {
       id: input.sandboxId,
       inventory_location: "inside_sandbox",

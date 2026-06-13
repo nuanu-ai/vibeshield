@@ -3,20 +3,26 @@ import type { GitHubRepoReference } from "./github-url.js";
 export type RunStatus = "failed" | "running" | "success";
 
 export type RunStage =
+  | "auth-config-secrets-validation"
   | "cleanup"
   | "clone"
   | "completed"
   | "context"
+  | "coverage-structure-validation"
   | "create_run"
   | "create_sandbox"
   | "data-flows-validation"
   | "deterministic-baseline"
-  | "entry-points-validation"
+  | "entrypoints-validation"
   | "inventory"
+  | "operation-sinks-validation"
   | "pi"
-  | "project-understanding-validation"
   | "report"
-  | "sensitive-sinks-validation";
+  | "repository-map-validation"
+  | "resume"
+  | "stack-build-deps-validation"
+  | "storage-integrations-infra-validation"
+  | "trust-boundaries-validation";
 
 export interface RunError {
   diagnostics?: string[];
@@ -36,16 +42,23 @@ export interface ScanRunState {
   artifacts: {
     baseline_summary?: string;
     baseline_tool_availability?: string;
+    repo_map?: {
+      auth_config_secrets?: string;
+      coverage_structure?: string;
+      data_flows?: string;
+      entrypoints?: string;
+      operation_sinks?: string;
+      stack_build_deps?: string;
+      storage_integrations_infra?: string;
+      trust_boundaries?: string;
+    };
     events: string;
     inventory?: string;
     inventory_legacy?: string;
     outputs_dir: string;
-    data_flows?: string;
-    entry_points?: string;
     pi_context_pack?: string;
-    project_understanding?: string;
     report?: string;
-    sensitive_sinks?: string;
+    repository_map?: string;
   };
   commit_sha?: string;
   created_at: string;

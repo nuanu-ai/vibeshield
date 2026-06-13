@@ -18,7 +18,7 @@ export interface ParseGitHubRepoFailure {
 export type ParseGitHubRepoResult = ParseGitHubRepoSuccess | ParseGitHubRepoFailure;
 
 const scopeError =
-  "Phase 0 accepts only GitHub repository URLs like https://github.com/owner/repo. " +
+  "VibeShield accepts only GitHub repository URLs like https://github.com/owner/repo. " +
   "Local paths, archives, malformed URLs, and non-GitHub sources are out of scope.";
 
 const segmentPattern = /^[A-Za-z0-9_.-]+$/;

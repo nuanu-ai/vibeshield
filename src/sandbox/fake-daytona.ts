@@ -6,12 +6,8 @@ import { promisify } from "node:util";
 import type {
   BaselineObservation,
   BaselineToolName,
-  DataFlowsArtifact,
-  EntryPointsArtifact,
   PiContextPackArtifact,
-  PiSemanticEvaluationArtifact,
-  ProjectUnderstandingArtifact,
-  SensitiveSinksArtifact,
+  RepositoryMapArtifact,
   ToolAvailabilityArtifact,
 } from "../artifacts/contracts.js";
 import { buildRepoInventory } from "../inventory/repo-inventory.js";
@@ -19,6 +15,7 @@ import { ScanStageError } from "../run/errors.js";
 import { redactDeep } from "../run/redaction.js";
 import type { SandboxCleanupState } from "../run/types.js";
 import type {
+  CloneRepositoryOptions,
   CloneRepositoryResult,
   GenerateInventoryInput,
   PrepareBaselineToolsInput,
@@ -39,17 +36,28 @@ export interface FakeDaytonaSandboxProviderOptions {
   failAt?: "baseline" | "clone" | "inventory" | "pi";
   fixtureRepos: Map<string, string>;
   piOutputs?: Partial<Record<string, FakePiOutput>>;
-  projectUnderstandingOutput?: ProjectUnderstandingArtifact | ((input: RuntimeJobInput) => unknown);
   sandboxRoot: string;
   unavailableTools?: BaselineToolName[];
 }
 
 type FakePiOutput = unknown | ((input: RuntimeJobInput) => unknown);
 
+type RepoMapStep =
+  | "auth-config-secrets"
+  | "coverage-structure"
+  | "data-flows"
+  | "entrypoints"
+  | "operation-sinks"
+  | "repository-map"
+  | "stack-build-deps"
+  | "storage-integrations-infra"
+  | "trust-boundaries";
+
 export class FakeDaytonaSandboxProvider implements SandboxProvider {
   readonly createdSandboxIds: string[] = [];
   readonly liveSandboxIds: string[] = [];
   readonly sessions: FakeDaytonaSandboxSession[] = [];
+  readonly staleDeleteCalls: string[] = [];
 
   private sequence = 0;
 
@@ -68,9 +76,6 @@ export class FakeDaytonaSandboxProvider implements SandboxProvider {
       repoUrl: context.repo.url,
       sandboxDir,
       unavailableTools: this.options.unavailableTools ?? [],
-      ...(this.options.projectUnderstandingOutput === undefined
-        ? {}
-        : { projectUnderstandingOutput: this.options.projectUnderstandingOutput }),
       removeLiveSandboxId: () => {
         const index = this.liveSandboxIds.indexOf(id);
         if (index >= 0) {
@@ -90,6 +95,20 @@ export class FakeDaytonaSandboxProvider implements SandboxProvider {
 
     return session;
   }
+
+  async deleteSandboxById(sandboxId: string): Promise<SandboxCleanupState> {
+    this.staleDeleteCalls.push(sandboxId);
+    const index = this.liveSandboxIds.indexOf(sandboxId);
+    if (index >= 0) {
+      this.liveSandboxIds.splice(index, 1);
+    }
+
+    return {
+      attempted: true,
+      deleted: index >= 0,
+      success: true,
+    };
+  }
 }
 
 export class FakeDaytonaSandboxSession implements SandboxSession {
@@ -107,7 +126,10 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
     return this.options.id;
   }
 
-  async cloneRepository(): Promise<CloneRepositoryResult> {
+  async cloneRepository(
+    _repo?: unknown,
+    options: CloneRepositoryOptions = {},
+  ): Promise<CloneRepositoryResult> {
     this.commands.push({
       command: "git clone --no-local <fixture-repo> <sandbox-repo>",
       cwd: this.options.sandboxDir,
@@ -135,6 +157,18 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
     await execFileAsync("git", ["clone", "--no-local", "--quiet", fixtureRepo, this.repoPath], {
       cwd: this.options.sandboxDir,
     });
+
+    if (options.commitSha !== undefined) {
+      this.commands.push({
+        command: "git -C <sandbox-repo> checkout --detach <commit>",
+        cwd: this.options.sandboxDir,
+        repoDefinedCommand: false,
+        stage: "clone",
+      });
+      await execFileAsync("git", ["-C", this.repoPath, "checkout", "--detach", options.commitSha], {
+        cwd: this.options.sandboxDir,
+      });
+    }
 
     this.commands.push({
       command: "git -C <sandbox-repo> rev-parse HEAD",
@@ -180,7 +214,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
     await writeFile(artifactPath, `${JSON.stringify(inventory, null, 2)}\n`, "utf8");
 
     return {
-      relativePath: "inventory.v1.json",
+      relativePath: "inventory.json",
       sandboxPath: artifactPath,
     };
   }
@@ -208,7 +242,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       throw new ScanStageError({
         message: "Fake Daytona Pi failure.",
         stage: "pi",
-        userMessage: "VibeShield could not complete the Pi project-understanding step.",
+        userMessage: "VibeShield could not complete the Pi repository-map step.",
       });
     }
     return this.runFakePi(input);
@@ -221,9 +255,8 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
     await mkdir(toolDir, { recursive: true });
     const unavailable = new Set(this.options.unavailableTools ?? []);
     const availability: ToolAvailabilityArtifact = {
-      artifact_version: 1,
       generated_at: input.generatedAt,
-      kind: "tool-availability.v1",
+      kind: "tool-availability",
       tool_bin_dir: path.join(this.options.sandboxDir, "tools", "bin"),
       tools: input.tools.map((tool) => {
         if (!tool.required) {
@@ -264,12 +297,12 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
         };
       }),
     };
-    const artifactPath = path.join(toolDir, "tool-availability.v1.json");
+    const artifactPath = path.join(toolDir, "tool-availability.json");
     await writeFile(artifactPath, `${JSON.stringify(availability, null, 2)}\n`, "utf8");
 
     return {
       artifact: {
-        relativePath: "baseline/tool-availability.v1.json",
+        relativePath: "baseline/tool-availability.json",
         sandboxPath: artifactPath,
       },
       availability,
@@ -323,7 +356,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       const sbomPath = path.join(this.artifactsDir, "baseline", "syft-sbom.json");
       await writeFile(
         sbomPath,
-        `${JSON.stringify({ artifact_version: 1, files, generated_by: "fake-syft" }, null, 2)}\n`,
+        `${JSON.stringify({ files, generated_by: "fake-syft" }, null, 2)}\n`,
         "utf8",
       );
       artifacts.unshift({
@@ -504,7 +537,6 @@ interface FakeDaytonaSandboxSessionOptions {
   fixtureRepos: Map<string, string>;
   id: string;
   piOutputs: Partial<Record<string, FakePiOutput>>;
-  projectUnderstandingOutput?: ProjectUnderstandingArtifact | ((input: RuntimeJobInput) => unknown);
   removeLiveSandboxId: () => void;
   repoUrl: string;
   sandboxDir: string;
@@ -551,7 +583,7 @@ function skippedReasonForTool(
 function fakeToolArgs(tool: BaselineToolName): string[] {
   switch (tool) {
     case "syft":
-      return ["dir:<repo>", "-o", "json"];
+      return ["dir:<repo>", "-o", "cyclonedx-json"];
     case "gitleaks":
       return ["detect", "--source", "<repo>", "--redact"];
     case "trivy":
@@ -573,13 +605,13 @@ function fakeObservationsForTool(tool: BaselineToolName, files: string[]): Basel
     ),
   );
 
-  if ((tool === "syft" || tool === "trivy") && manifests.length > 0) {
+  if (tool === "trivy" && manifests.length > 0) {
     observations.push({
-      confidence: "medium",
-      evidence: manifests.map((file) => `${file}:1`),
+      confidence: "high",
+      evidence: [`${manifests[0]}:1`],
       kind: "dependency",
-      message: `${tool} saw dependency manifests for follow-up vulnerability review.`,
-      severity: "info",
+      message: "CVE-FAKE-0001 in fixture-dependency@1.0.0 fixed in 1.0.1",
+      severity: "medium",
     });
   }
 
@@ -604,12 +636,13 @@ function fakeObservationsForTool(tool: BaselineToolName, files: string[]): Basel
   }
 
   if (tool === "checkov" && files.some(isIacCandidatePath)) {
+    const candidate = files.find(isIacCandidatePath);
     observations.push({
-      confidence: "medium",
-      evidence: files.filter(isIacCandidatePath).map((file) => `${file}:1`),
+      confidence: "high",
+      evidence: candidate === undefined ? [] : [`${candidate}:1`],
       kind: "iac",
-      message: "IaC/config candidates were routed through checkov.",
-      severity: "info",
+      message: "CKV_FAKE_1: Fixture IaC check failed",
+      severity: "medium",
     });
   }
 
@@ -624,59 +657,111 @@ function fakePiOutputForStep(
     throw new Error("Missing Pi job input.");
   }
 
-  const configured = options.piOutputs[input.pi.step] ?? options.piOutputs[input.pi.outputBaseName];
+  const configured = configuredFakePiOutput(input, options);
   if (configured !== undefined) {
     return typeof configured === "function" ? configured(input) : configured;
   }
 
-  if (
-    input.pi.outputBaseName === "project-understanding" &&
-    options.projectUnderstandingOutput !== undefined
-  ) {
-    return typeof options.projectUnderstandingOutput === "function"
-      ? options.projectUnderstandingOutput(input)
-      : options.projectUnderstandingOutput;
-  }
-
-  if (input.pi.outputBaseName.endsWith("-semantic-evaluation")) {
-    return defaultFakeSemanticEvaluation(input);
-  }
-
-  switch (input.pi.outputBaseName) {
-    case "entry-points":
-      return defaultFakeEntryPoints(input);
-    case "sensitive-sinks":
-      return defaultFakeSensitiveSinks(input);
+  const repoMapStep = repoMapStepFromInput(input);
+  switch (repoMapStep) {
+    case "coverage-structure":
+      return defaultFakeRepoMapCoverageStructure(input);
+    case "stack-build-deps":
+      return defaultFakeRepoMapStackBuildDeps(input);
+    case "entrypoints":
+      return defaultFakeRepoMapEntrypoints(input);
+    case "auth-config-secrets":
+      return defaultFakeRepoMapAuthConfigSecrets(input);
+    case "storage-integrations-infra":
+      return defaultFakeRepoMapStorageIntegrationsInfra(input);
+    case "operation-sinks":
+      return defaultFakeRepoMapOperationSinks(input);
     case "data-flows":
-      return defaultFakeDataFlows(input);
-    case "project-understanding":
-      return defaultFakeProjectUnderstanding(input);
-    default:
-      throw new Error(`No fake Pi output is configured for ${input.pi.outputBaseName}.`);
+      return defaultFakeRepoMapDataFlows(input);
+    case "trust-boundaries":
+      return defaultFakeRepoMapTrustBoundaries(input);
+    case "repository-map":
+      return defaultFakeRepositoryMap(input);
+    case undefined:
+      break;
   }
+
+  throw new Error(`No fake Pi output is configured for ${input.pi.outputBaseName}.`);
 }
 
-function defaultFakeSemanticEvaluation(input: RuntimeJobInput): PiSemanticEvaluationArtifact {
-  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
-  const stage = input.pi?.step.replace(/:semantic-evaluation$/, "") ?? "unknown";
-  return {
-    accepted: true,
-    artifact_version: 1,
-    attempt_count: 1,
-    candidate_kind: stage as PiSemanticEvaluationArtifact["candidate_kind"],
-    generated_at: new Date().toISOString(),
-    generated_by: "pi",
-    issues: [],
-    kind: "pi-semantic-evaluation.v1",
-    missing_coverage: [],
-    overclaims: [],
-    repo: {
-      commit_sha: context?.repo?.commit_sha ?? null,
-      url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
-    },
-    stage,
-    summary: "Fake semantic evaluator accepted the candidate artifact.",
-  };
+function configuredFakePiOutput(
+  input: RuntimeJobInput,
+  options: FakeDaytonaSandboxSessionOptions,
+): FakePiOutput | undefined {
+  const pi = input.pi;
+  if (pi === undefined) {
+    return undefined;
+  }
+
+  const keys = new Set([pi.step, pi.outputBaseName, pi.artifactSubdir]);
+  const repoMapStep = repoMapStepFromInput(input);
+  if (repoMapStep !== undefined) {
+    keys.add(repoMapStep);
+    keys.add(`repo-map/${repoMapStep}`);
+    keys.add(`repo-map-${repoMapStep}`);
+  }
+
+  for (const key of keys) {
+    const output = options.piOutputs[key];
+    if (output !== undefined) {
+      return output;
+    }
+  }
+
+  return undefined;
+}
+
+function repoMapStepFromInput(input: RuntimeJobInput): RepoMapStep | undefined {
+  if (input.pi === undefined) {
+    return undefined;
+  }
+
+  return (
+    normalizeRepoMapStep(input.pi.step) ??
+    normalizeRepoMapStep(input.pi.outputBaseName) ??
+    normalizeRepoMapStep(input.pi.artifactSubdir)
+  );
+}
+
+function normalizeRepoMapStep(value: string): RepoMapStep | undefined {
+  const normalized = value
+    .replace(/^outputs\//, "")
+    .replace(/^repo-map\//, "")
+    .replace(/^pi-repo-map-/, "")
+    .replace(/^repo-map-/, "")
+    .replace(/\.json$/, "");
+
+  switch (normalized) {
+    case "coverage":
+    case "coverage-structure":
+      return "coverage-structure";
+    case "stack":
+    case "stack-build-deps":
+      return "stack-build-deps";
+    case "entrypoints":
+      return "entrypoints";
+    case "auth":
+    case "auth-config-secrets":
+      return "auth-config-secrets";
+    case "storage":
+    case "storage-integrations-infra":
+      return "storage-integrations-infra";
+    case "operation-sinks":
+      return "operation-sinks";
+    case "data-flows":
+      return "data-flows";
+    case "trust-boundaries":
+      return "trust-boundaries";
+    case "repository-map":
+      return "repository-map";
+    default:
+      return undefined;
+  }
 }
 
 function isFakeRawPiOutput(value: unknown): value is { rawText: string } {
@@ -688,218 +773,565 @@ function isFakeRawPiOutput(value: unknown): value is { rawText: string } {
   );
 }
 
-function defaultFakeEntryPoints(input: RuntimeJobInput): EntryPointsArtifact {
+function defaultFakeRepoMapCoverageStructure(input: RuntimeJobInput) {
   const now = new Date().toISOString();
-  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
-  const inventory = context?.inventory;
-  const manifestPath = inventory?.manifest_files?.[0] ?? "README.md";
-  const entrypointPath = inventory?.candidate_entrypoints?.[0] ?? manifestPath;
-  const repo = {
-    commit_sha: context?.repo?.commit_sha ?? null,
-    url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
-  };
+  const repo = fakeRepoFromInput(input);
+  const manifestPath = fakeManifestPath(input);
 
   return {
-    artifact_version: 1,
-    coverage: {
-      not_covered: [
-        { area: "Runtime-only entrypoints", reason: "Fake Pi does not execute the app." },
+    coverage: fakeRepoMapCoverage("Repository structure", [`${manifestPath}:1`]),
+    coverage_targets: [
+      {
+        area: "Application source",
+        evidence: ["src/server.ts:1"],
+        reason: "Primary source directory reviewed for repository map facts.",
+      },
+    ],
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    important_files: [
+      {
+        evidence: [`${manifestPath}:1`],
+        path: manifestPath,
+        reason: "Defines dependencies and scripts.",
+      },
+      {
+        evidence: ["Dockerfile:1"],
+        path: "Dockerfile",
+        reason: "Defines runtime image.",
+      },
+    ],
+    kind: "coverage-structure",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo,
+    repository_structure: [
+      { evidence: ["src/server.ts:1"], kind: "source", path: "src", role: "application source" },
+      { evidence: ["infra/main.tf:1"], kind: "infra", path: "infra", role: "infrastructure" },
+      { evidence: [`${manifestPath}:1`], kind: "dependency", path: manifestPath, role: "manifest" },
+    ],
+  };
+}
+
+function defaultFakeRepoMapStackBuildDeps(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+  const repo = fakeRepoFromInput(input);
+  const manifestPath = fakeManifestPath(input);
+
+  return {
+    build: {
+      commands: [
+        {
+          command: "node scripts/should-not-run.js",
+          evidence: [`${manifestPath}:6`],
+          id: "build-package-script",
+          name: "package build script",
+          source: "package.json scripts.build",
+        },
       ],
-      reviewed: [{ area: "Candidate entrypoint files", evidence: [`${entrypointPath}:1`] }],
+      lockfiles: [],
+      manifests: [{ evidence: [`${manifestPath}:1`], path: manifestPath }],
     },
-    entry_points: [
+    coverage: fakeRepoMapCoverage("Stack, build, dependencies, and CI", [
+      `${manifestPath}:1`,
+      ".github/workflows/ci.yml:1",
+    ]),
+    dependencies: [
       {
-        confidence: "medium",
-        evidence: [`${entrypointPath}:1`],
-        id: "ep-1",
+        confidence: "high",
+        evidence: [`${manifestPath}:4`],
+        id: "dep-express",
+        kind: "dependency",
+        name: "express",
+        role: "^5.0.0 runtime dependency",
+      },
+    ],
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    kind: "stack-build-deps",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo,
+    stack: [
+      {
+        confidence: "high",
+        evidence: ["src/server.ts:1"],
+        id: "stack-typescript",
+        kind: "language",
+        name: "TypeScript",
+        role: "application source",
+      },
+      {
+        confidence: "high",
+        evidence: ["Dockerfile:1"],
+        id: "runtime-node-24",
+        kind: "runtime",
+        name: "Node.js",
+        role: "24-alpine container runtime",
+      },
+      {
+        confidence: "high",
+        evidence: [".github/workflows/ci.yml:1"],
+        id: "ci-github-actions",
+        kind: "service",
+        name: "GitHub Actions",
+        role: "CI workflow",
+      },
+    ],
+  };
+}
+
+function defaultFakeRepoMapEntrypoints(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    coverage: fakeRepoMapCoverage("External entrypoints", [
+      "src/server.ts:5",
+      "src/cli.ts:3",
+      "src/jobs/cleanup.ts:3",
+      "src/parsers/json.ts:2",
+    ]),
+    entrypoints: [
+      {
+        confidence: "high",
+        evidence: ["src/server.ts:5"],
+        id: "entry-http-spam",
         kind: "http_route",
-        location: entrypointPath,
-        name: "Primary HTTP route candidate",
-        route: "/api",
+        location: "src/server.ts",
+        method: "POST",
+        name: "POST /api/spam",
+        route: "/api/spam",
       },
-    ],
-    generated_at: now,
-    generated_by: "pi",
-    kind: "entry-points.v1",
-    metadata: {
-      pi: fakePiMetadata(input),
-    },
-    repo,
-  };
-}
-
-function defaultFakeSensitiveSinks(input: RuntimeJobInput): SensitiveSinksArtifact {
-  const now = new Date().toISOString();
-  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
-  const inventory = context?.inventory;
-  const manifestPath = inventory?.manifest_files?.[0] ?? "README.md";
-  const sinkPath =
-    inventory?.candidate_entrypoints?.[1] ?? inventory?.candidate_entrypoints?.[0] ?? manifestPath;
-  const repo = {
-    commit_sha: context?.repo?.commit_sha ?? null,
-    url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
-  };
-
-  return {
-    artifact_version: 1,
-    coverage: {
-      not_covered: [{ area: "Runtime-only sinks", reason: "Fake Pi does not execute the app." }],
-      reviewed: [{ area: "Candidate operation files", evidence: [`${sinkPath}:1`] }],
-    },
-    generated_at: now,
-    generated_by: "pi",
-    kind: "sensitive-sinks.v1",
-    metadata: {
-      pi: fakePiMetadata(input),
-    },
-    repo,
-    sinks: [
       {
-        confidence: "medium",
-        evidence: [`${sinkPath}:1`],
-        id: "sink-1",
-        kind: "filesystem_operation",
-        location: sinkPath,
-        operation: "Observable operation candidate",
+        command: "scan",
+        confidence: "high",
+        evidence: ["src/cli.ts:3"],
+        id: "entry-cli-scan",
+        kind: "cli_command",
+        location: "src/cli.ts",
+        name: "scan command",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/jobs/cleanup.ts:3"],
+        id: "entry-cron-cleanup",
+        kind: "cron_job",
+        location: "src/jobs/cleanup.ts",
+        name: "hourly cleanup job",
+        schedule: "0 * * * *",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/parsers/json.ts:2"],
+        id: "entry-parser-json",
+        kind: "external_format_parser",
+        location: "src/parsers/json.ts",
+        name: "JSON payload parser",
+      },
+    ],
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    kind: "entrypoints",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo: fakeRepoFromInput(input),
+  };
+}
+
+function defaultFakeRepoMapAuthConfigSecrets(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    auth: [
+      {
+        confidence: "high",
+        evidence: ["src/auth.ts:2"],
+        id: "auth-session-middleware",
+        kind: "middleware",
+        location: "src/auth.ts",
+        name: "requireSession middleware",
+        notes: "Used by entry-http-spam route.",
+      },
+    ],
+    config: [
+      {
+        confidence: "high",
+        evidence: ["src/config.ts:1", ".env.example:1"],
+        id: "config-api-base-url",
+        kind: "config_source",
+        location: "src/config.ts",
+        name: "API_BASE_URL",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/config.ts:1", ".env.example:2"],
+        id: "config-session-secret",
+        kind: "config_source",
+        location: "src/config.ts",
+        name: "SESSION_SECRET",
+      },
+    ],
+    coverage: fakeRepoMapCoverage("Auth, configuration, and secret locations", [
+      "src/auth.ts:2",
+      "src/config.ts:1",
+      ".env.example:1",
+    ]),
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    kind: "auth-config-secrets",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo: fakeRepoFromInput(input),
+    secret_references: [
+      {
+        confidence: "high",
+        evidence: [".env.example:2"],
+        id: "secret-session-example",
+        kind: "secret_reference",
+        location: ".env.example",
+        name: "SESSION_SECRET",
+        value_redacted: true,
       },
     ],
   };
 }
 
-function defaultFakeDataFlows(input: RuntimeJobInput): DataFlowsArtifact {
+function defaultFakeRepoMapStorageIntegrationsInfra(input: RuntimeJobInput) {
   const now = new Date().toISOString();
-  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
-  const inventory = context?.inventory;
-  const evidencePath =
-    inventory?.candidate_entrypoints?.[0] ?? inventory?.manifest_files?.[0] ?? "README.md";
-  const repo = {
-    commit_sha: context?.repo?.commit_sha ?? null,
-    url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
-  };
 
   return {
-    artifact_version: 1,
-    coverage: {
-      not_covered: [{ area: "Runtime execution", reason: "Fake Pi does not execute requests." }],
-      reviewed: [{ area: "Entry-to-sink candidates", evidence: [`${evidencePath}:1`] }],
+    coverage: fakeRepoMapCoverage("Storage, integrations, and infrastructure", [
+      "src/db.ts:2",
+      "src/schema.sql:1",
+      "src/http.ts:3",
+      "Dockerfile:1",
+      "infra/main.tf:1",
+    ]),
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    infra: [
+      {
+        confidence: "high",
+        evidence: ["Dockerfile:1"],
+        id: "infra-dockerfile",
+        kind: "runtime",
+        location: "Dockerfile",
+        name: "Dockerfile",
+        role: "Node.js container runtime",
+      },
+      {
+        confidence: "high",
+        evidence: ["infra/main.tf:1"],
+        id: "infra-terraform",
+        kind: "iac",
+        location: "infra/main.tf",
+        name: "Terraform demo resource",
+        role: "Infrastructure definition",
+      },
+      {
+        confidence: "high",
+        evidence: [".github/workflows/ci.yml:1"],
+        id: "ci-github-actions",
+        kind: "workflow",
+        location: ".github/workflows/ci.yml",
+        name: "GitHub Actions CI",
+        role: "CI workflow",
+      },
+    ],
+    integrations: [
+      {
+        confidence: "high",
+        evidence: ["src/http.ts:3"],
+        id: "integration-webhook-client",
+        kind: "external_api",
+        location: "src/http.ts",
+        name: "configured webhook base URL",
+        role: "Outbound HTTP client",
+      },
+    ],
+    kind: "storage-integrations-infra",
+    metadata: {
+      pi: fakePiMetadata(input),
     },
+    repo: fakeRepoFromInput(input),
+    storage: [
+      {
+        confidence: "high",
+        evidence: ["src/db.ts:2", "src/schema.sql:1"],
+        id: "store-messages-db",
+        kind: "database",
+        location: "src/schema.sql",
+        name: "messages table",
+        role: "SQL data model",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/files.ts:4"],
+        id: "store-upload-filesystem",
+        kind: "file_storage",
+        location: "src/files.ts",
+        name: "local upload directory",
+        role: "Filesystem write target",
+      },
+    ],
+  };
+}
+
+function defaultFakeRepoMapOperationSinks(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    coverage: fakeRepoMapCoverage("Operation sinks", [
+      "src/db.ts:2",
+      "src/files.ts:4",
+      "src/http.ts:3",
+      "src/logger.ts:2",
+      "src/crypto.ts:2",
+      "src/crypto.ts:3",
+    ]),
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    kind: "operation-sinks",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    operation_sinks: [
+      {
+        confidence: "high",
+        evidence: ["src/db.ts:2"],
+        id: "sink-db-insert",
+        input_variables: ["text"],
+        kind: "sql_or_orm_query",
+        location: "src/db.ts",
+        operation: "db.query insert statement",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/files.ts:4"],
+        id: "sink-filesystem-write",
+        input_variables: ["name", "body"],
+        kind: "filesystem_operation",
+        location: "src/files.ts",
+        operation: "writeFile path.join write",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/http.ts:3"],
+        id: "sink-outbound-webhook",
+        input_variables: ["baseUrl", "id"],
+        kind: "outbound_http_or_sdk_url",
+        location: "src/http.ts",
+        operation: "fetch URL constructed from variables",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/logger.ts:2"],
+        id: "sink-audit-log",
+        input_variables: ["value"],
+        kind: "logging",
+        location: "src/logger.ts",
+        operation: "console.log audit value",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/crypto.ts:2"],
+        id: "sink-crypto-hmac",
+        input_variables: ["body", "secret"],
+        kind: "crypto_operation",
+        location: "src/crypto.ts",
+        operation: "createHmac sha256",
+      },
+      {
+        confidence: "high",
+        evidence: ["src/crypto.ts:3"],
+        id: "sink-random-token",
+        kind: "randomness",
+        location: "src/crypto.ts",
+        operation: "randomBytes token generation",
+      },
+    ],
+    repo: fakeRepoFromInput(input),
+  };
+}
+
+function defaultFakeRepoMapDataFlows(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    coverage: fakeRepoMapCoverage("Bounded external-input data flows", [
+      "src/server.ts:5",
+      "src/db.ts:2",
+    ]),
+    fact_gaps: [],
     flows: [
       {
-        id: "flow-1",
-        intermediate_functions: [],
-        sink: "sink-1",
-        sink_evidence: [`${evidencePath}:1`],
-        source_entrypoint: "ep-1",
-        source_evidence: [`${evidencePath}:1`],
+        breakpoint: null,
+        id: "flow-http-spam-db",
+        inference: false,
+        intermediate_functions: [{ evidence: ["src/db.ts:1"], name: "saveMessage" }],
+        operation_sink: "sink-db-insert",
+        operation_sink_evidence: ["src/db.ts:2"],
+        source_entrypoint: "entry-http-spam",
+        source_evidence: ["src/server.ts:5"],
         trace_status: "direct observed",
       },
     ],
     generated_at: now,
     generated_by: "pi",
     inputs: {
-      entry_points_artifact: "outputs/entry-points.v1.json",
-      sensitive_sinks_artifact: "outputs/sensitive-sinks.v1.json",
+      entrypoints_artifact: "outputs/repo-map/entrypoints.json",
+      operation_sinks_artifact: "outputs/repo-map/operation-sinks.json",
     },
-    kind: "data-flows.v1",
+    kind: "data-flows",
     metadata: {
       pi: fakePiMetadata(input),
     },
-    repo,
+    repo: fakeRepoFromInput(input),
   };
 }
 
-function defaultFakeProjectUnderstanding(input: RuntimeJobInput): ProjectUnderstandingArtifact {
+function defaultFakeRepoMapTrustBoundaries(input: RuntimeJobInput) {
   const now = new Date().toISOString();
-  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
-  const inventory = context?.inventory;
-  const manifestPath = inventory?.manifest_files?.[0] ?? "README.md";
-  const entrypointPath = inventory?.candidate_entrypoints?.[0] ?? manifestPath;
-  const repo = {
-    commit_sha: context?.repo?.commit_sha ?? null,
-    url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
-  };
 
   return {
-    artifact_version: 1,
-    coverage: {
-      not_covered: [{ area: "Runtime behavior", reason: "Phase 1 does not execute the app." }],
-      reviewed: [{ area: "Previous Pi artifacts", evidence: [`${entrypointPath}:1`] }],
-    },
-    data_flow_groups: [
+    boundaries: [
       {
-        evidence: [`${entrypointPath}:1`],
-        flow_ids: ["flow-1"],
-        name: "Observed entry-to-operation traces",
-        summary: "Data-flow synthesis is based on data-flows.v1.",
-        trace_statuses: ["direct observed"],
+        confidence: "medium",
+        description:
+          "External HTTP request data crosses from a network boundary into application and database handling.",
+        evidence: ["src/server.ts:5", "src/auth.ts:2", "src/db.ts:2"],
+        flow_ids: ["flow-http-spam-db"],
+        id: "boundary-external-http-to-app-db",
+        inference: true,
+        kind: "external_user_to_app",
+        name: "External HTTP to app/database",
+        sink_ids: ["sink-db-insert"],
+        source_artifact_ids: ["entrypoints", "auth-config-secrets", "data-flows"],
+        source_entrypoint_ids: ["entry-http-spam"],
+        summary: "External HTTP request data crosses into the application and database layer.",
       },
     ],
-    entry_point_groups: [
-      {
-        entry_point_ids: ["ep-1"],
-        evidence: [`${entrypointPath}:1`],
-        name: "Primary entrypoint group",
-        summary: "Entry point group summarized from entry-points.v1.",
-      },
-    ],
+    coverage: fakeRepoMapCoverage("Trust-boundary inferences", [
+      "src/server.ts:5",
+      "src/auth.ts:2",
+      "src/db.ts:2",
+    ]),
+    fact_gaps: [],
     generated_at: now,
     generated_by: "pi",
     inputs: {
-      data_flows_artifact: "outputs/data-flows.v1.json",
-      entry_points_artifact: "outputs/entry-points.v1.json",
-      sensitive_sinks_artifact: "outputs/sensitive-sinks.v1.json",
+      auth_config_secrets_artifact: "outputs/repo-map/auth-config-secrets.json",
+      coverage_structure_artifact: "outputs/repo-map/coverage-structure.json",
+      data_flows_artifact: "outputs/repo-map/data-flows.json",
+      entrypoints_artifact: "outputs/repo-map/entrypoints.json",
+      operation_sinks_artifact: "outputs/repo-map/operation-sinks.json",
+      stack_build_deps_artifact: "outputs/repo-map/stack-build-deps.json",
+      storage_integrations_infra_artifact: "outputs/repo-map/storage-integrations-infra.json",
     },
-    kind: "project-understanding.v1",
-    map: {
-      components: [
-        {
-          evidence: [`${entrypointPath}:1`],
-          kind: "application",
-          name: "Repository application surface",
-          summary: "Component grouping synthesized from prior Pi artifacts.",
-        },
-      ],
-      important_files: [
-        {
-          evidence: [`${manifestPath}:1`],
-          path: manifestPath,
-          reason: "Important project manifest or configuration file.",
-        },
-      ],
-    },
+    kind: "trust-boundaries",
     metadata: {
       pi: fakePiMetadata(input),
     },
-    fact_gaps: [
-      {
-        area: "Runtime behavior",
-        evidence: [`${entrypointPath}:1`],
-        missing_fact: "Runtime behavior was not executed or observed in Phase 1.",
-      },
+    repo: fakeRepoFromInput(input),
+  };
+}
+
+function defaultFakeRepositoryMap(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    coverage: fakeRepoMapCoverage("Repository map synthesis", ["src/server.ts:5"]),
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    inputs: {
+      auth_config_secrets_artifact: "outputs/repo-map/auth-config-secrets.json",
+      coverage_structure_artifact: "outputs/repo-map/coverage-structure.json",
+      data_flows_artifact: "outputs/repo-map/data-flows.json",
+      entrypoints_artifact: "outputs/repo-map/entrypoints.json",
+      operation_sinks_artifact: "outputs/repo-map/operation-sinks.json",
+      stack_build_deps_artifact: "outputs/repo-map/stack-build-deps.json",
+      storage_integrations_infra_artifact: "outputs/repo-map/storage-integrations-infra.json",
+      trust_boundaries_artifact: "outputs/repo-map/trust-boundaries.json",
+    },
+    kind: "repository-map",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo: fakeRepoFromInput(input),
+    sections: [
+      fakeRepoMapSection("coverage-structure", "outputs/repo-map/coverage-structure.json", 3),
+      fakeRepoMapSection("stack-build-deps", "outputs/repo-map/stack-build-deps.json", 4),
+      fakeRepoMapSection("entrypoints", "outputs/repo-map/entrypoints.json", 4),
+      fakeRepoMapSection("auth-config-secrets", "outputs/repo-map/auth-config-secrets.json", 4),
+      fakeRepoMapSection(
+        "storage-integrations-infra",
+        "outputs/repo-map/storage-integrations-infra.json",
+        6,
+      ),
+      fakeRepoMapSection("operation-sinks", "outputs/repo-map/operation-sinks.json", 6),
+      fakeRepoMapSection("data-flows", "outputs/repo-map/data-flows.json", 1),
+      fakeRepoMapSection("trust-boundaries", "outputs/repo-map/trust-boundaries.json", 1),
     ],
-    repo,
-    sensitive_sink_groups: [
-      {
-        evidence: [`${entrypointPath}:1`],
-        name: "Observable operation sinks",
-        sensitive_sink_ids: ["sink-1"],
-        summary: "Sink group summarized from sensitive-sinks.v1.",
-      },
-    ],
-    stack: [{ evidence: [`${manifestPath}:1`], name: "Repository stack", role: "detected" }],
     summary: {
       confidence: "medium",
-      evidence: [`${manifestPath}:1`],
-      project_kind: "unknown",
-      text: "Repository orientation generated from Phase 1 context pack.",
+      evidence: ["package.json:1", "src/server.ts:5"],
+      inference: true,
+      project_kind: "backend-api",
+      text: "Fixture Node.js repository map assembled from facts-only section artifacts.",
     },
   };
 }
 
-function fakePiMetadata(input: RuntimeJobInput): ProjectUnderstandingArtifact["metadata"]["pi"] {
+function fakeRepoMapSection(artifact: RepoMapStep, artifactPath: string, itemCount: number) {
+  return {
+    artifact,
+    evidence: ["src/server.ts:5"],
+    item_count: itemCount,
+    path: artifactPath,
+    summary: `${artifact} facts are available.`,
+  };
+}
+
+function fakeRepoMapCoverage(area: string, evidence: string[]) {
+  return {
+    not_covered: [
+      {
+        area: "Runtime-only behavior",
+        reason: "Fake Pi does not execute the application.",
+      },
+    ],
+    reviewed: [{ area, evidence }],
+  };
+}
+
+function fakeRepoFromInput(input: RuntimeJobInput): { commit_sha: string | null; url: string } {
+  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
+  return {
+    commit_sha: context?.repo?.commit_sha ?? null,
+    url: context?.repo?.url ?? "https://github.com/vibeshield/fixture",
+  };
+}
+
+function fakeManifestPath(input: RuntimeJobInput): string {
+  const context = input.pi?.contextPack as Partial<PiContextPackArtifact> | undefined;
+  return context?.inventory?.manifest_files?.[0] ?? "package.json";
+}
+
+function fakePiMetadata(input: RuntimeJobInput): RepositoryMapArtifact["metadata"]["pi"] {
   const tools = input.pi?.tools ?? ["read", "grep", "find", "ls"];
   return {
-    input_context_artifact: input.pi?.inputContextArtifact ?? "outputs/pi-context-pack.v1.json",
+    input_context_artifact: input.pi?.inputContextArtifact ?? "outputs/pi-context-pack.json",
     invocation: {
       args: ["-p", "--tools", tools.join(",")],
       command: "pi",

@@ -17,6 +17,7 @@
     "smoke:daytona": "tsx scripts/smoke-daytona.ts",
     "smoke:pi-daytona": "tsx scripts/smoke-pi-daytona.ts",
     "lint": "biome check .",
+    "resume": "tsx src/cli.ts resume",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

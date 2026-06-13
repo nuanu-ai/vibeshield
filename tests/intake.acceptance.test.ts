@@ -11,7 +11,7 @@ import { FakeDaytonaSandboxProvider } from "../src/sandbox/fake-daytona.js";
 const execFileAsync = promisify(execFile);
 
 const tempRoots: string[] = [];
-const fixtureUrl = "https://github.com/vibeshield/phase-zero-fixture";
+const fixtureUrl = "https://github.com/vibeshield/intake-fixture";
 
 async function createTempRoot(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), prefix));
@@ -35,7 +35,7 @@ async function createFixtureGitRepo(): Promise<string> {
     path.join(repoDir, "package.json"),
     `${JSON.stringify(
       {
-        name: "phase-zero-fixture",
+        name: "intake-fixture",
         scripts: {
           build: "node scripts/should-not-run.js",
           postinstall: "node scripts/should-not-run.js",
@@ -48,7 +48,7 @@ async function createFixtureGitRepo(): Promise<string> {
   );
   await writeFile(path.join(repoDir, "vibeshield-marker.txt"), "inventory marker\n");
   await execFileAsync("mkdir", ["-p", path.join(repoDir, "src"), path.join(repoDir, "scripts")]);
-  await writeFile(path.join(repoDir, "src", "app.ts"), "export const marker = 'phase0';\n");
+  await writeFile(path.join(repoDir, "src", "app.ts"), "export const marker = 'intake';\n");
   await writeFile(
     path.join(repoDir, "scripts", "should-not-run.js"),
     "throw new Error('repo-defined script was executed');\n",
@@ -103,8 +103,8 @@ afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
 });
 
-describe("Phase 0 acceptance", () => {
-  it("TP0.1 rejects unsupported inputs before sandbox creation", async () => {
+describe("GitHub intake and sandbox inventory acceptance", () => {
+  it("rejects unsupported inputs before sandbox creation", async () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
     const unsupportedInputs = [
@@ -127,13 +127,13 @@ describe("Phase 0 acceptance", () => {
         throw new Error("Unsupported input unexpectedly succeeded.");
       }
       expect(result.runDir).toBeUndefined();
-      expect(result.userMessage).toContain("Phase 0 accepts only GitHub repository URLs");
+      expect(result.userMessage).toContain("VibeShield accepts only GitHub repository URLs");
     }
 
     expect(provider.createdSandboxIds).toHaveLength(0);
   });
 
-  it("TP0.2 returns a local run directory with inspectable intake artifacts", async () => {
+  it("returns a local run directory with inspectable intake artifacts", async () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
     const stdout: string[] = [];
@@ -173,13 +173,13 @@ describe("Phase 0 acceptance", () => {
     );
 
     const report = await readFile(path.join(runDir, "report.md"), "utf8");
-    expect(report).toContain("Phase 0 intake and inventory");
+    expect(report).toContain("Intake, inventory, deterministic baseline, and repository mapping");
     expect(report).toContain("not a security audit");
     expect(report).toContain("No security findings or verdict");
     expect(report).toContain("outputs/repo-inventory.json");
   });
 
-  it("TP0.3 creates a fresh sandbox per run and keeps the checkout out of local artifacts", async () => {
+  it("creates a fresh sandbox per run and keeps the checkout out of local artifacts", async () => {
     const { provider, sandboxRoot } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
@@ -215,7 +215,7 @@ describe("Phase 0 acceptance", () => {
     }
   });
 
-  it("TP0.4 keeps the sandbox flow limited to controlled clone and read-only inventory", async () => {
+  it("keeps the sandbox flow limited to controlled clone and read-only inventory", async () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
@@ -230,7 +230,7 @@ describe("Phase 0 acceptance", () => {
     );
   });
 
-  it("TP0.5 leaves a failed run contract and deletes the sandbox after sandbox-created failure", async () => {
+  it("leaves a failed run contract and deletes the sandbox after sandbox-created failure", async () => {
     const { provider } = await createProvider({ failAt: "inventory" });
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
@@ -257,7 +257,7 @@ describe("Phase 0 acceptance", () => {
     });
 
     const report = await readFile(path.join(runDir, "report.md"), "utf8");
-    expect(report).toContain("Phase 0 scan did not complete");
+    expect(report).toContain("Scan did not complete");
     expect(report).toContain("Failed stage: inventory");
     expect(report).not.toContain("Status: success");
     expect(report).not.toContain("Security verdict");
