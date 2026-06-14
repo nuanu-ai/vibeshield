@@ -327,7 +327,12 @@ export interface StackBuildDepsArtifact extends PiRepositoryMapBaseArtifact<"sta
   dependencies: StackBuildDependencyRecord[];
   dependency_notes?: Array<{
     evidence?: string[];
-    kind: "lockfile_absent" | "lockfile_present" | "transitive_available" | "vendored_dependencies";
+    kind:
+      | "dependency_count"
+      | "lockfile_absent"
+      | "lockfile_present"
+      | "transitive_available"
+      | "vendored_dependencies";
     path?: string;
     summary: string;
   }>;
@@ -535,7 +540,7 @@ export type DataFlowTraceStatus =
   | "direct observed"
   | "multi-step inferred"
   | "not established"
-  | "not traced beyond path:line";
+  | "not traced further";
 
 export interface DataFlowTrace {
   breakpoint?: {
