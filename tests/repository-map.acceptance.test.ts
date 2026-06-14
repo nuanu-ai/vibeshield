@@ -921,12 +921,355 @@ describe("AppSec repository map acceptance", () => {
         ?.commands.filter((command) => command.command.startsWith("vibeshield-runtime-job"))
         .map((command) => command.command) ?? [];
     expect(runtimeCommands).toHaveLength(0);
+    expect(resumeProvider.createdSandboxIds).toHaveLength(0);
     expect(await readFile(path.join(runDir, "final-report.md"), "utf8")).toContain(
       "# Security Report",
     );
     expect((await readFile(path.join(runDir, "final-report.pdf"))).subarray(0, 4).toString()).toBe(
       "%PDF",
     );
+  });
+
+  it("reruns only attack hypotheses with --only and leaves the final report untouched", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      sourceInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    const originalReport = await readFile(path.join(runDir, "final-report.md"), "utf8");
+    const rerunHypotheses = fakeAttackHypotheses();
+    const firstHypothesis = rerunHypotheses.hypotheses[0];
+    if (firstHypothesis === undefined) {
+      throw new Error("Fake attack hypotheses fixture is empty.");
+    }
+    rerunHypotheses.hypotheses[0] = {
+      ...firstHypothesis,
+      id: "hyp-only-rerun",
+      title: "Only-step generated attack hypothesis",
+    };
+    rerunHypotheses.summary = {
+      ...rerunHypotheses.summary,
+      text: "Only-step attack hypotheses are derived from the existing repository map.",
+    };
+
+    const sandboxRoot = await createTempRoot("vibeshield-fake-daytona-only-hypotheses-");
+    const resumeProvider = new FakeDaytonaSandboxProvider({
+      fixtureRepos: new Map([[fixtureUrl, initial.fixtureRepo]]),
+      piOutputs: {
+        ...fixtureRepoMapOutputs(),
+        "attack-hypotheses": rerunHypotheses,
+      },
+      sandboxRoot,
+    });
+    const resumed = await runResume({
+      onlyStep: "attack-hypotheses",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(0);
+    const runtimeCommands =
+      resumeProvider.sessions
+        .at(-1)
+        ?.commands.filter((command) => command.command.startsWith("vibeshield-runtime-job"))
+        .map((command) => command.command) ?? [];
+    expect(runtimeCommands).toEqual([
+      "vibeshield-runtime-job pi-repository-mapping pi-attack-hypotheses",
+    ]);
+    const attackHypotheses = await readJson<AttackHypothesesArtifact>(
+      path.join(runDir, "outputs", "attack-hypotheses.json"),
+    );
+    expect(attackHypotheses.summary.text).toBe(
+      "Only-step attack hypotheses are derived from the existing repository map.",
+    );
+    expect(attackHypotheses.hypotheses.map((hypothesis) => hypothesis.id)).toContain(
+      "hyp-only-rerun",
+    );
+    expect(await readFile(path.join(runDir, "final-report.md"), "utf8")).toBe(originalReport);
+  });
+
+  it("rerenders only final reports with --only without creating a sandbox", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      sourceInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    await rm(path.join(runDir, "final-report.md"), { force: true });
+    await rm(path.join(runDir, "final-report.pdf"), { force: true });
+
+    const sandboxRoot = await createTempRoot("vibeshield-fake-daytona-only-report-");
+    const resumeProvider = new FakeDaytonaSandboxProvider({
+      fixtureRepos: new Map([[fixtureUrl, initial.fixtureRepo]]),
+      piOutputs: fixtureRepoMapOutputs(),
+      sandboxRoot,
+    });
+    const resumed = await runResume({
+      onlyStep: "final-report",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(0);
+    expect(resumeProvider.createdSandboxIds).toHaveLength(0);
+    expect(await readFile(path.join(runDir, "final-report.md"), "utf8")).toContain(
+      "# Security Report",
+    );
+    expect((await readFile(path.join(runDir, "final-report.pdf"))).subarray(0, 4).toString()).toBe(
+      "%PDF",
+    );
+  });
+
+  it("reruns only entrypoints with --only and leaves downstream artifacts untouched", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      sourceInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    const originalAttackHypotheses = await readFile(
+      path.join(runDir, "outputs", "attack-hypotheses.json"),
+      "utf8",
+    );
+    const originalReport = await readFile(path.join(runDir, "final-report.md"), "utf8");
+    const rerunEntrypoints = fakeRepoMapEntrypoints();
+    const firstEntrypoint = rerunEntrypoints.entrypoints[0];
+    if (firstEntrypoint === undefined) {
+      throw new Error("Fake entrypoints fixture is empty.");
+    }
+    rerunEntrypoints.entrypoints[0] = {
+      ...firstEntrypoint,
+      id: "entry-only-rerun",
+      name: "Only-step entrypoint",
+    };
+
+    const sandboxRoot = await createTempRoot("vibeshield-fake-daytona-only-entrypoints-");
+    const resumeProvider = new FakeDaytonaSandboxProvider({
+      fixtureRepos: new Map([[fixtureUrl, initial.fixtureRepo]]),
+      piOutputs: {
+        ...fixtureRepoMapOutputs(),
+        entrypoints: rerunEntrypoints,
+      },
+      sandboxRoot,
+    });
+    const resumed = await runResume({
+      onlyStep: "entrypoints",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(0);
+    const runtimeCommands =
+      resumeProvider.sessions
+        .at(-1)
+        ?.commands.filter((command) => command.command.startsWith("vibeshield-runtime-job"))
+        .map((command) => command.command) ?? [];
+    expect(runtimeCommands).toEqual([
+      "vibeshield-runtime-job pi-repository-mapping pi-entrypoints",
+    ]);
+    const entrypoints = await readJson<EntrypointsArtifact>(
+      path.join(runDir, "outputs", "repo-map", "entrypoints.json"),
+    );
+    expect(entrypoints.entrypoints.map((entrypoint) => entrypoint.id)).toContain(
+      "entry-only-rerun",
+    );
+    expect(await readFile(path.join(runDir, "outputs", "attack-hypotheses.json"), "utf8")).toBe(
+      originalAttackHypotheses,
+    );
+    expect(await readFile(path.join(runDir, "final-report.md"), "utf8")).toBe(originalReport);
+  });
+
+  it("fails --only Pi steps before sandbox creation when the context artifact is missing", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      sourceInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    await rm(path.join(runDir, "outputs", "pi-context-pack.json"), { force: true });
+
+    const sandboxRoot = await createTempRoot("vibeshield-fake-daytona-missing-context-");
+    const resumeProvider = new FakeDaytonaSandboxProvider({
+      fixtureRepos: new Map([[fixtureUrl, initial.fixtureRepo]]),
+      piOutputs: fixtureRepoMapOutputs(),
+      sandboxRoot,
+    });
+    const resumed = await runResume({
+      onlyStep: "entrypoints",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(1);
+    if (resumed.exitCode !== 1) {
+      throw new Error("Missing context unexpectedly succeeded.");
+    }
+    expect(resumed.userMessage).toContain("pi-context-pack");
+    expect(resumeProvider.createdSandboxIds).toHaveLength(0);
+  });
+
+  it("preserves failed run status after a successful --only step", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      sourceInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    const runJsonPath = path.join(runDir, "run.json");
+    const runJson = await readJson<{
+      current_stage: "pi";
+      error?: {
+        message: string;
+        stage: "pi";
+        user_message: string;
+      };
+      status: "failed" | "running" | "success";
+    }>(runJsonPath);
+    runJson.status = "failed";
+    runJson.current_stage = "pi";
+    runJson.error = {
+      message: "Original failure",
+      stage: "pi",
+      user_message: "Original user-facing failure",
+    };
+    await writeFile(runJsonPath, `${JSON.stringify(runJson, null, 2)}\n`, "utf8");
+
+    const resumeProvider = (await createProvider()).provider;
+    const resumed = await runResume({
+      onlyStep: "context",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(0);
+    expect(resumeProvider.createdSandboxIds).toHaveLength(0);
+    const updatedRunJson = await readJson<{
+      current_stage: string;
+      error?: { user_message: string };
+      status: string;
+    }>(runJsonPath);
+    expect(updatedRunJson.status).toBe("failed");
+    expect(updatedRunJson.current_stage).toBe("pi");
+    expect(updatedRunJson.error?.user_message).toBe("Original user-facing failure");
+  });
+
+  it("does not render --only final-report for a failed run", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      sourceInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    const runJsonPath = path.join(runDir, "run.json");
+    const runJson = await readJson<{
+      current_stage: "pi";
+      error?: {
+        message: string;
+        stage: "pi";
+        user_message: string;
+      };
+      status: "failed" | "running" | "success";
+    }>(runJsonPath);
+    runJson.status = "failed";
+    runJson.current_stage = "pi";
+    runJson.error = {
+      message: "Original failure",
+      stage: "pi",
+      user_message: "Original user-facing failure",
+    };
+    await writeFile(runJsonPath, `${JSON.stringify(runJson, null, 2)}\n`, "utf8");
+    await rm(path.join(runDir, "final-report.md"), { force: true });
+    await rm(path.join(runDir, "final-report.pdf"), { force: true });
+
+    const resumeProvider = (await createProvider()).provider;
+    const resumed = await runResume({
+      onlyStep: "final-report",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(1);
+    if (resumed.exitCode !== 1) {
+      throw new Error("Failed run final-report unexpectedly succeeded.");
+    }
+    expect(resumed.userMessage).toContain("did not complete successfully");
+    expect(await pathExists(path.join(runDir, "final-report.md"))).toBe(false);
+    expect(await pathExists(path.join(runDir, "final-report.pdf"))).toBe(false);
+    expect(resumeProvider.createdSandboxIds).toHaveLength(0);
+  });
+
+  it("does not render --from final-report for a failed run", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      sourceInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    const runJsonPath = path.join(runDir, "run.json");
+    const runJson = await readJson<{
+      current_stage: "pi";
+      error?: {
+        message: string;
+        stage: "pi";
+        user_message: string;
+      };
+      status: "failed" | "running" | "success";
+    }>(runJsonPath);
+    runJson.status = "failed";
+    runJson.current_stage = "pi";
+    runJson.error = {
+      message: "Original failure",
+      stage: "pi",
+      user_message: "Original user-facing failure",
+    };
+    await writeFile(runJsonPath, `${JSON.stringify(runJson, null, 2)}\n`, "utf8");
+    await rm(path.join(runDir, "final-report.md"), { force: true });
+    await rm(path.join(runDir, "final-report.pdf"), { force: true });
+
+    const resumeProvider = (await createProvider()).provider;
+    const resumed = await runResume({
+      fromStep: "final-report",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(1);
+    if (resumed.exitCode !== 1) {
+      throw new Error("Failed run final-report unexpectedly succeeded.");
+    }
+    expect(resumed.userMessage).toContain("did not complete successfully");
+    expect(await pathExists(path.join(runDir, "final-report.md"))).toBe(false);
+    expect(await pathExists(path.join(runDir, "final-report.pdf"))).toBe(false);
+    expect(resumeProvider.createdSandboxIds).toHaveLength(0);
   });
 
   it("records a degraded map section and still writes the final report when Pi output is unusable", async () => {

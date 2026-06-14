@@ -57,7 +57,7 @@ const repoMapPaths = {
   trustBoundaries: "outputs/repo-map/trust-boundaries.json",
 } as const;
 
-type PiStructuredArtifact =
+export type PiStructuredArtifact =
   | AttackHypothesesArtifact
   | AuthAccessArtifact
   | ConfigSecretsArtifact
@@ -91,7 +91,7 @@ type PiStageValidationStage =
   | "storage-data-model-validation"
   | "trust-boundaries-validation";
 
-interface RunPiRepositoryMappingInput {
+export interface RunPiRepositoryMappingInput {
   contextPack: PiContextPackArtifact;
   contextPath: string;
   existing?: Partial<{
@@ -121,10 +121,27 @@ interface RunPiRepositoryMappingInput {
   store: ArtifactStore;
 }
 
-interface ExistingPiArtifact<TArtifact extends PiStructuredArtifact> {
+export interface ExistingPiArtifact<TArtifact extends PiStructuredArtifact> {
   artifact: TArtifact;
   artifactPath: string;
 }
+
+export type RunPiRepositoryMappingStep =
+  | "attack-hypotheses"
+  | "auth-access"
+  | "config-secrets"
+  | "coverage-structure"
+  | "crypto"
+  | "data-flows"
+  | "entrypoints"
+  | "external-integrations-egress"
+  | "infra-deploy"
+  | "logging-observability"
+  | "operation-sinks"
+  | "repository-map"
+  | "stack-build-deps"
+  | "storage-data-model"
+  | "trust-boundaries";
 
 export interface RunPiRepositoryMappingResult {
   attackHypotheses: AttackHypothesesArtifact;
@@ -158,6 +175,13 @@ export interface RunPiRepositoryMappingResult {
   storageDataModelPath: string;
   trustBoundaries: TrustBoundariesArtifact;
   trustBoundariesPath: string;
+}
+
+export interface RunPiRepositoryMappingStepResult {
+  artifact: PiStructuredArtifact;
+  artifactPath: string;
+  jobState: RunJobState;
+  step: RunPiRepositoryMappingStep;
 }
 
 interface PiStageInput<TArtifact extends PiStructuredArtifact> {
@@ -596,6 +620,704 @@ export async function runPiRepositoryMapping(
     trustBoundaries: trustBoundaries.artifact,
     trustBoundariesPath: trustBoundaries.artifactPath,
   };
+}
+
+export async function runPiRepositoryMappingStep(
+  input: RunPiRepositoryMappingInput & { step: RunPiRepositoryMappingStep },
+): Promise<RunPiRepositoryMappingStepResult> {
+  const jobStates: RunJobState[] = [];
+  const onJobFinished = async (jobState: RunJobState) => {
+    jobStates.push(jobState);
+    await input.onJobFinished?.(jobState);
+  };
+  const stageInput = { ...input, onJobFinished };
+
+  switch (input.step) {
+    case "coverage-structure": {
+      const result = await buildDeterministicCoverageStructure({
+        generatedAt: input.generatedAt,
+        input: stageInput,
+      });
+      return { ...result, step: input.step };
+    }
+    case "stack-build-deps": {
+      const context = buildStackBuildDepsContext(input.contextPack);
+      const result = await runPiStage<StackBuildDepsArtifact>({
+        artifactId: "stack-build-deps",
+        artifactRelativePath: repoMapPaths.stackBuildDeps,
+        contextArtifactLabel: input.contextPath,
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-stack-deps",
+        kind: "stack-build-deps",
+        outputBaseName: "stack-build-deps",
+        prompt: buildStackBuildDepsPrompt(context),
+        step: "stack-build-deps",
+        validateSchema: (artifact) => validateStackBuildDepsArtifact({ artifact }),
+        validationStage: "stack-build-deps-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "entrypoints": {
+      const stackBuildDeps = input.existing?.stackBuildDeps;
+      const context =
+        stackBuildDeps === undefined
+          ? buildBestEffortObjectContext(input, input.step, ["stack-build-deps"])
+          : buildEntrypointsContext(input.contextPack, stackBuildDeps.artifact);
+      const result = await runPiStage<EntrypointsArtifact>({
+        artifactId: "entrypoints",
+        artifactRelativePath: repoMapPaths.entrypoints,
+        contextArtifactLabel:
+          stackBuildDeps === undefined ? bestEffortContextLabel(input) : input.contextPath,
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-entrypoints",
+        kind: "entrypoints",
+        outputBaseName: "entrypoints",
+        prompt: buildEntrypointsPrompt(context),
+        step: "entrypoints",
+        thinking: "xhigh",
+        validateSchema: (artifact) => validateEntrypointsArtifact({ artifact }),
+        validationStage: "entrypoints-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "config-secrets": {
+      const context = buildConfigSecretsContext(input.contextPack);
+      const result = await runPiStage<ConfigSecretsArtifact>({
+        artifactId: "config-secrets",
+        artifactRelativePath: repoMapPaths.configSecrets,
+        contextArtifactLabel: input.contextPath,
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-config-secrets",
+        kind: "config-secrets",
+        outputBaseName: "config-secrets",
+        prompt: buildConfigSecretsPrompt(context),
+        step: "config-secrets",
+        validateSchema: (artifact) => validateConfigSecretsArtifact({ artifact }),
+        validationStage: "config-secrets-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "auth-access": {
+      const entrypoints = input.existing?.entrypoints;
+      const configSecrets = input.existing?.configSecrets;
+      const hasDirectInputs = entrypoints !== undefined && configSecrets !== undefined;
+      const context = hasDirectInputs
+        ? buildAuthAccessContext(input.contextPack, entrypoints.artifact, configSecrets.artifact)
+        : buildBestEffortObjectContext(input, input.step, ["entrypoints", "config-secrets"]);
+      const result = await runPiStage<AuthAccessArtifact>({
+        artifactId: "auth-access",
+        artifactRelativePath: repoMapPaths.authAccess,
+        contextArtifactLabel: hasDirectInputs
+          ? `${input.contextPath}, ${entrypoints.artifactPath}, ${configSecrets.artifactPath}`
+          : bestEffortContextLabel(input),
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-auth-access",
+        kind: "auth-access",
+        outputBaseName: "auth-access",
+        prompt: buildAuthAccessPrompt(context),
+        step: "auth-access",
+        validateSchema: (artifact) => validateAuthAccessArtifact({ artifact }),
+        validationStage: "auth-access-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "storage-data-model": {
+      const configSecrets = input.existing?.configSecrets;
+      const context =
+        configSecrets === undefined
+          ? buildBestEffortObjectContext(input, input.step, ["config-secrets"])
+          : buildStorageDataModelContext(input.contextPack, configSecrets.artifact);
+      const result = await runPiStage<StorageDataModelArtifact>({
+        artifactId: "storage-data-model",
+        artifactRelativePath: repoMapPaths.storageDataModel,
+        contextArtifactLabel:
+          configSecrets === undefined
+            ? bestEffortContextLabel(input)
+            : `${input.contextPath}, ${configSecrets.artifactPath}`,
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-storage-data-model",
+        kind: "storage-data-model",
+        outputBaseName: "storage-data-model",
+        prompt: buildStorageDataModelPrompt(context),
+        step: "storage-data-model",
+        validateSchema: (artifact) => validateStorageDataModelArtifact({ artifact }),
+        validationStage: "storage-data-model-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "external-integrations-egress": {
+      const configSecrets = input.existing?.configSecrets;
+      const context =
+        configSecrets === undefined
+          ? buildBestEffortObjectContext(input, input.step, ["config-secrets"])
+          : buildExternalIntegrationsEgressContext(input.contextPack, configSecrets.artifact);
+      const result = await runPiStage<ExternalIntegrationsEgressArtifact>({
+        artifactId: "external-integrations-egress",
+        artifactRelativePath: repoMapPaths.externalIntegrationsEgress,
+        contextArtifactLabel:
+          configSecrets === undefined
+            ? bestEffortContextLabel(input)
+            : `${input.contextPath}, ${configSecrets.artifactPath}`,
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-external-integrations-egress",
+        kind: "external-integrations-egress",
+        outputBaseName: "external-integrations-egress",
+        prompt: buildExternalIntegrationsEgressPrompt(context),
+        step: "external-integrations-egress",
+        validateSchema: (artifact) => validateExternalIntegrationsEgressArtifact({ artifact }),
+        validationStage: "external-integrations-egress-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "infra-deploy": {
+      const context = buildInfraDeployContext(input.contextPack);
+      const result = await runPiStage<InfraDeployArtifact>({
+        artifactId: "infra-deploy",
+        artifactRelativePath: repoMapPaths.infraDeploy,
+        contextArtifactLabel: input.contextPath,
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-infra-deploy",
+        kind: "infra-deploy",
+        outputBaseName: "infra-deploy",
+        prompt: buildInfraDeployPrompt(context),
+        step: "infra-deploy",
+        validateSchema: (artifact) => validateInfraDeployArtifact({ artifact }),
+        validationStage: "infra-deploy-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "operation-sinks": {
+      const stackBuildDeps = input.existing?.stackBuildDeps;
+      const context =
+        stackBuildDeps === undefined
+          ? buildBestEffortObjectContext(input, input.step, ["stack-build-deps"])
+          : buildOperationSinksContext(input.contextPack, stackBuildDeps.artifact);
+      const result = await runPiStage<OperationSinksArtifact>({
+        artifactId: "operation-sinks",
+        artifactRelativePath: repoMapPaths.operationSinks,
+        contextArtifactLabel:
+          stackBuildDeps === undefined ? bestEffortContextLabel(input) : input.contextPath,
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-operation-sinks",
+        kind: "operation-sinks",
+        outputBaseName: "operation-sinks",
+        prompt: buildOperationSinksPrompt(context),
+        step: "operation-sinks",
+        thinking: "xhigh",
+        validateSchema: (artifact) => validateOperationSinksArtifact({ artifact }),
+        validationStage: "operation-sinks-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "crypto": {
+      const context = buildCryptoContext(input.contextPack);
+      const result = await runPiStage<CryptoArtifact>({
+        artifactId: "crypto",
+        artifactRelativePath: repoMapPaths.crypto,
+        contextArtifactLabel: input.contextPath,
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-crypto",
+        kind: "crypto",
+        outputBaseName: "crypto",
+        prompt: buildCryptoPrompt(context),
+        step: "crypto",
+        validateSchema: (artifact) => validateCryptoArtifact({ artifact }),
+        validationStage: "crypto-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "logging-observability": {
+      const entrypoints = input.existing?.entrypoints;
+      const storageDataModel = input.existing?.storageDataModel;
+      const hasDirectInputs = entrypoints !== undefined && storageDataModel !== undefined;
+      const context = hasDirectInputs
+        ? buildLoggingObservabilityContext(
+            input.contextPack,
+            entrypoints.artifact,
+            storageDataModel.artifact,
+          )
+        : buildBestEffortObjectContext(input, input.step, ["entrypoints", "storage-data-model"]);
+      const result = await runPiStage<LoggingObservabilityArtifact>({
+        artifactId: "logging-observability",
+        artifactRelativePath: repoMapPaths.loggingObservability,
+        contextArtifactLabel: hasDirectInputs ? input.contextPath : bestEffortContextLabel(input),
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-logging-observability",
+        kind: "logging-observability",
+        outputBaseName: "logging-observability",
+        prompt: buildLoggingObservabilityPrompt(context),
+        step: "logging-observability",
+        validateSchema: (artifact) => validateLoggingObservabilityArtifact({ artifact }),
+        validationStage: "logging-observability-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "data-flows": {
+      const entrypoints = input.existing?.entrypoints;
+      const operationSinks = input.existing?.operationSinks;
+      const hasDirectInputs = entrypoints !== undefined && operationSinks !== undefined;
+      const context = hasDirectInputs
+        ? {
+            inputs: {
+              entrypoints: piHandoffArtifact(entrypoints.artifact),
+              operation_sinks: piHandoffArtifact(operationSinks.artifact),
+            },
+          }
+        : buildBestEffortObjectContext(input, input.step, ["entrypoints", "operation-sinks"]);
+      const result = await runPiStage<DataFlowsArtifact>({
+        artifactId: "data-flows",
+        artifactRelativePath: repoMapPaths.dataFlows,
+        contextArtifactLabel: hasDirectInputs
+          ? `${entrypoints.artifactPath}, ${operationSinks.artifactPath}`
+          : bestEffortContextLabel(input),
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-data-flows",
+        kind: "data-flows",
+        outputBaseName: "data-flows",
+        prompt: buildDataFlowsPrompt(context),
+        step: "data-flows",
+        thinking: "xhigh",
+        validateSchema: (artifact) => validateDataFlowsArtifact({ artifact }),
+        validationStage: "data-flows-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "trust-boundaries": {
+      const deps = repositoryMapSectionDependenciesIfComplete(input);
+      const context =
+        deps === undefined
+          ? buildBestEffortMarkdownContext(input, input.step, [
+              "auth-access",
+              "data-flows",
+              "entrypoints",
+              "external-integrations-egress",
+              "infra-deploy",
+              "operation-sinks",
+              "storage-data-model",
+            ])
+          : buildTrustBoundariesContextMarkdown({
+              authAccess: deps.authAccess.artifact,
+              dataFlows: deps.dataFlows.artifact,
+              entrypoints: deps.entrypoints.artifact,
+              externalIntegrationsEgress: deps.externalIntegrationsEgress.artifact,
+              infraDeploy: deps.infraDeploy.artifact,
+              operationSinks: deps.operationSinks.artifact,
+              storageDataModel: deps.storageDataModel.artifact,
+            });
+      const result = await runPiStage<TrustBoundariesArtifact>({
+        artifactId: "trust-boundaries",
+        artifactRelativePath: repoMapPaths.trustBoundaries,
+        contextArtifactLabel:
+          deps === undefined
+            ? bestEffortContextLabel(input)
+            : [
+                deps.coverageStructure.artifactPath,
+                deps.stackBuildDeps.artifactPath,
+                deps.entrypoints.artifactPath,
+                deps.authAccess.artifactPath,
+                deps.configSecrets.artifactPath,
+                deps.storageDataModel.artifactPath,
+                deps.externalIntegrationsEgress.artifactPath,
+                deps.infraDeploy.artifactPath,
+                deps.operationSinks.artifactPath,
+                deps.crypto.artifactPath,
+                deps.loggingObservability.artifactPath,
+                deps.dataFlows.artifactPath,
+              ].join(", "),
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-trust-boundaries",
+        kind: "trust-boundaries",
+        model: trustBoundariesPiModel,
+        outputBaseName: "trust-boundaries",
+        prompt: buildTrustBoundariesPrompt(context),
+        step: "trust-boundaries",
+        thinking: "xhigh",
+        tools: [],
+        validateSchema: (artifact) => validateTrustBoundariesArtifact({ artifact }),
+        validationStage: "trust-boundaries-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "repository-map": {
+      const deps = repositoryMapSectionDependenciesIfComplete(input);
+      const trustBoundaries = input.existing?.trustBoundaries;
+      const hasDirectInputs = deps !== undefined && trustBoundaries !== undefined;
+      const context = hasDirectInputs
+        ? buildRepositoryMapContextMarkdown({
+            authAccess: deps.authAccess.artifact,
+            configSecrets: deps.configSecrets.artifact,
+            coverageStructure: deps.coverageStructure.artifact,
+            crypto: deps.crypto.artifact,
+            dataFlows: deps.dataFlows.artifact,
+            entrypoints: deps.entrypoints.artifact,
+            externalIntegrationsEgress: deps.externalIntegrationsEgress.artifact,
+            infraDeploy: deps.infraDeploy.artifact,
+            loggingObservability: deps.loggingObservability.artifact,
+            operationSinks: deps.operationSinks.artifact,
+            stackBuildDeps: deps.stackBuildDeps.artifact,
+            storageDataModel: deps.storageDataModel.artifact,
+            trustBoundaries: trustBoundaries.artifact,
+          })
+        : buildBestEffortMarkdownContext(input, input.step, [
+            "coverage-structure",
+            "stack-build-deps",
+            "entrypoints",
+            "auth-access",
+            "config-secrets",
+            "storage-data-model",
+            "external-integrations-egress",
+            "infra-deploy",
+            "operation-sinks",
+            "crypto",
+            "logging-observability",
+            "data-flows",
+            "trust-boundaries",
+          ]);
+      const result = await runPiStage<RepositoryMapArtifact>({
+        artifactId: "repository-map",
+        artifactRelativePath: repoMapPaths.repositoryMap,
+        contextArtifactLabel: hasDirectInputs
+          ? [
+              deps.coverageStructure.artifactPath,
+              deps.stackBuildDeps.artifactPath,
+              deps.entrypoints.artifactPath,
+              deps.authAccess.artifactPath,
+              deps.configSecrets.artifactPath,
+              deps.storageDataModel.artifactPath,
+              deps.externalIntegrationsEgress.artifactPath,
+              deps.infraDeploy.artifactPath,
+              deps.operationSinks.artifactPath,
+              deps.crypto.artifactPath,
+              deps.loggingObservability.artifactPath,
+              deps.dataFlows.artifactPath,
+              trustBoundaries.artifactPath,
+            ].join(", ")
+          : bestEffortContextLabel(input),
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-repository-map",
+        kind: "repository-map",
+        model: trustBoundariesPiModel,
+        outputBaseName: "repository-map",
+        prompt: buildRepositoryMapPrompt(context),
+        step: "repository-map",
+        thinking: "xhigh",
+        tools: [],
+        validateSchema: (artifact) => validateRepositoryMapArtifact({ artifact }),
+        validationStage: "repository-map-validation",
+      });
+      return { ...result, step: input.step };
+    }
+    case "attack-hypotheses": {
+      const repositoryMap = input.existing?.repositoryMap;
+      const context = buildAttackHypothesesContextMarkdown({
+        repositoryMap:
+          repositoryMap?.artifact ?? createBestEffortRepositoryMapArtifact(input, input.step),
+        repositoryMapContext:
+          repositoryMap === undefined
+            ? buildBestEffortMarkdownContext(input, input.step, ["repository-map"])
+            : buildRepositoryMapContextFromArtifact(repositoryMap.artifact),
+      });
+      const result = await runPiStage<AttackHypothesesArtifact>({
+        artifactId: "attack-hypotheses",
+        artifactRelativePath: repoMapPaths.attackHypotheses,
+        contextArtifactLabel: repositoryMap?.artifactPath ?? bestEffortContextLabel(input),
+        contextPack: context,
+        generatedAt: input.generatedAt,
+        input: stageInput,
+        jobName: "pi-attack-hypotheses",
+        kind: "attack-hypotheses",
+        model: attackHypothesesPiModel,
+        outputBaseName: "attack-hypotheses",
+        prompt: buildAttackHypothesesPrompt(context),
+        step: "attack-hypotheses",
+        thinking: "xhigh",
+        tools: [],
+        validateSchema: (artifact) => validateAttackHypothesesArtifact({ artifact }),
+        validationStage: "attack-hypotheses-validation",
+      });
+      return { ...result, step: input.step };
+    }
+  }
+}
+
+function repositoryMapSectionDependenciesIfComplete(input: RunPiRepositoryMappingInput):
+  | {
+      authAccess: ExistingPiArtifact<AuthAccessArtifact>;
+      configSecrets: ExistingPiArtifact<ConfigSecretsArtifact>;
+      coverageStructure: ExistingPiArtifact<CoverageStructureArtifact>;
+      crypto: ExistingPiArtifact<CryptoArtifact>;
+      dataFlows: ExistingPiArtifact<DataFlowsArtifact>;
+      entrypoints: ExistingPiArtifact<EntrypointsArtifact>;
+      externalIntegrationsEgress: ExistingPiArtifact<ExternalIntegrationsEgressArtifact>;
+      infraDeploy: ExistingPiArtifact<InfraDeployArtifact>;
+      loggingObservability: ExistingPiArtifact<LoggingObservabilityArtifact>;
+      operationSinks: ExistingPiArtifact<OperationSinksArtifact>;
+      stackBuildDeps: ExistingPiArtifact<StackBuildDepsArtifact>;
+      storageDataModel: ExistingPiArtifact<StorageDataModelArtifact>;
+    }
+  | undefined {
+  const existing = input.existing;
+  if (
+    existing?.authAccess === undefined ||
+    existing.configSecrets === undefined ||
+    existing.coverageStructure === undefined ||
+    existing.crypto === undefined ||
+    existing.dataFlows === undefined ||
+    existing.entrypoints === undefined ||
+    existing.externalIntegrationsEgress === undefined ||
+    existing.infraDeploy === undefined ||
+    existing.loggingObservability === undefined ||
+    existing.operationSinks === undefined ||
+    existing.stackBuildDeps === undefined ||
+    existing.storageDataModel === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    authAccess: existing.authAccess,
+    configSecrets: existing.configSecrets,
+    coverageStructure: existing.coverageStructure,
+    crypto: existing.crypto,
+    dataFlows: existing.dataFlows,
+    entrypoints: existing.entrypoints,
+    externalIntegrationsEgress: existing.externalIntegrationsEgress,
+    infraDeploy: existing.infraDeploy,
+    loggingObservability: existing.loggingObservability,
+    operationSinks: existing.operationSinks,
+    stackBuildDeps: existing.stackBuildDeps,
+    storageDataModel: existing.storageDataModel,
+  };
+}
+
+function buildBestEffortObjectContext(
+  input: RunPiRepositoryMappingInput,
+  step: RunPiRepositoryMappingStep,
+  expectedInputs: string[],
+): unknown {
+  const available = requireAnyBestEffortArtifact(input, step);
+  const inventory = input.contextPack.inventory;
+  return {
+    available_prior_artifacts: available.map((entry) => ({
+      artifact: entry.step,
+      facts: stripPiContextNoise(entry.artifact),
+      path: entry.artifactPath,
+    })),
+    best_effort: {
+      expected_inputs: expectedInputs,
+      missing_expected_inputs: expectedInputs.filter(
+        (expected) => !available.some((entry) => entry.step === expected),
+      ),
+      rule: "Use the available prior artifacts as facts. Do not invent missing facts; record fact gaps.",
+      step,
+    },
+    inventory: {
+      config_files: inventory.config_files,
+      github_actions_workflows: inventory.github_actions_workflows,
+      language_summary: inventory.language_summary,
+      manifest_files: inventory.manifest_files,
+      package_and_lock_files: inventory.package_and_lock_files,
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+      top_level_directories: inventory.top_level_directories,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: input.contextPack.repo,
+  };
+}
+
+function buildBestEffortMarkdownContext(
+  input: RunPiRepositoryMappingInput,
+  step: RunPiRepositoryMappingStep,
+  expectedInputs: string[],
+): string {
+  const available = requireAnyBestEffortArtifact(input, step);
+  const missing = expectedInputs.filter(
+    (expected) => !available.some((entry) => entry.step === expected),
+  );
+  const lines: string[] = [
+    `# Best-Effort Context For ${step}`,
+    "",
+    `Repo: ${input.contextPack.repo.url}`,
+    `Commit: ${input.contextPack.repo.commit_sha ?? "unknown"}`,
+    "",
+    "Use only the available prior artifacts below. Do not invent missing facts; record fact gaps.",
+    "",
+    "## Expected Inputs",
+    `- expected: ${expectedInputs.length === 0 ? "none" : expectedInputs.join(", ")}`,
+    `- missing: ${missing.length === 0 ? "none" : missing.join(", ")}`,
+    "",
+    "## Available Prior Artifacts",
+  ];
+
+  for (const entry of available) {
+    lines.push("", `### ${entry.step}`, `Path: ${entry.artifactPath}`, "");
+    lines.push("```json");
+    lines.push(JSON.stringify(stripPiContextNoise(entry.artifact), null, 2));
+    lines.push("```");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function createBestEffortRepositoryMapArtifact(
+  input: RunPiRepositoryMappingInput,
+  step: RunPiRepositoryMappingStep,
+): RepositoryMapArtifact {
+  const available = requireAnyBestEffortArtifact(input, step);
+  return {
+    coverage: {
+      not_covered: [
+        {
+          area: "repository-map",
+          reason: "canonical repository-map artifact was not available for this best-effort run",
+        },
+      ],
+      reviewed: available.map((entry) => ({
+        area: entry.step,
+        evidence: [entry.artifactPath],
+      })),
+    },
+    fact_gaps: [
+      {
+        area: "repository-map",
+        evidence: available.map((entry) => entry.artifactPath),
+        missing_fact: "canonical repository-map artifact was not available",
+      },
+    ],
+    generated_at: input.generatedAt,
+    generated_by: "vibeshield",
+    kind: "repository-map",
+    metadata: {
+      best_effort: true,
+      source_artifacts: available.map((entry) => entry.artifactPath),
+    },
+    repo: input.contextPack.repo,
+    sections: available.map((entry, index) => ({
+      artifact: entry.step,
+      evidence: [entry.artifactPath],
+      id: index + 1,
+      path: entry.artifactPath,
+      summary: `Best-effort input from ${entry.step}.`,
+    })),
+    summary: {
+      confidence: "low",
+      evidence: available.map((entry) => entry.artifactPath),
+      inference: true,
+      project_kind: "unknown",
+      text: "Best-effort repository map projection from available prior artifacts.",
+    },
+  };
+}
+
+function bestEffortContextLabel(input: RunPiRepositoryMappingInput): string {
+  const artifactPaths = existingPiArtifactEntries(input.existing).map(
+    (entry) => entry.artifactPath,
+  );
+  return [input.contextPath, ...artifactPaths].join(", ");
+}
+
+function requireAnyBestEffortArtifact(
+  input: RunPiRepositoryMappingInput,
+  _step: RunPiRepositoryMappingStep,
+): Array<{
+  artifact: PiStructuredArtifact;
+  artifactPath: string;
+  step: RunPiRepositoryMappingStep;
+}> {
+  return existingPiArtifactEntries(input.existing);
+}
+
+function existingPiArtifactEntries(existing: RunPiRepositoryMappingInput["existing"]): Array<{
+  artifact: PiStructuredArtifact;
+  artifactPath: string;
+  step: RunPiRepositoryMappingStep;
+}> {
+  const entries: Array<{
+    artifact: PiStructuredArtifact;
+    artifactPath: string;
+    step: RunPiRepositoryMappingStep;
+  }> = [];
+  if (existing === undefined) {
+    return entries;
+  }
+
+  if (existing.coverageStructure !== undefined) {
+    entries.push({ ...existing.coverageStructure, step: "coverage-structure" });
+  }
+  if (existing.stackBuildDeps !== undefined) {
+    entries.push({ ...existing.stackBuildDeps, step: "stack-build-deps" });
+  }
+  if (existing.entrypoints !== undefined) {
+    entries.push({ ...existing.entrypoints, step: "entrypoints" });
+  }
+  if (existing.configSecrets !== undefined) {
+    entries.push({ ...existing.configSecrets, step: "config-secrets" });
+  }
+  if (existing.authAccess !== undefined) {
+    entries.push({ ...existing.authAccess, step: "auth-access" });
+  }
+  if (existing.storageDataModel !== undefined) {
+    entries.push({ ...existing.storageDataModel, step: "storage-data-model" });
+  }
+  if (existing.externalIntegrationsEgress !== undefined) {
+    entries.push({
+      ...existing.externalIntegrationsEgress,
+      step: "external-integrations-egress",
+    });
+  }
+  if (existing.infraDeploy !== undefined) {
+    entries.push({ ...existing.infraDeploy, step: "infra-deploy" });
+  }
+  if (existing.operationSinks !== undefined) {
+    entries.push({ ...existing.operationSinks, step: "operation-sinks" });
+  }
+  if (existing.crypto !== undefined) {
+    entries.push({ ...existing.crypto, step: "crypto" });
+  }
+  if (existing.loggingObservability !== undefined) {
+    entries.push({ ...existing.loggingObservability, step: "logging-observability" });
+  }
+  if (existing.dataFlows !== undefined) {
+    entries.push({ ...existing.dataFlows, step: "data-flows" });
+  }
+  if (existing.trustBoundaries !== undefined) {
+    entries.push({ ...existing.trustBoundaries, step: "trust-boundaries" });
+  }
+  if (existing.repositoryMap !== undefined) {
+    entries.push({ ...existing.repositoryMap, step: "repository-map" });
+  }
+  if (existing.attackHypotheses !== undefined) {
+    entries.push({ ...existing.attackHypotheses, step: "attack-hypotheses" });
+  }
+
+  return entries;
 }
 
 function buildStackBuildDepsContext(contextPack: PiContextPackArtifact): unknown {
@@ -1323,6 +2045,38 @@ export function buildAttackHypothesesContextMarkdown(input: {
   pushNoneIfEmpty(lines, input.repositoryMap.sections);
 
   lines.push("", "## Repository Knowledge", input.repositoryMapContext.trim());
+
+  return `${lines.join("\n")}\n`;
+}
+
+function buildRepositoryMapContextFromArtifact(repositoryMap: RepositoryMapArtifact): string {
+  const lines: string[] = [
+    "# Repository Map Context",
+    "",
+    `Repo: ${repositoryMap.repo.url}`,
+    `Commit: ${repositoryMap.repo.commit_sha ?? "unknown"}`,
+    "",
+    "This context is derived from the accepted repository-map artifact.",
+    "",
+    "## Summary",
+    `- project_kind: ${repositoryMap.summary.project_kind ?? "unknown"}`,
+    `- confidence: ${repositoryMap.summary.confidence ?? "unknown"}`,
+    `- text: ${markdownField(repositoryMap.summary.text)}`,
+    `- evidence: ${formatMarkdownEvidence(repositoryMap.summary.evidence)}`,
+    "",
+    "## Sections",
+  ];
+
+  for (const section of repositoryMap.sections) {
+    lines.push(
+      `- ${section.artifact ?? "unknown"} | ${section.path ?? "unknown"} | item_count=${
+        section.item_count ?? "unknown"
+      } | ${markdownField(section.summary ?? section.title ?? "n/a")} | evidence: ${formatMarkdownEvidence(
+        section.evidence,
+      )}`,
+    );
+  }
+  pushNoneIfEmpty(lines, repositoryMap.sections);
 
   return `${lines.join("\n")}\n`;
 }

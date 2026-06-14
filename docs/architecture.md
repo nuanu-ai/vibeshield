@@ -320,11 +320,18 @@ named artifact boundary, which is useful while debugging prompts such as
 `attack-hypotheses`. Final accepted artifacts before the selected step are
 reused; raw Pi candidates are not treated as accepted output.
 
-Resume always creates a fresh sandbox and clones the original repository at the
-`commit_sha` recorded in `run.json`. If the run records a previous sandbox id,
-VibeShield first asks the sandbox provider to delete that old sandbox id. A
-failed, unsupported, or not-found stale-sandbox cleanup is recorded in
-`events.jsonl` but does not block the fresh resume sandbox.
+`vibeshield resume <run-dir> --only <step>` reruns exactly one selected step,
+overwrites that step's stable artifact path, and leaves downstream artifacts
+untouched even if they are now semantically stale. `--from` and `--only` cannot
+be combined.
+
+Resume creates a fresh sandbox only for steps that need the repository source.
+`context` and `final-report` run entirely from local artifacts. When a sandbox
+is needed, VibeShield clones the original GitHub commit or copies the unchanged
+local Git snapshot recorded in `run.json`. If the run records a previous
+sandbox id, VibeShield first asks the sandbox provider to delete that old
+sandbox id. A failed, unsupported, or not-found stale-sandbox cleanup is
+recorded in `events.jsonl` but does not block the fresh resume sandbox.
 
 The resume boundary is artifact-based:
 
@@ -336,4 +343,9 @@ The resume boundary is artifact-based:
   `coverage-structure` through `repository-map`, then `attack-hypotheses`;
 - when `--from <step>` is provided, ignore accepted artifacts from that step
   onward and overwrite their stable output paths;
-- rerender `final-report.md` and `final-report.pdf` from the final accepted artifacts.
+- when `--only <step>` is provided, use any accepted inputs that already exist,
+  fail clearly if the selected step's basic inputs are missing, and preserve the
+  previous overall run status after a successful single-step rerun;
+- rerender `final-report.md` and `final-report.pdf` only when report inputs
+  exist. `--only final-report` is allowed only for a run that was already
+  successful.

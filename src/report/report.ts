@@ -91,17 +91,12 @@ export async function writeFinalReport(input: {
   const runDir = path.dirname(input.markdownPath);
   const [baseline, repositoryMap, attackHypotheses] = await Promise.all([
     readArtifact<BaselineSummaryArtifact>(runDir, input.run.artifacts.baseline_summary),
-    readRequiredArtifact<RepositoryMapArtifact>(
-      runDir,
-      input.run.artifacts.repository_map,
-      "repository-map",
-    ),
-    readRequiredArtifact<AttackHypothesesArtifact>(
-      runDir,
-      input.run.artifacts.attack_hypotheses,
-      "attack-hypotheses",
-    ),
+    readArtifact<RepositoryMapArtifact>(runDir, input.run.artifacts.repository_map),
+    readArtifact<AttackHypothesesArtifact>(runDir, input.run.artifacts.attack_hypotheses),
   ]);
+  if (baseline === null && repositoryMap === null && attackHypotheses === null) {
+    throw new Error("Cannot render final report without any report input artifacts.");
+  }
   const model = buildFinalReportModel({
     attackHypotheses,
     baseline,
@@ -116,18 +111,6 @@ export async function writeFinalReport(input: {
     markdownPath: path.basename(input.markdownPath),
     pdfPath: path.basename(input.pdfPath),
   };
-}
-
-async function readRequiredArtifact<T>(
-  runDir: string,
-  relativePath: string | undefined,
-  label: string,
-): Promise<T> {
-  const artifact = await readArtifact<T>(runDir, relativePath);
-  if (artifact === null) {
-    throw new Error(`Cannot render final report without ${label} artifact.`);
-  }
-  return artifact;
 }
 
 async function readArtifact<T>(
@@ -146,13 +129,13 @@ async function readArtifact<T>(
 }
 
 function buildFinalReportModel(input: {
-  attackHypotheses: AttackHypothesesArtifact;
+  attackHypotheses: AttackHypothesesArtifact | null;
   baseline: BaselineSummaryArtifact | null;
-  repositoryMap: RepositoryMapArtifact;
+  repositoryMap: RepositoryMapArtifact | null;
   run: ScanRunState;
 }): FinalReportModel {
   const deterministicFindings = collectDeterministicFindings(input.baseline);
-  const hypotheses = input.attackHypotheses.hypotheses;
+  const hypotheses = input.attackHypotheses?.hypotheses ?? [];
   const repoName = repositoryName(input.run.source.url);
   const commitShaFull = input.run.commit_sha ?? "unknown";
   const commitShaShort = input.run.commit_sha === undefined ? "unknown" : shortSha(commitShaFull);
@@ -166,7 +149,10 @@ function buildFinalReportModel(input: {
     needsNow,
   };
 
-  const executiveText = input.attackHypotheses.executive_summary.text?.trim() ?? "";
+  const executiveText =
+    input.attackHypotheses?.executive_summary.text?.trim() ??
+    input.repositoryMap?.summary.text?.trim() ??
+    "";
 
   return {
     confirmedGroups: severityOrder
@@ -190,7 +176,10 @@ function buildFinalReportModel(input: {
         label: priorityLabel(priority),
       }))
       .filter((group) => group.cards.length > 0),
-    limitations: cleanList(input.attackHypotheses.executive_summary.limitations ?? []),
+    limitations:
+      input.attackHypotheses === null
+        ? ["Attack hypotheses were not available when this best-effort report was rendered."]
+        : cleanList(input.attackHypotheses.executive_summary.limitations ?? []),
     repo: {
       commitShaFull,
       commitShaShort,
@@ -198,7 +187,7 @@ function buildFinalReportModel(input: {
       url: input.run.source.url,
     },
     runId: input.run.run_id,
-    startHere: cleanList(input.attackHypotheses.validation_roadmap?.first_pass ?? []).slice(0, 5),
+    startHere: cleanList(input.attackHypotheses?.validation_roadmap?.first_pass ?? []).slice(0, 5),
     summary: executiveText === "" ? fallbackSummary(repoName, commitShaShort) : executiveText,
     verdict: buildVerdict({ counts, hypotheses }),
   };

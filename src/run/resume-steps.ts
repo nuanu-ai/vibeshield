@@ -1,93 +1,93 @@
 export const resumeStepDefinitions = [
   {
-    description: "Rebuild repository inventory, then rerun every downstream step.",
+    description: "Repository inventory",
     step: "inventory",
   },
   {
     aliases: ["baseline"],
-    description: "Rerun deterministic baseline checks, context, map, and hypotheses.",
+    description: "Quick security scanners",
     step: "deterministic-baseline",
   },
   {
     aliases: ["pi-context", "pi-context-pack"],
-    description: "Rebuild the Pi context pack, then rerun map and hypotheses.",
+    description: "AI analysis context pack",
     step: "context",
   },
   {
-    description: "Rebuild the deterministic coverage/structure map and all downstream artifacts.",
+    description: "Coverage and structure",
     step: "coverage-structure",
   },
   {
     aliases: ["stack"],
-    description: "Rerun stack/build/dependency mapping and all downstream artifacts.",
+    description: "Stack, build, dependencies",
     step: "stack-build-deps",
   },
   {
-    description: "Rerun entrypoint mapping and all downstream artifacts.",
+    description: "Entry points and routes",
     step: "entrypoints",
   },
   {
     aliases: ["config"],
-    description: "Rerun configuration/secret-reference mapping and all downstream artifacts.",
+    description: "Config and secret references",
     step: "config-secrets",
   },
   {
     aliases: ["auth"],
-    description: "Rerun auth/access mapping and all downstream artifacts.",
+    description: "Auth and access control",
     step: "auth-access",
   },
   {
     aliases: ["storage"],
-    description: "Rerun storage/data-model mapping and all downstream artifacts.",
+    description: "Storage and data model",
     step: "storage-data-model",
   },
   {
     aliases: ["integrations", "egress"],
-    description: "Rerun external integration/egress mapping and all downstream artifacts.",
+    description: "Integrations and egress",
     step: "external-integrations-egress",
   },
   {
     aliases: ["infra"],
-    description: "Rerun infrastructure/deploy mapping and all downstream artifacts.",
+    description: "Infrastructure and deploy",
     step: "infra-deploy",
   },
   {
     aliases: ["sinks"],
-    description: "Rerun operation-sink mapping and all downstream artifacts.",
+    description: "Operation sinks",
     step: "operation-sinks",
   },
   {
-    description: "Rerun crypto/randomness mapping and all downstream artifacts.",
+    description: "Crypto and randomness",
     step: "crypto",
   },
   {
     aliases: ["logging"],
-    description: "Rerun logging/observability mapping and all downstream artifacts.",
+    description: "Logging and observability",
     step: "logging-observability",
   },
   {
     aliases: ["flows"],
-    description: "Rerun data-flow mapping and all downstream artifacts.",
+    description: "Input-to-sink data flows",
     step: "data-flows",
   },
   {
     aliases: ["boundaries"],
-    description: "Rerun trust-boundary synthesis, repository map, and hypotheses.",
+    description: "Trust boundaries",
     step: "trust-boundaries",
   },
   {
     aliases: ["repo-map"],
-    description: "Rerun repository-map synthesis and hypotheses.",
+    description: "Repository-map synthesis",
     step: "repository-map",
   },
   {
     aliases: ["hypotheses"],
-    description: "Rerun attack-hypothesis generation and the final report.",
+    description: "Prioritized attack hypotheses",
     step: "attack-hypotheses",
   },
   {
     aliases: ["report"],
-    description: "Rerender only the owner-facing final Markdown and PDF report.",
+    description: "Markdown + PDF report",
     step: "final-report",
   },
 ] as const;

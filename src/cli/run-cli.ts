@@ -24,26 +24,10 @@ export interface CliIo {
 
 export type CliDependencies = Pick<RunScanOptions, "runsRoot" | "sandboxProvider">;
 
-const usage = `Usage:
-  vibeshield scan <github-url-or-local-path>
-  vibeshield resume /path/to/run-directory [--from <step>]
-
-Options:
-  -h, --help       Show this help.
-  --from <step>   Resume by rerunning from a specific step onward.
-
-Resume steps:
-${resumeStepDefinitions
-  .map((definition) => {
-    const aliases = "aliases" in definition ? ` (aliases: ${definition.aliases.join(", ")})` : "";
-    return `  ${definition.step.padEnd(30)} ${definition.description}${aliases}`;
-  })
-  .join("\n")}
-`;
-
 interface ParsedCliArgs {
   command: "resume" | "scan";
   fromStep?: RunResumeFromStep;
+  onlyStep?: RunResumeFromStep;
   target: string;
 }
 
@@ -54,17 +38,17 @@ export async function runCli(
 ): Promise<number> {
   const parsed = parseCliArgs(argv);
   if (parsed === "help") {
-    io.stdout.write(usage);
+    io.stdout.write(renderHelp(isInteractive(io.stdout)));
     return 0;
   }
   if (typeof parsed === "string") {
-    io.stderr.write(`${parsed}\n\n${usage}`);
+    io.stderr.write(renderCliError(parsed, isInteractive(io.stderr)));
     return 1;
   }
 
-  const { command, fromStep, target } = parsed;
-  if (fromStep !== undefined && command !== "resume") {
-    io.stderr.write(usage);
+  const { command, fromStep, onlyStep, target } = parsed;
+  if ((fromStep !== undefined || onlyStep !== undefined) && command !== "resume") {
+    io.stderr.write(renderHelp(isInteractive(io.stderr)));
     return 1;
   }
 
@@ -92,6 +76,7 @@ export async function runCli(
         ? await runScan(scanOptions)
         : await runResume({
             ...(fromStep === undefined ? {} : { fromStep }),
+            ...(onlyStep === undefined ? {} : { onlyStep }),
             onProgress,
             runDir: target,
             ...(dependencies.sandboxProvider === undefined
@@ -103,7 +88,7 @@ export async function runCli(
   }
 
   if (result.exitCode === 0) {
-    renderer.success(result);
+    renderer.success(result, onlyStep === undefined ? {} : { onlyStep });
     return 0;
   }
 
@@ -128,6 +113,7 @@ function parseCliArgs(argv: string[]): ParsedCliArgs | "help" | string {
   }
 
   let fromStep: RunResumeFromStep | undefined;
+  let onlyStep: RunResumeFromStep | undefined;
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === undefined) {
@@ -163,6 +149,36 @@ function parseCliArgs(argv: string[]): ParsedCliArgs | "help" | string {
       continue;
     }
 
+    const inlineOnly = arg.match(/^--only=(?<step>.+)$/)?.groups?.step;
+    if (inlineOnly !== undefined) {
+      if (onlyStep !== undefined) {
+        return "--only can only be provided once.";
+      }
+      const parsed = parseRunResumeFromStep(inlineOnly);
+      if (parsed === undefined) {
+        return `Unknown resume step: ${inlineOnly}`;
+      }
+      onlyStep = parsed;
+      continue;
+    }
+
+    if (arg === "--only") {
+      if (onlyStep !== undefined) {
+        return "--only can only be provided once.";
+      }
+      const value = rest[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return "--only requires a step name.";
+      }
+      const parsed = parseRunResumeFromStep(value);
+      if (parsed === undefined) {
+        return `Unknown resume step: ${value}`;
+      }
+      onlyStep = parsed;
+      index += 1;
+      continue;
+    }
+
     if (arg === "--help" || arg === "-h") {
       return "help";
     }
@@ -173,8 +189,19 @@ function parseCliArgs(argv: string[]): ParsedCliArgs | "help" | string {
   if (command === "scan" && fromStep !== undefined) {
     return "--from is only supported for resume.";
   }
+  if (command === "scan" && onlyStep !== undefined) {
+    return "--only is only supported for resume.";
+  }
+  if (fromStep !== undefined && onlyStep !== undefined) {
+    return "--from and --only cannot be used together.";
+  }
 
-  return fromStep === undefined ? { command, target } : { command, fromStep, target };
+  return {
+    command,
+    ...(fromStep === undefined ? {} : { fromStep }),
+    ...(onlyStep === undefined ? {} : { onlyStep }),
+    target,
+  };
 }
 
 interface Renderer {
@@ -183,7 +210,7 @@ interface Renderer {
   header(command: string, target: string): void;
   startSpinner(): void;
   stopSpinner(): void;
-  success(result: RunScanSuccess): void;
+  success(result: RunScanSuccess, options?: { onlyStep?: RunResumeFromStep }): void;
 }
 
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -212,13 +239,70 @@ const code = {
   yellow: "\x1b[33m",
 } as const;
 
+function makePaint(interactive: boolean): (codes: string, text: string) => string {
+  return (codes, text) => (interactive ? `${codes}${text}${code.reset}` : text);
+}
+
 function isInteractive(stdout: CliWritable): boolean {
   return (stdout as { isTTY?: boolean }).isTTY === true && process.env.NO_COLOR === undefined;
 }
 
+// Owner-facing help in the same visual language as the live run output: a brand
+// line, sectioned blocks, cyan command/step names, and dim descriptions. Colors
+// only render on an interactive TTY; piped/non-TTY output stays plain text.
+function renderHelp(interactive: boolean): string {
+  const paint = makePaint(interactive);
+  const heading = (text: string): string => `  ${paint(code.bold, text)}`;
+  const stepWidth = Math.max(...resumeStepDefinitions.map((definition) => definition.step.length));
+
+  const lines = [
+    "",
+    `  ${paint(code.magenta, glyph.active)} ${paint(code.bold, "vibeshield")}   ${paint(code.dim, "security autopilot for AI-generated code")}`,
+    "",
+    `  ${paint(code.dim, "Scan a GitHub repo or local Git worktree in an isolated sandbox, then get")}`,
+    `  ${paint(code.dim, "an owner-facing report: what to fix now and what to check next.")}`,
+    "",
+    heading("Usage"),
+    `    ${paint(code.cyan, "vibeshield scan")} <github-url-or-local-path>`,
+    `    ${paint(code.cyan, "vibeshield resume")} /path/to/run-directory [--from <step>]`,
+    `    ${paint(code.cyan, "vibeshield resume")} /path/to/run-directory --only <step>`,
+    "",
+    heading("Commands"),
+    `    ${paint(code.cyan, "scan".padEnd(9))}${paint(code.dim, "Run a full security scan; write the report and artifacts")}`,
+    `    ${paint(code.cyan, "resume".padEnd(9))}${paint(code.dim, "Continue or rerun a previous run from saved artifacts")}`,
+    "",
+    heading("Options"),
+    `    ${paint(code.cyan, "-h, --help".padEnd(16))}${paint(code.dim, "Show this help")}`,
+    `    ${paint(code.cyan, "--from <step>".padEnd(16))}${paint(code.dim, "Rerun from <step> and everything after it  (resume)")}`,
+    `    ${paint(code.cyan, "--only <step>".padEnd(16))}${paint(code.dim, "Rerun just <step>, keep later artifacts    (resume)")}`,
+    "",
+    heading("Examples"),
+    `    ${paint(code.dim, "vibeshield scan https://github.com/owner/repo")}`,
+    `    ${paint(code.dim, "vibeshield scan ./my-app")}`,
+    `    ${paint(code.dim, "vibeshield resume ./runs/<run-id> --from attack-hypotheses")}`,
+    `    ${paint(code.dim, "vibeshield resume ./runs/<run-id> --only final-report")}`,
+    "",
+    `${heading("Resume steps")}  ${paint(code.dim, "· pipeline order; pass a name or alias to --from / --only")}`,
+    ...resumeStepDefinitions.map((definition) => {
+      const alias = "aliases" in definition ? paint(code.dim, `  (${definition.aliases[0]})`) : "";
+      return `    ${paint(code.cyan, definition.step.padEnd(stepWidth))}  ${paint(code.dim, definition.description)}${alias}`;
+    }),
+    "",
+    heading("Output"),
+    `    ${paint(code.dim, "runs/<run-id>/ — final-report.md, final-report.pdf, and JSON artifacts")}`,
+    "",
+  ];
+
+  return `${lines.join("\n")}\n`;
+}
+
+function renderCliError(message: string, interactive: boolean): string {
+  const paint = makePaint(interactive);
+  return `\n  ${paint(code.red, glyph.fail)} ${paint(code.bold, message)}\n${renderHelp(interactive)}`;
+}
+
 function createRenderer(io: CliIo, interactive: boolean): Renderer {
-  const paint = (codes: string, text: string): string =>
-    interactive ? `${codes}${text}${code.reset}` : text;
+  const paint = makePaint(interactive);
 
   let frame = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -606,13 +690,14 @@ function createRenderer(io: CliIo, interactive: boolean): Renderer {
         io.stdout.write(code.showCursor);
       }
     },
-    success(result) {
+    success(result, options = {}) {
       const elapsed = formatElapsed(Date.now() - runStartedWall);
+      const isOnlyStep = options.onlyStep !== undefined;
       io.stdout.write(
-        `\n  ${paint(code.green, glyph.done)} ${paint(code.bold, "Scan complete")} ${paint(code.dim, `· ${elapsed}`)}\n`,
+        `\n  ${paint(code.green, glyph.done)} ${paint(code.bold, isOnlyStep ? "Step complete" : "Scan complete")} ${paint(code.dim, `· ${elapsed}`)}\n`,
       );
       io.stdout.write(`    Run directory: ${result.runDir}\n`);
-      if (result.runDir !== undefined) {
+      if (!isOnlyStep && result.runDir !== undefined) {
         io.stdout.write(
           `    ${paint(code.dim, `Final report PDF: ${result.runDir}/final-report.pdf`)}\n`,
         );

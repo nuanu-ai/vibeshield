@@ -163,6 +163,9 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     expect(exitCode).toBe(0);
     expect(stderr.join("")).toBe("");
     expect(stdout.join("")).toContain("vibeshield resume /path/to/run-directory [--from <step>]");
+    expect(stdout.join("")).toContain("vibeshield resume /path/to/run-directory --only <step>");
+    expect(stdout.join("")).toContain("--only <step>");
+    expect(stdout.join("")).not.toContain("--only-step");
     expect(stdout.join("")).toContain("attack-hypotheses");
     expect(stdout.join("")).toContain("final-report");
     expect(stdout.join("")).toContain("stack-build-deps");
@@ -181,6 +184,52 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     expect(stdout.join("")).toBe("");
     expect(stderr.join("")).toContain("Unknown resume step: unknown-step");
     expect(stderr.join("")).toContain("attack-hypotheses");
+  });
+
+  it("rejects unknown resume --only steps before touching a run directory", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    const exitCode = await runCli(["resume", "/tmp/does-not-matter", "--only", "unknown-step"], {
+      stderr: { write: (chunk: string) => stderr.push(chunk) },
+      stdout: { write: (chunk: string) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stdout.join("")).toBe("");
+    expect(stderr.join("")).toContain("Unknown resume step: unknown-step");
+    expect(stderr.join("")).toContain("attack-hypotheses");
+  });
+
+  it("rejects mixing resume --from and --only", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    const exitCode = await runCli(
+      ["resume", "/tmp/does-not-matter", "--from", "entrypoints", "--only", "final-report"],
+      {
+        stderr: { write: (chunk: string) => stderr.push(chunk) },
+        stdout: { write: (chunk: string) => stdout.push(chunk) },
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout.join("")).toBe("");
+    expect(stderr.join("")).toContain("--from and --only cannot be used together.");
+  });
+
+  it("does not accept --only-step as a resume alias", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    const exitCode = await runCli(["resume", "/tmp/does-not-matter", "--only-step", "context"], {
+      stderr: { write: (chunk: string) => stderr.push(chunk) },
+      stdout: { write: (chunk: string) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stdout.join("")).toBe("");
+    expect(stderr.join("")).toContain("Unknown argument: --only-step");
   });
 
   it("rejects unsupported URL and archive inputs before sandbox creation", async () => {

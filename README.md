@@ -115,6 +115,17 @@ A live scan **requires** both keys and will fail clearly if they're missing — 
 > pnpm resume runs/<run-directory> --from attack-hypotheses
 > pnpm cli -- --help            # lists every resume step and its aliases
 > ```
+>
+> To rerun exactly one step and leave downstream artifacts untouched, use `--only`:
+> ```bash
+> pnpm resume runs/<run-directory> --only entrypoints
+> pnpm resume runs/<run-directory> --only final-report
+> ```
+>
+> `--only` is best-effort: the selected step uses whatever accepted inputs already exist and
+> fails clearly if its basic inputs are missing. A successful `--only` on a failed run does not
+> turn the overall run into `success`; `--only final-report` only renders for a run that already
+> completed successfully.
 
 ## 📂 What a run produces
 
@@ -189,6 +200,7 @@ pnpm typecheck    # tsc --noEmit
 pnpm test         # vitest
 pnpm cli -- --help
 pnpm resume runs/<run-directory> --from attack-hypotheses
+pnpm resume runs/<run-directory> --only entrypoints
 
 # Live smoke tests (require credentials)
 pnpm smoke:daytona     https://github.com/octocat/Hello-World
