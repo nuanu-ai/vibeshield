@@ -1,102 +1,205 @@
-# VibeShield
+<div align="center">
 
-VibeShield is an early-stage security audit pipeline for AI-generated and beginner-built web projects.
+# 🛡️ VibeShield
 
-The current product slice is not a dashboard, GitHub App, or auto-fix system. The goal is to prove the scan pipeline:
+### Security autopilot for AI-generated code
 
-> GitHub repo in, inspectable run artifacts out.
+**Point it at a repo. Get an inspectable security read-out — not a 200-alert dashboard.**
 
-The current scan output is a facts-only AppSec repository map plus deterministic scanner results. The map is not a security verdict; deeper security findings come later after the repository map and runtime boundary are stable.
+[![status](https://img.shields.io/badge/status-experimental-orange.svg)](#-status--roadmap)
+[![stage](https://img.shields.io/badge/stage-MVP%20scan%20pipeline-blue.svg)](#-how-it-works)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Node%20%E2%89%A5%2024-3178C6.svg?logo=typescript&logoColor=white)](package.json)
+[![pnpm](https://img.shields.io/badge/pnpm-10-F69220.svg?logo=pnpm&logoColor=white)](package.json)
+[![runtime](https://img.shields.io/badge/runtime-Daytona%20sandbox-111111.svg)](docs/architecture.md)
+[![models](https://img.shields.io/badge/models-via%20OpenRouter-6566F1.svg)](docs/architecture.md)
 
-## Current Direction
+</div>
 
-The first implementation should be a local CLI pipeline:
+---
+
+> **The promise:** GitHub repo in → inspectable run artifacts out.
+>
+> You shipped something an agent wrote. VibeShield helps you answer the only question that matters before you deploy it: **"Is there a hole in here right now?"**
+
+## 🎯 Who this is for
+
+A new wave of builders ship real web apps without reading most of the code their AI agent wrote. They push to GitHub, wire up a database and a few API keys, and hit deploy. They won't install Snyk, configure CodeQL, or triage 40 security alerts — and they shouldn't have to.
+
+VibeShield is built for them: **a security autopilot for beginner, AI-generated web projects.** Not an enterprise AppSec platform. Not another scanner wrapper. A tool that does the boring security legwork and hands back something a non-expert (or their coding agent) can actually act on.
+
+## ✨ What makes it different
+
+- 🧠 **AI-native, two-stage triage** — deterministic scanners first, then agentic repository mapping, then prioritized *attack hypotheses*. Cheap checks gate expensive models.
+- 🔒 **Untrusted code is treated as hostile** — every scanned repo runs inside a fresh, network-isolated [Daytona](https://www.daytona.io/) sandbox that is destroyed when the run ends. Nothing hostile ever touches your host.
+- 🧾 **Facts before verdicts** — VibeShield builds an evidence-backed map of *what the code actually is* before anyone reasons about *what could go wrong*. Every fact is named and traceable to a file.
+- 📉 **Low noise is the product** — the goal is 3–7 useful, prioritized signals, not a wall of findings. Honesty over coverage.
+- 📂 **Everything is inspectable** — every stage writes plain JSON and Markdown to disk. No black box; `cat` the artifacts and see exactly what happened.
+
+## ⚠️ What it is (and isn't) — today
+
+VibeShield is **early-stage**. The current product slice proves one thing end-to-end: the scan pipeline.
+
+| ✅ Today | 🚧 Not yet |
+| --- | --- |
+| Local CLI: `vibeshield scan <repo>` | GitHub App / one-click install |
+| Deterministic baseline scanners | Auto-fix or PR generation |
+| Facts-only AppSec **repository map** | Continuous monitoring |
+| Prioritized **attack hypotheses** | A web dashboard or accounts |
+| Inspectable run artifacts on disk | Confirmed, validated findings |
+
+> [!IMPORTANT]
+> The repository map and attack hypotheses are **navigation aids, not a security verdict.** Hypotheses are *testable leads*, not confirmed vulnerabilities. Confirmation comes later, after validation.
+
+## 🛠️ How it works
+
+```mermaid
+flowchart TD
+    A(["vibeshield scan &lt;github-url&gt;"]) --> V[Validate GitHub URL]
+    V --> SBX
+
+    subgraph SBX ["🔒 Ephemeral Daytona sandbox — isolated, deleted after the run"]
+        direction TB
+        C[Clone repo] --> I[Inventory & classify]
+        I --> B["Deterministic baseline<br/>syft · trivy · gitleaks<br/>actionlint · zizmor · checkov"]
+        B --> P["Pi context pack<br/>compact, neutral repo facts"]
+        P --> M["Facts-only repository map<br/>section-by-section agentic mapping"]
+        M --> H["Attack hypotheses<br/>claude-opus-4.8"]
+    end
+
+    H --> PULL[Pull expected artifacts to host]
+    PULL --> R[("📂 Inspectable run directory<br/>report.md · repository-map.json<br/>attack-hypotheses.json · events.jsonl")]
+```
+
+1. **Intake** — validate the URL, clone *inside the sandbox*, and build an inventory of languages, manifests, and structure.
+2. **Deterministic baseline** — run fast, boring, well-understood scanners (SBOM, vulnerabilities, secrets, CI/IaC linting). A single tool failing never sinks the run.
+3. **Context pack** — distill the repo into compact, neutral facts for the agents — no raw scanner noise, no debug spam.
+4. **Repository map** — agentic "Pi" collectors map the codebase section by section (entrypoints, auth, config & secrets, storage, integrations, operation sinks, data flows, trust boundaries, …). Each fact is **named** and backed by the file it was observed in.
+5. **Attack hypotheses** — a strong model (`claude-opus-4.8`) reads the accepted map — *not* the raw code — and proposes a prioritized list of testable attack hypotheses.
+6. **Report & cleanup** — pull the expected artifacts back to the host, write the report, and destroy the sandbox.
+
+See [docs/architecture.md](docs/architecture.md) for the full flow and [docs/repository-map-expectations.md](docs/repository-map-expectations.md) for what each map section must contain.
+
+## 🚀 Quickstart
+
+**Requirements:** Node ≥ 24, [pnpm](https://pnpm.io/), and API keys for [Daytona](https://www.daytona.io/) + [OpenRouter](https://openrouter.ai/) (for live scans).
 
 ```bash
-vibeshield scan https://github.com/owner/repo
+# 1. Install
+pnpm install
+
+# 2. Configure credentials
+cp .env.example .env
+#   then set DAYTONA_API_KEY and OPENROUTER_API_KEY in .env
+#   (DAYTONA_API_URL and DAYTONA_TARGET are optional SDK overrides)
+
+# 3. Scan a repo
+pnpm scan https://github.com/owner/repo
 ```
 
-Target outputs:
+A live scan **requires** both keys and will fail clearly if they're missing — it never falls back to cloning an untrusted repo on your host. Results land in a fresh run directory under `runs/`.
+
+> 💡 **A run died midway?** Resume it from durable artifacts — no need to redo finished work:
+> ```bash
+> pnpm resume runs/<run-directory>
+> ```
+>
+> While debugging a later step, rerun from a named artifact boundary:
+> ```bash
+> pnpm resume runs/<run-directory> --from attack-hypotheses
+> pnpm cli -- --help
+> ```
+
+## 📂 What a run produces
+
+Every run writes a self-contained, inspectable directory. The highlights:
 
 ```text
-run.json
-events.jsonl
-report.md
-report.json
-repo-map.json
-coverage.json
-findings.json
-metrics.json
+report.md                       # human-readable summary
+run.json                        # run status, repo, commit SHA
+events.jsonl                    # sanitized lifecycle event stream
+outputs/
+├─ inventory.json               # languages, manifests, structure
+├─ baseline-summary.json        # concrete deterministic findings
+├─ pi-context-pack.json         # compact facts handed to the agents
+├─ repository-map.json          # the synthesized facts-only map
+├─ attack-hypotheses.json       # prioritized, testable leads
+└─ repo-map/                    # one JSON artifact per map section
+   ├─ entrypoints.json
+   ├─ auth-access.json
+   ├─ config-secrets.json
+   ├─ storage-data-model.json
+   ├─ operation-sinks.json
+   ├─ data-flows.json
+   └─ … (coverage, stack, crypto, infra, integrations, logging, trust-boundaries)
 ```
 
-The first implementation may produce only a smaller subset.
+<details>
+<summary><b>Why a sandbox? (the threat model)</b></summary>
 
-No frontend, backend, GitHub App, PR generation, accounts, or continuous monitoring in the current product slice.
+<br/>
 
-## Technical Shape
+Repositories that VibeShield scans are **untrusted input** — they may be malicious, and their content can attempt prompt injection against the analysis agents. So the design is defensive by default:
 
-Preferred direction for the core is TypeScript/Node orchestration with simple, inspectable steps.
+- Each scan gets a **fresh, isolated Daytona sandbox**; the repo is cloned and all scanners + agents run *there*, never on the host.
+- The host only pulls back a known set of **expected artifacts** — not arbitrary files.
+- The sandbox is **deleted** after both success and failure.
+- Agents reason over a **curated context pack**, run read-only, and the hypothesis stage gets the map — not raw repository inspection tools.
 
-The first implementation should avoid a heavy analyzer framework. Later steps may call external tools when that becomes useful.
+The host's job is orchestration, artifact storage, and reporting. It must never clone or execute the scanned repo directly when live credentials are present.
 
-The local CLI runs deterministic baseline jobs, builds curated Pi context,
-collects a facts-only repository map, validates evidence, and writes an
-artifact-driven report. The default runtime sandbox path uses the official
-`@daytona/sdk` adapter. Tests use a fake Daytona adapter only as a local test
-double. A live scan requires Daytona and OpenRouter credentials and must not fall
-back to cloning a hostile repository on the host.
+</details>
 
-The core concepts are:
+## 🧱 Tech stack
 
-- repo intake and classification;
-- universal baseline hygiene;
-- ecosystem analyzers;
-- AI-assisted repository mapping;
-- verifier;
-- scoring, deduplication, and suppression;
-- short reports with coverage.
+- **Language / runtime:** TypeScript on Node ≥ 24, ESM.
+- **Sandbox:** [`@daytona/sdk`](https://www.daytona.io/) — ephemeral, isolated execution.
+- **Models:** routed via [OpenRouter](https://openrouter.ai/); attack hypotheses use `claude-opus-4.8`.
+- **Baseline scanners:** syft (SBOM), trivy, gitleaks, actionlint, zizmor, checkov.
+- **Tooling:** pnpm · tsx · vitest · Biome.
 
-## Documentation
+Design philosophy: **boring, inspectable code over clever orchestration** — KISS, DRY, YAGNI. Behavior should be easy to debug straight from files on disk. See [AGENTS.md](AGENTS.md).
 
-Project docs live in [docs/](./docs/).
+## 🗺️ Status & roadmap
 
-Start here:
+This is an MVP focused on proving the detection core. Where it's heading:
 
-- [Architecture](./docs/architecture.md)
-- [Product idea](./docs/idea.md)
+- **Now** — local CLI, facts-only map + attack hypotheses, inspectable artifacts.
+- **Next** — a beginner-friendly **Security Snapshot**: a `Safe to demo / Unsafe to deploy / Critical fix needed` status with a handful of cards, each explaining the risk in plain language and including a ready-to-paste prompt for your coding agent.
+- **Later** — validated findings (hypothesis → evidence → confirmation), and eventually a low-friction GitHub integration.
 
-## Working Principles
-
-See [AGENTS.md](./AGENTS.md) for repository conventions and agent instructions.
-
-## Local Development
+## 🧑‍💻 Local development
 
 ```bash
 pnpm install
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm scan https://github.com/owner/repo
-pnpm smoke:daytona https://github.com/octocat/Hello-World
-pnpm smoke:pi-daytona https://github.com/owner/repo
+pnpm lint         # Biome
+pnpm typecheck    # tsc --noEmit
+pnpm test         # vitest
+pnpm cli -- --help
+pnpm resume runs/<run-directory> --from attack-hypotheses
+
+# Live smoke tests (require credentials)
+pnpm smoke:daytona     https://github.com/octocat/Hello-World
+pnpm smoke:pi-daytona  https://github.com/owner/repo
 ```
 
-`pnpm scan` runs the development CLI form of `vibeshield scan`. A successful
-live scan requires `DAYTONA_API_KEY` and `OPENROUTER_API_KEY`;
-`DAYTONA_API_URL` and `DAYTONA_TARGET` are optional SDK overrides. Put these
-values in `.env` or export them in the shell. `pnpm smoke:daytona` is the live
-Daytona scan path; it exits clearly when required keys are missing.
-`pnpm smoke:pi-daytona` is retained as a focused Pi-in-Daytona smoke through
-OpenRouter. The fake adapter in
-`src/sandbox/fake-daytona.ts` is for non-live acceptance tests only.
+Tests use a **fake Daytona adapter** (`src/sandbox/fake-daytona.ts`) as a local double — non-live acceptance tests don't need credentials or network access.
 
-Current runs write inspectable artifacts under each local run directory,
-including `outputs/inventory.json`, `outputs/baseline-summary.json`,
-`outputs/baseline/tool-availability.json`,
-`outputs/baseline/syft-sbom.json`, `outputs/pi-context-pack.json`,
-repository map section artifacts under `outputs/repo-map/`,
-`outputs/repository-map.json`,
-per-stage redacted Pi progress/log artifacts under `outputs/pi/<stage>/`, and
-`report.md`. The current map sections are coverage/structure, stack/build/deps,
-entrypoints, auth/config/secrets, storage/integrations/infra, operation sinks,
-data flows, and trust boundaries.
+Conventions, commit hygiene, and engineering principles live in [AGENTS.md](AGENTS.md).
+
+## 📚 Documentation
+
+| Doc | What's inside |
+| --- | --- |
+| [docs/architecture.md](docs/architecture.md) | End-to-end flow, sandbox boundary, pipeline, artifacts |
+| [docs/repository-map-expectations.md](docs/repository-map-expectations.md) | The evidence contract for each map section |
+| [docs/idea.md](docs/idea.md) | Product vision and positioning |
+| [docs/mvp-plan.md](docs/mvp-plan.md) | MVP plan |
+| [AGENTS.md](AGENTS.md) | Repository conventions for humans and coding agents |
+
+---
+
+<div align="center">
+
+**VibeShield** · early-stage · built with care for people who ship faster than they can review.
+
+</div>

@@ -48,6 +48,10 @@ export async function writeSuccessReport(input: {
     runDir,
     input.run.artifacts.baseline_summary,
   );
+  const attackHypotheses = await readArtifact<JsonObject>(
+    runDir,
+    input.run.artifacts.attack_hypotheses,
+  );
   const repoMapSections = await readRepoMapSectionArtifacts(runDir, input.run);
   const baselineObservations = formatBaselineObservations(baseline);
   const lines = [
@@ -57,6 +61,7 @@ export async function writeSuccessReport(input: {
     `Commit: ${input.run.commit_sha ?? "unknown"}`,
     `Run ID: ${input.run.run_id}`,
     "",
+    ...formatAttackHypothesesSection(attackHypotheses),
     ...(baselineObservations.length > 0
       ? ["## Deterministic Scanner Observations", ...baselineObservations, ""]
       : []),
@@ -158,6 +163,133 @@ function formatRepositoryMap(
     ...formatRepositoryMapSection(sectionArtifacts, section),
     "",
   ]);
+}
+
+function formatAttackHypothesesSection(artifact: JsonObject | null): string[] {
+  if (artifact === null) {
+    return ["## Attack Hypotheses", "- Not available.", ""];
+  }
+
+  const summary = objectField(artifact, "summary");
+  const executiveSummary = objectField(artifact, "executive_summary");
+  const summaryText = field(summary ?? {}, "text");
+  const executiveText = field(executiveSummary ?? {}, "text");
+  return [
+    "## Attack Hypotheses",
+    ...compactLines([
+      ...formatDegradedNotice(artifact),
+      executiveText === "" ? undefined : `- ${executiveText}`,
+      summaryText === "" ? undefined : `- ${summaryText}`,
+      listField(executiveSummary ?? {}, "top_risk_areas") === ""
+        ? undefined
+        : `- Top risk areas: ${listField(executiveSummary ?? {}, "top_risk_areas")}`,
+      listField(executiveSummary ?? {}, "limitations") === ""
+        ? undefined
+        : `- Limitations: ${listField(executiveSummary ?? {}, "limitations")}`,
+      ...tableOrNotObserved(
+        [
+          "Priority",
+          "Confidence",
+          "Hypothesis",
+          "Target",
+          "Attack Vector",
+          "Validation Gaps",
+          "Evidence",
+        ],
+        attackHypothesisRecords(artifact).map((item) => [
+          field(item, "priority"),
+          field(item, "confidence"),
+          field(item, "title"),
+          compactJoin([field(item, "target_surface"), listField(item, "target_ids")]),
+          field(item, "attack_vector"),
+          listField(item, "missing_facts_to_validate"),
+          formatEvidence(evidenceArray(item.supporting_map_evidence)),
+        ]),
+      ),
+      ...formatCrossCuttingChains(artifact),
+      ...formatValidationRoadmap(artifact),
+      ...formatBlockingFactGaps(artifact),
+      ...formatDeprioritizedAreas(artifact),
+      ...formatFactGaps(artifact),
+    ]),
+    "",
+  ];
+}
+
+function attackHypothesisRecords(artifact: JsonObject): JsonObject[] {
+  const priorityRank = new Map([
+    ["P0", 0],
+    ["P1", 1],
+    ["P2", 2],
+    ["P3", 3],
+  ]);
+  const confidenceRank = new Map([
+    ["high", 0],
+    ["medium", 1],
+    ["low", 2],
+  ]);
+  return recordArray(artifact, "hypotheses").sort(
+    (left, right) =>
+      (priorityRank.get(field(left, "priority")) ?? 99) -
+        (priorityRank.get(field(right, "priority")) ?? 99) ||
+      (confidenceRank.get(field(left, "confidence")) ?? 99) -
+        (confidenceRank.get(field(right, "confidence")) ?? 99) ||
+      field(left, "id").localeCompare(field(right, "id")),
+  );
+}
+
+function formatCrossCuttingChains(artifact: JsonObject): string[] {
+  return optionalTable(
+    "Cross-Cutting Chains",
+    ["Chain", "Theme", "Required Conditions", "Validation Order"],
+    recordArray(artifact, "cross_cutting_chains").map((item) => [
+      firstField(item, ["title", "id"]),
+      field(item, "theme"),
+      listField(item, "required_conditions"),
+      listField(item, "validation_order"),
+    ]),
+  );
+}
+
+function formatValidationRoadmap(artifact: JsonObject): string[] {
+  const roadmap = objectField(artifact, "validation_roadmap");
+  if (roadmap === undefined) {
+    return [];
+  }
+  return optionalTable(
+    "Validation Roadmap",
+    ["Phase", "Checks"],
+    [
+      ["First Pass", listField(roadmap, "first_pass")],
+      ["Deep Dive", listField(roadmap, "deep_dive")],
+      ["Later Hardening", listField(roadmap, "later_hardening")],
+    ],
+  );
+}
+
+function formatBlockingFactGaps(artifact: JsonObject): string[] {
+  return optionalTable(
+    "Blocking Fact Gaps",
+    ["Gap", "Why It Matters", "Hypotheses", "How To Close"],
+    recordArray(artifact, "blocking_fact_gaps").map((item) => [
+      field(item, "gap"),
+      field(item, "why_it_matters"),
+      listField(item, "hypothesis_ids"),
+      field(item, "how_to_close"),
+    ]),
+  );
+}
+
+function formatDeprioritizedAreas(artifact: JsonObject): string[] {
+  return optionalTable(
+    "Deprioritized Areas",
+    ["Area", "Reason", "Evidence"],
+    recordArray(artifact, "deprioritized_areas").map((item) => [
+      field(item, "area"),
+      field(item, "reason"),
+      recordEvidence(item),
+    ]),
+  );
 }
 
 function formatRepositoryMapSection(

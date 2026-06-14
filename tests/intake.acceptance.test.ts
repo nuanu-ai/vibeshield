@@ -104,6 +104,37 @@ afterEach(async () => {
 });
 
 describe("GitHub intake and sandbox inventory acceptance", () => {
+  it("prints CLI help with rerunnable resume steps", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    const exitCode = await runCli(["--", "--help"], {
+      stderr: { write: (chunk: string) => stderr.push(chunk) },
+      stdout: { write: (chunk: string) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stderr.join("")).toBe("");
+    expect(stdout.join("")).toContain("vibeshield resume /path/to/run-directory [--from <step>]");
+    expect(stdout.join("")).toContain("attack-hypotheses");
+    expect(stdout.join("")).toContain("stack-build-deps");
+  });
+
+  it("rejects unknown resume --from steps before touching a run directory", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    const exitCode = await runCli(["resume", "/tmp/does-not-matter", "--from", "unknown-step"], {
+      stderr: { write: (chunk: string) => stderr.push(chunk) },
+      stdout: { write: (chunk: string) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stdout.join("")).toBe("");
+    expect(stderr.join("")).toContain("Unknown resume step: unknown-step");
+    expect(stderr.join("")).toContain("attack-hypotheses");
+  });
+
   it("rejects unsupported inputs before sandbox creation", async () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");

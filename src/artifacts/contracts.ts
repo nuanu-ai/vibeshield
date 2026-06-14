@@ -1,6 +1,7 @@
 import type { GitHubRepoReference } from "../run/github-url.js";
 
 export type ArtifactKind =
+  | "attack-hypotheses"
   | "auth-access"
   | "baseline-summary"
   | "config-secrets"
@@ -206,6 +207,7 @@ export interface FactGap {
 }
 
 export type PiRepositoryMapArtifactKind =
+  | "attack-hypotheses"
   | "auth-access"
   | "config-secrets"
   | "coverage-structure"
@@ -647,6 +649,90 @@ export interface RepositoryMapArtifact extends PiRepositoryMapBaseArtifact<"repo
     project_kind?: string;
     text: string;
   };
+}
+
+export type AttackHypothesisPriority = "P0" | "P1" | "P2" | "P3";
+
+export interface AttackHypothesisRecord {
+  area?: string;
+  attack_path: string[];
+  attack_vector: string;
+  asset_at_risk?: string;
+  auth_context?: string;
+  category?: string;
+  confidence: PiConfidence;
+  entry_point?: string;
+  evidence: Array<{
+    detail: string;
+    type: string;
+  }>;
+  id: string;
+  intermediates?: string[];
+  likely_remediation_if_confirmed?: string[];
+  missing_facts_to_validate: string[];
+  notes?: string[];
+  potential_impact: string;
+  preconditions: string[];
+  priority: AttackHypothesisPriority;
+  refutes_if?: string[];
+  safe_dynamic_checks?: string[];
+  sink?: string;
+  source?: string;
+  status: "hypothesis";
+  supporting_map_evidence: string[];
+  target_ids?: string[];
+  target_surface: string;
+  title: string;
+  validation_plan: string[];
+  why_plausible: string[];
+}
+
+export interface AttackHypothesisChain {
+  chain: string[];
+  id: string;
+  required_conditions: string[];
+  theme: string;
+  title: string;
+  validation_order: string[];
+  why_it_matters: string;
+}
+
+export interface AttackHypothesisRoadmap {
+  deep_dive: string[];
+  first_pass: string[];
+  later_hardening: string[];
+}
+
+export interface AttackHypothesesArtifact extends PiRepositoryMapBaseArtifact<"attack-hypotheses"> {
+  blocking_fact_gaps?: Array<{
+    gap: string;
+    how_to_close: string;
+    hypothesis_ids: string[];
+    why_it_matters: string;
+  }>;
+  cross_cutting_chains?: AttackHypothesisChain[];
+  deprioritized_areas?: Array<{
+    area: string;
+    reason: string;
+    evidence: string[];
+  }>;
+  executive_summary: {
+    hypothesis_counts: Partial<Record<AttackHypothesisPriority, number>>;
+    limitations: string[];
+    strong_hypothesis_count: number;
+    text: string;
+    top_risk_areas: string[];
+  };
+  hypotheses: AttackHypothesisRecord[];
+  inputs: {
+    repository_map_artifact: string;
+  };
+  summary: {
+    confidence?: PiConfidence;
+    evidence: string[];
+    text: string;
+  };
+  validation_roadmap?: AttackHypothesisRoadmap;
 }
 
 export type PiStructuredArtifactKind = PiRepositoryMapArtifactKind;

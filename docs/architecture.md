@@ -66,6 +66,8 @@ vibeshield scan <github-url>
             input: prior map artifacts
        -> Pi synthesis: repository-map
             input: all section artifacts
+       -> Pi security-research synthesis: attack-hypotheses
+            input: repository map, no repository inspection tools
 
   -> write report.md
   -> write run.json/events.jsonl
@@ -147,8 +149,8 @@ and not a full program trace; they are a compact, evidence-backed navigation map
 for later analysis and threat modeling.
 
 The current implementation builds coverage deterministically from inventory, then
-calls Pi once per remaining map step. A complete successful scan runs one
-deterministic coverage job plus thirteen Pi jobs:
+calls Pi once per remaining map or post-map step. A complete successful scan
+runs one deterministic coverage job plus fourteen Pi jobs:
 
 - `coverage-structure`: deterministic inventory projection for repository size,
   language LOC, repository shape, inventory-covered directories, excluded
@@ -196,6 +198,10 @@ deterministic coverage job plus thirteen Pi jobs:
 - `repository-map`: synthesize the final human-oriented repository map from all
   section artifacts with no repository inspection tools; it must not add new
   facts.
+- `attack-hypotheses`: use the accepted repository map as repository knowledge
+  and ask `anthropic/claude-opus-4.8` to produce a prioritized list of
+  testable attack hypotheses. This post-map step has no repository inspection
+  tools and must not present hypotheses as confirmed vulnerabilities.
 
 Each Pi job writes a structured JSON artifact. Dependent jobs receive the
 minimal context or prior artifacts they need, so Pi does not carry one large
@@ -284,6 +290,7 @@ Successful runs write inspectable artifacts under the local run directory:
 - `outputs/repo-map/data-flows.json`
 - `outputs/repo-map/trust-boundaries.json`
 - `outputs/repository-map.json`
+- `outputs/attack-hypotheses.json`
 - `outputs/pi/<stage>/...` raw/stderr/progress/metadata artifacts
 - `report.md`
 - `run.json`
@@ -305,8 +312,10 @@ The sandbox should be deleted after both success and failure.
 ## Resume Semantics
 
 `vibeshield resume <run-dir>` continues a failed run from durable local
-artifacts. Final accepted artifacts are reused; raw Pi candidates are not
-treated as accepted output.
+artifacts. `vibeshield resume <run-dir> --from <step>` forces a rerun from a
+named artifact boundary, which is useful while debugging prompts such as
+`attack-hypotheses`. Final accepted artifacts before the selected step are
+reused; raw Pi candidates are not treated as accepted output.
 
 Resume always creates a fresh sandbox and clones the original repository at the
 `commit_sha` recorded in `run.json`. If the run records a previous sandbox id,
@@ -320,6 +329,8 @@ The resume boundary is artifact-based:
 - reuse `baseline-summary` when present, otherwise rerun deterministic
   baseline;
 - reuse `pi-context-pack` when present, otherwise rebuild context;
-- resume Pi from the first missing final map artifact in the section order from
-  `coverage-structure` through `repository-map`;
+- resume Pi from the first missing accepted artifact in the section order from
+  `coverage-structure` through `repository-map`, then `attack-hypotheses`;
+- when `--from <step>` is provided, ignore accepted artifacts from that step
+  onward and overwrite their stable output paths;
 - rewrite `report.md` from the final accepted artifacts.

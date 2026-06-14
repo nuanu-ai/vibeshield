@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
+  AttackHypothesesArtifact,
   AuthAccessArtifact,
   BaselineSummaryArtifact,
   ConfigSecretsArtifact,
@@ -50,6 +51,7 @@ const expectedRepoMapArtifacts = [
   "outputs/repo-map/trust-boundaries.json",
   "outputs/repository-map.json",
 ];
+const expectedAcceptedArtifacts = [...expectedRepoMapArtifacts, "outputs/attack-hypotheses.json"];
 
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
@@ -80,6 +82,7 @@ describe("AppSec repository map acceptance", () => {
       "data-flows",
       "trust-boundaries",
       "repository-map",
+      "attack-hypotheses",
     ];
 
     expect(expectationDoc).toContain("facts-only AppSec repository map");
@@ -103,7 +106,7 @@ describe("AppSec repository map acceptance", () => {
     await expectPath(path.join(runDir, "outputs", "inventory.json"));
     await expectPath(path.join(runDir, "outputs", "baseline-summary.json"));
     await expectPath(path.join(runDir, "outputs", "pi-context-pack.json"));
-    for (const artifact of expectedRepoMapArtifacts) {
+    for (const artifact of expectedAcceptedArtifacts) {
       await expectPath(path.join(runDir, artifact));
     }
 
@@ -221,6 +224,28 @@ describe("AppSec repository map acceptance", () => {
     expect(repositoryMap.sections.map((section) => section.path)).toEqual(
       expect.arrayContaining(expectedRepoMapArtifacts),
     );
+
+    const attackHypotheses = await readJson<AttackHypothesesArtifact>(
+      path.join(runDir, "outputs", "attack-hypotheses.json"),
+    );
+    expect(attackHypotheses).toMatchObject({
+      inputs: { repository_map_artifact: "outputs/repository-map.json" },
+      kind: "attack-hypotheses",
+      metadata: {
+        pi: {
+          model: "anthropic/claude-opus-4.8",
+          step: "attack-hypotheses",
+        },
+      },
+    });
+    expect(attackHypotheses.hypotheses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "hyp-http-spam-db-input",
+          supporting_map_evidence: expect.arrayContaining(["entry-http-spam", "sink-db-insert"]),
+        }),
+      ]),
+    );
   });
 
   it("renders an auditor-readable 0-14 Markdown repository map with scanner observations", async () => {
@@ -238,6 +263,8 @@ describe("AppSec repository map acceptance", () => {
       expect(report).toMatch(new RegExp(`(^|\\n)##\\s+${section}\\.\\s+`));
     }
     expect(report).toContain("| Tool | Severity | Kind | Observation | Evidence |");
+    expect(report).toContain("## Attack Hypotheses");
+    expect(report).toContain("HTTP request body reaches database write");
     expect(report).toContain("CVE-FAKE-0001 in fixture-dependency@1.0.0 fixed in 1.0.1");
     expect(report).toContain("CKV_FAKE_1: Fixture IaC check failed");
     expect(report).toContain("| Type | Name | Handler | External Input | Evidence |");
@@ -463,6 +490,7 @@ describe("AppSec repository map acceptance", () => {
       };
     const { provider } = await createProvider({
       piOutputs: {
+        "attack-hypotheses": capture("attack-hypotheses", fakeAttackHypotheses()),
         "auth-access": capture("auth-access", fakeRepoMapAuthAccess()),
         "config-secrets": capture("config-secrets", fakeRepoMapConfigSecrets()),
         crypto: capture("crypto", fakeRepoMapCrypto()),
@@ -679,6 +707,19 @@ describe("AppSec repository map acceptance", () => {
       thinking: "xhigh",
       tools: [],
     });
+
+    const attackHypotheses = capturedContexts["attack-hypotheses"];
+    expect(typeof attackHypotheses).toBe("string");
+    expect(attackHypotheses).toContain("# Attack Hypotheses Context");
+    expect(attackHypotheses).toContain("# Repository Knowledge");
+    expect(attackHypotheses).toContain("entry-http-spam");
+    expect(attackHypotheses).toContain("sink-db-insert");
+    expect(attackHypotheses).not.toContain('"metadata"');
+    expect(capturedPi["attack-hypotheses"]).toMatchObject({
+      model: "anthropic/claude-opus-4.8",
+      thinking: "xhigh",
+      tools: [],
+    });
   });
 
   it("preserves partial map artifacts and resumes from a fatal Pi runtime failure", async () => {
@@ -712,6 +753,7 @@ describe("AppSec repository map acceptance", () => {
       await pathExists(path.join(runDir, "outputs", "repo-map", "stack-build-deps.json")),
     ).toBe(false);
     expect(await pathExists(path.join(runDir, "outputs", "repository-map.json"))).toBe(false);
+    expect(await pathExists(path.join(runDir, "outputs", "attack-hypotheses.json"))).toBe(false);
     expect(failedRun.artifacts.diagnostics).toEqual(
       expect.arrayContaining([
         "outputs/diagnostics/sandbox-failure/manifest.json",
@@ -744,7 +786,7 @@ describe("AppSec repository map acceptance", () => {
         .map((command) => command.command) ?? [];
     expect(resumedCommands[0]).toContain("stack-deps");
     expect(resumedCommands.some((command) => command.includes("coverage-structure"))).toBe(false);
-    for (const artifact of expectedRepoMapArtifacts) {
+    for (const artifact of expectedAcceptedArtifacts) {
       await expectPath(path.join(runDir, artifact));
     }
 
@@ -755,6 +797,70 @@ describe("AppSec repository map acceptance", () => {
       1,
     );
     expect(resumedRun.steps.every((step) => step.status === "success")).toBe(true);
+  });
+
+  it("reruns only attack hypotheses when resume starts from attack-hypotheses", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    const rerunHypotheses = fakeAttackHypotheses();
+    const firstHypothesis = rerunHypotheses.hypotheses[0];
+    if (firstHypothesis === undefined) {
+      throw new Error("Fake attack hypotheses fixture is empty.");
+    }
+    rerunHypotheses.hypotheses[0] = {
+      ...firstHypothesis,
+      id: "hyp-rerun-from-cli",
+      title: "Rerun generated attack hypothesis",
+    };
+    rerunHypotheses.summary = {
+      ...rerunHypotheses.summary,
+      text: "Rerun attack hypotheses are derived from the existing repository map.",
+    };
+
+    const sandboxRoot = await createTempRoot("vibeshield-fake-daytona-rerun-");
+    const resumeProvider = new FakeDaytonaSandboxProvider({
+      fixtureRepos: new Map([[fixtureUrl, initial.fixtureRepo]]),
+      piOutputs: {
+        ...fixtureRepoMapOutputs(),
+        "attack-hypotheses": rerunHypotheses,
+      },
+      sandboxRoot,
+    });
+    const resumed = await runResume({
+      fromStep: "attack-hypotheses",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(0);
+    const runtimeCommands =
+      resumeProvider.sessions
+        .at(-1)
+        ?.commands.filter((command) => command.command.startsWith("vibeshield-runtime-job"))
+        .map((command) => command.command) ?? [];
+    expect(runtimeCommands).toHaveLength(1);
+    expect(runtimeCommands[0]).toBe(
+      "vibeshield-runtime-job pi-repository-mapping pi-attack-hypotheses",
+    );
+
+    const attackHypotheses = await readJson<AttackHypothesesArtifact>(
+      path.join(runDir, "outputs", "attack-hypotheses.json"),
+    );
+    expect(attackHypotheses.summary.text).toBe(
+      "Rerun attack hypotheses are derived from the existing repository map.",
+    );
+    expect(attackHypotheses.hypotheses.map((hypothesis) => hypothesis.id)).toContain(
+      "hyp-rerun-from-cli",
+    );
+    await expectPath(path.join(runDir, "outputs", "repository-map.json"));
   });
 
   it("records a degraded map section and still writes the final report when Pi output is unusable", async () => {
@@ -787,6 +893,7 @@ describe("AppSec repository map acceptance", () => {
     expect(report).toContain("## 3. Attack Surface And Entry Points");
     expect(report).toContain("Collection degraded");
     await expectPath(path.join(runDir, "outputs", "repository-map.json"));
+    await expectPath(path.join(runDir, "outputs", "attack-hypotheses.json"));
   });
 
   it("accepts a single markdown JSON fence around a Pi final response", async () => {
@@ -1147,6 +1254,7 @@ function fixtureRepoMapOutputs(): NonNullable<
   ConstructorParameters<typeof FakeDaytonaSandboxProvider>[0]["piOutputs"]
 > {
   const outputs = {
+    "attack-hypotheses": fakeAttackHypotheses(),
     "auth-access": fakeRepoMapAuthAccess(),
     "config-secrets": fakeRepoMapConfigSecrets(),
     "coverage-structure": fakeRepoMapCoverageStructure(),
@@ -1165,6 +1273,7 @@ function fixtureRepoMapOutputs(): NonNullable<
 
   return {
     ...outputs,
+    "repo-map/attack-hypotheses": outputs["attack-hypotheses"],
     "repo-map/auth-access": outputs["auth-access"],
     "repo-map/config-secrets": outputs["config-secrets"],
     "repo-map/coverage-structure": outputs["coverage-structure"],
@@ -1179,6 +1288,7 @@ function fixtureRepoMapOutputs(): NonNullable<
     "repo-map/stack-build-deps": outputs["stack-build-deps"],
     "repo-map/storage-data-model": outputs["storage-data-model"],
     "repo-map/trust-boundaries": outputs["trust-boundaries"],
+    "repo-map-attack-hypotheses": outputs["attack-hypotheses"],
     "repo-map-auth-access": outputs["auth-access"],
     "repo-map-config-secrets": outputs["config-secrets"],
     "repo-map-coverage-structure": outputs["coverage-structure"],
@@ -1211,6 +1321,32 @@ function minimalRepoMapOutputs(): NonNullable<
   };
 
   return {
+    "attack-hypotheses": {
+      ...minimalSection("attack-hypotheses"),
+      blocking_fact_gaps: [],
+      cross_cutting_chains: [],
+      deprioritized_areas: [],
+      executive_summary: {
+        hypothesis_counts: {},
+        limitations: ["Minimal fixture has no mapped attack chain."],
+        strong_hypothesis_count: 0,
+        text: "No strong attack hypotheses for minimal fixture.",
+        top_risk_areas: [],
+      },
+      hypotheses: [],
+      inputs: {
+        repository_map_artifact: "outputs/repository-map.json",
+      },
+      summary: {
+        evidence: ["README.md:1"],
+        text: "No attack hypotheses for minimal fixture.",
+      },
+      validation_roadmap: {
+        deep_dive: [],
+        first_pass: [],
+        later_hardening: [],
+      },
+    },
     "auth-access": {
       ...minimalSection("auth-access"),
       auth: [],
@@ -1910,6 +2046,115 @@ function fakeRepositoryMap(): RepositoryMapArtifact {
       inference: true,
       project_kind: "backend-api",
       text: "Fixture Node.js repository map assembled from facts-only section artifacts.",
+    },
+  };
+}
+
+function fakeAttackHypotheses(): AttackHypothesesArtifact {
+  return {
+    blocking_fact_gaps: [],
+    coverage: fakeCoverage("Attack hypothesis generation", [
+      "entry-http-spam",
+      "flow-http-spam-db",
+      "sink-db-insert",
+    ]),
+    cross_cutting_chains: [],
+    deprioritized_areas: [],
+    executive_summary: {
+      hypothesis_counts: { P2: 1 },
+      limitations: ["Fixture hypotheses are generated from static map facts only."],
+      strong_hypothesis_count: 1,
+      text: "One medium-priority hypothesis links external HTTP input to a database write.",
+      top_risk_areas: ["HTTP input to database write"],
+    },
+    fact_gaps: [],
+    generated_at: "2026-06-13T00:00:00.000Z",
+    generated_by: "pi",
+    hypotheses: [
+      {
+        attack_path: [
+          "entry-http-spam accepts external HTTP input",
+          "flow-http-spam-db connects the entrypoint to sink-db-insert",
+          "sink-db-insert writes request-derived text to the database",
+        ],
+        attack_vector:
+          "Validate whether request-controlled text can reach database insertion without expected normalization or authorization checks.",
+        asset_at_risk: "stored message data",
+        auth_context: "protected",
+        category: "data validation",
+        confidence: "medium",
+        entry_point: "POST /api/spam",
+        evidence: [
+          { detail: "entry-http-spam", type: "Entrypoint" },
+          { detail: "flow-http-spam-db", type: "Data flow status" },
+          { detail: "sink-db-insert", type: "Sink" },
+        ],
+        id: "hyp-http-spam-db-input",
+        intermediates: ["saveMessage"],
+        likely_remediation_if_confirmed: [
+          "Enforce handler-level validation before persistence.",
+          "Keep database operations parameterized.",
+        ],
+        missing_facts_to_validate: [
+          "handler-level validation around req.body.text",
+          "database query parameterization details",
+          "authorization expectations for the route",
+        ],
+        notes: [],
+        potential_impact:
+          "If validated, malformed or unauthorized external input may affect stored message data.",
+        preconditions: [
+          "attacker can reach POST /api/spam",
+          "session middleware allows the attacker or is bypassable",
+        ],
+        priority: "P2",
+        refutes_if: [
+          "Request body text is validated before saveMessage.",
+          "The route is reachable only by the intended trusted role.",
+        ],
+        safe_dynamic_checks: [
+          "Verify validation behavior for malformed text using non-destructive test cases.",
+        ],
+        sink: "sink-db-insert",
+        source: "req.body.text",
+        status: "hypothesis",
+        supporting_map_evidence: [
+          "entry-http-spam",
+          "flow-http-spam-db",
+          "sink-db-insert",
+          "src/server.ts:5",
+          "src/db.ts:2",
+        ],
+        target_ids: ["entry-http-spam", "flow-http-spam-db", "sink-db-insert"],
+        target_surface: "POST /api/spam to database write",
+        title: "HTTP request body reaches database write",
+        validation_plan: [
+          "Review POST /api/spam handler validation before saveMessage.",
+          "Review sink-db-insert query construction.",
+          "Confirm expected authorization policy for entry-http-spam.",
+        ],
+        why_plausible: [
+          "The map records an HTTP entrypoint for POST /api/spam.",
+          "The map records a direct observed flow to sink-db-insert.",
+          "The sink writes request-derived text to storage.",
+        ],
+      },
+    ],
+    inputs: {
+      repository_map_artifact: "outputs/repository-map.json",
+    },
+    kind: "attack-hypotheses",
+    metadata: fakeRepoMapMetadata("attack-hypotheses"),
+    repo: fakeRepo(),
+    summary: {
+      confidence: "medium",
+      evidence: ["entry-http-spam", "flow-http-spam-db", "sink-db-insert"],
+      text: "Fixture attack hypotheses are derived from accepted repository-map facts.",
+    },
+    validation_roadmap: {
+      deep_dive: ["Trace handler validation and storage constraints."],
+      first_pass: ["Review POST /api/spam to sink-db-insert reachability."],
+      later_hardening: ["Add regression tests for rejected malformed inputs."],
     },
   };
 }

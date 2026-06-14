@@ -45,6 +45,7 @@ export interface FakeDaytonaSandboxProviderOptions {
 type FakePiOutput = unknown | ((input: RuntimeJobInput) => unknown);
 
 type RepoMapStep =
+  | "attack-hypotheses"
   | "auth-access"
   | "config-secrets"
   | "coverage-structure"
@@ -721,6 +722,8 @@ function fakePiOutputForStep(
 
   const repoMapStep = repoMapStepFromInput(input);
   switch (repoMapStep) {
+    case "attack-hypotheses":
+      return defaultFakeAttackHypotheses(input);
     case "coverage-structure":
       return defaultFakeRepoMapCoverageStructure(input);
     case "stack-build-deps":
@@ -807,6 +810,9 @@ function normalizeRepoMapStep(value: string): RepoMapStep | undefined {
     case "coverage":
     case "coverage-structure":
       return "coverage-structure";
+    case "attack-hypotheses":
+    case "hypotheses":
+      return "attack-hypotheses";
     case "stack":
     case "stack-build-deps":
       return "stack-build-deps";
@@ -1479,6 +1485,119 @@ function defaultFakeRepositoryMap(input: RuntimeJobInput) {
   };
 }
 
+function defaultFakeAttackHypotheses(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    blocking_fact_gaps: [],
+    coverage: fakeRepoMapCoverage("Attack hypothesis generation", [
+      "entry-http-spam",
+      "flow-http-spam-db",
+      "sink-db-insert",
+    ]),
+    cross_cutting_chains: [],
+    deprioritized_areas: [],
+    executive_summary: {
+      hypothesis_counts: { P2: 1 },
+      limitations: ["Fake fixture hypotheses are generated from static map facts only."],
+      strong_hypothesis_count: 1,
+      text: "One medium-priority hypothesis links external HTTP input to a database write.",
+      top_risk_areas: ["HTTP input to database write"],
+    },
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    hypotheses: [
+      {
+        attack_path: [
+          "entry-http-spam accepts external HTTP input",
+          "flow-http-spam-db connects the entrypoint to sink-db-insert",
+          "sink-db-insert writes request-derived text to the database",
+        ],
+        attack_vector:
+          "Validate whether request-controlled text can reach database insertion without expected normalization or authorization checks.",
+        asset_at_risk: "stored message data",
+        auth_context: "protected",
+        category: "data validation",
+        confidence: "medium",
+        entry_point: "POST /api/spam",
+        evidence: [
+          { detail: "entry-http-spam", type: "Entrypoint" },
+          { detail: "flow-http-spam-db", type: "Data flow status" },
+          { detail: "sink-db-insert", type: "Sink" },
+        ],
+        id: "hyp-http-spam-db-input",
+        intermediates: ["saveMessage"],
+        likely_remediation_if_confirmed: [
+          "Enforce handler-level validation before persistence.",
+          "Keep database operations parameterized.",
+        ],
+        missing_facts_to_validate: [
+          "handler-level validation around req.body.text",
+          "database query parameterization details",
+          "authorization expectations for the route",
+        ],
+        notes: [],
+        potential_impact:
+          "If validated, malformed or unauthorized external input may affect stored message data.",
+        preconditions: [
+          "attacker can reach POST /api/spam",
+          "session middleware allows the attacker or is bypassable",
+        ],
+        priority: "P2",
+        refutes_if: [
+          "Request body text is validated before saveMessage.",
+          "The route is reachable only by the intended trusted role.",
+        ],
+        safe_dynamic_checks: [
+          "Verify validation behavior for malformed text using non-destructive test cases.",
+        ],
+        sink: "sink-db-insert",
+        source: "req.body.text",
+        status: "hypothesis",
+        supporting_map_evidence: [
+          "entry-http-spam",
+          "flow-http-spam-db",
+          "sink-db-insert",
+          "src/server.ts:5",
+          "src/db.ts:2",
+        ],
+        target_ids: ["entry-http-spam", "flow-http-spam-db", "sink-db-insert"],
+        target_surface: "POST /api/spam to database write",
+        title: "HTTP request body reaches database write",
+        validation_plan: [
+          "Review POST /api/spam handler validation before saveMessage.",
+          "Review sink-db-insert query construction.",
+          "Confirm expected authorization policy for entry-http-spam.",
+        ],
+        why_plausible: [
+          "The map records an HTTP entrypoint for POST /api/spam.",
+          "The map records a direct observed flow to sink-db-insert.",
+          "The sink writes request-derived text to storage.",
+        ],
+      },
+    ],
+    inputs: {
+      repository_map_artifact: "outputs/repository-map.json",
+    },
+    kind: "attack-hypotheses",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo: fakeRepoFromInput(input),
+    summary: {
+      confidence: "medium",
+      evidence: ["entry-http-spam", "flow-http-spam-db", "sink-db-insert"],
+      text: "Fixture attack hypotheses are derived from accepted repository-map facts.",
+    },
+    validation_roadmap: {
+      deep_dive: ["Trace handler validation and storage constraints."],
+      first_pass: ["Review POST /api/spam to sink-db-insert reachability."],
+      later_hardening: ["Add regression tests for rejected malformed inputs."],
+    },
+  };
+}
+
 function fakeRepoMapSection(artifact: RepoMapStep, artifactPath: string, itemCount: number) {
   return {
     artifact,
@@ -1503,6 +1622,8 @@ function fakeRepoMapCoverage(area: string, evidence: string[]) {
 
 function piStepStartMessage(step: string): string {
   switch (step) {
+    case "attack-hypotheses":
+      return "Generating attack hypotheses from the repository map.";
     case "coverage-structure":
       return "Mapping repository coverage and structure.";
     case "stack-build-deps":
@@ -1538,6 +1659,8 @@ function piStepStartMessage(step: string): string {
 
 function piStepDoneMessage(step: string): string {
   switch (step) {
+    case "attack-hypotheses":
+      return "Attack hypothesis generation completed.";
     case "coverage-structure":
       return "Coverage and structure map completed.";
     case "stack-build-deps":

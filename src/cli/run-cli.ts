@@ -1,4 +1,9 @@
 import {
+  parseRunResumeFromStep,
+  type RunResumeFromStep,
+  resumeStepDefinitions,
+} from "../run/resume-steps.js";
+import {
   type RunScanFailure,
   type RunScanOptions,
   type RunScanResult,
@@ -21,17 +26,44 @@ export type CliDependencies = Pick<RunScanOptions, "runsRoot" | "sandboxProvider
 
 const usage = `Usage:
   vibeshield scan https://github.com/owner/repo
-  vibeshield resume /path/to/run-directory
+  vibeshield resume /path/to/run-directory [--from <step>]
+
+Options:
+  -h, --help       Show this help.
+  --from <step>   Resume by rerunning from a specific step onward.
+
+Resume steps:
+${resumeStepDefinitions
+  .map((definition) => {
+    const aliases = "aliases" in definition ? ` (aliases: ${definition.aliases.join(", ")})` : "";
+    return `  ${definition.step.padEnd(30)} ${definition.description}${aliases}`;
+  })
+  .join("\n")}
 `;
+
+interface ParsedCliArgs {
+  command: "resume" | "scan";
+  fromStep?: RunResumeFromStep;
+  target: string;
+}
 
 export async function runCli(
   argv: string[],
   io: CliIo,
   dependencies: CliDependencies = {},
 ): Promise<number> {
-  const [command, target, ...rest] = argv;
+  const parsed = parseCliArgs(argv);
+  if (parsed === "help") {
+    io.stdout.write(usage);
+    return 0;
+  }
+  if (typeof parsed === "string") {
+    io.stderr.write(`${parsed}\n\n${usage}`);
+    return 1;
+  }
 
-  if ((command !== "scan" && command !== "resume") || target === undefined || rest.length > 0) {
+  const { command, fromStep, target } = parsed;
+  if (fromStep !== undefined && command !== "resume") {
     io.stderr.write(usage);
     return 1;
   }
@@ -59,6 +91,7 @@ export async function runCli(
       command === "scan"
         ? await runScan(scanOptions)
         : await runResume({
+            ...(fromStep === undefined ? {} : { fromStep }),
             onProgress,
             runDir: target,
             ...(dependencies.sandboxProvider === undefined
@@ -76,6 +109,72 @@ export async function runCli(
 
   renderer.failure(result);
   return 1;
+}
+
+function parseCliArgs(argv: string[]): ParsedCliArgs | "help" | string {
+  if (argv[0] === "--") {
+    return parseCliArgs(argv.slice(1));
+  }
+
+  const [command, target, ...rest] = argv;
+  if (command === "help" || command === "--help" || command === "-h") {
+    return "help";
+  }
+  if (command !== "scan" && command !== "resume") {
+    return "Unknown command.";
+  }
+  if (target === undefined || target === "--help" || target === "-h") {
+    return target === "--help" || target === "-h" ? "help" : `Missing target for ${command}.`;
+  }
+
+  let fromStep: RunResumeFromStep | undefined;
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      continue;
+    }
+    const inlineFrom = arg.match(/^--from(?:-step)?=(?<step>.+)$/)?.groups?.step;
+    if (inlineFrom !== undefined) {
+      if (fromStep !== undefined) {
+        return "--from can only be provided once.";
+      }
+      const parsed = parseRunResumeFromStep(inlineFrom);
+      if (parsed === undefined) {
+        return `Unknown resume step: ${inlineFrom}`;
+      }
+      fromStep = parsed;
+      continue;
+    }
+
+    if (arg === "--from" || arg === "--from-step") {
+      if (fromStep !== undefined) {
+        return "--from can only be provided once.";
+      }
+      const value = rest[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return `${arg} requires a step name.`;
+      }
+      const parsed = parseRunResumeFromStep(value);
+      if (parsed === undefined) {
+        return `Unknown resume step: ${value}`;
+      }
+      fromStep = parsed;
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--help" || arg === "-h") {
+      return "help";
+    }
+
+    return `Unknown argument: ${arg}`;
+  }
+
+  if (command === "scan" && fromStep !== undefined) {
+    return "--from is only supported for resume.";
+  }
+
+  return fromStep === undefined ? { command, target } : { command, fromStep, target };
 }
 
 interface Renderer {

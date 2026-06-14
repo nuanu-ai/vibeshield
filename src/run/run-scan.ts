@@ -22,6 +22,7 @@ import {
 } from "./file-io.js";
 import { parseGitHubRepoUrl } from "./github-url.js";
 import { redactDeep } from "./redaction.js";
+import type { RunResumeFromStep } from "./resume-steps.js";
 import type { RunEvent, RunJobState, RunStepState, ScanRunState } from "./types.js";
 
 export interface RunScanOptions {
@@ -32,6 +33,7 @@ export interface RunScanOptions {
 }
 
 export interface RunResumeOptions {
+  fromStep?: RunResumeFromStep;
   onProgress?: (event: RunEvent) => unknown | Promise<unknown>;
   runDir: string;
   sandboxProvider?: SandboxProvider;
@@ -74,6 +76,8 @@ type RepositoryMapExistingKey =
   | "storageDataModel"
   | "trustBoundaries";
 
+const attackHypothesesArtifactPath = "outputs/attack-hypotheses.json";
+
 interface RepositoryMapArtifactDefinition {
   existingKey: RepositoryMapExistingKey;
   resultPathKeys: string[];
@@ -89,10 +93,13 @@ interface ExistingRepositoryMapArtifact {
 
 type ExistingRepositoryMapArtifacts = Partial<
   Record<RepositoryMapExistingKey, ExistingRepositoryMapArtifact>
->;
+> & {
+  attackHypotheses?: ExistingRepositoryMapArtifact;
+};
 
 interface NormalizedRepositoryMapResult {
   artifacts: Required<Record<RepositoryMapExistingKey, string>>;
+  attackHypothesesPath: string;
   jobStates: RunJobState[];
 }
 
@@ -624,6 +631,9 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
   let failure: ScanStageError | undefined;
 
   normalizeRunForResume(run);
+  if (options.fromStep !== undefined) {
+    clearRunArtifactsFromStep(run, options.fromStep);
+  }
   run.status = "running";
   run.current_stage = "resume";
   delete run.error;
@@ -634,6 +644,14 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
     stage: "resume",
     type: "resume.started",
   });
+  if (options.fromStep !== undefined) {
+    await appendEvent({
+      details: { from_step: options.fromStep },
+      message: `Rerunning pipeline from ${options.fromStep}.`,
+      stage: "resume",
+      type: "resume.from_step",
+    });
+  }
 
   try {
     if (!isValidCommitSha(run.commit_sha)) {
@@ -849,7 +867,10 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
       run.artifacts.pi_context_pack = contextResult.contextPath;
     }
 
-    const existingPi = await readExistingRepositoryMapArtifacts(runDir, run);
+    const existingPi = dropExistingRepositoryMapArtifactsFromStep(
+      await readExistingRepositoryMapArtifacts(runDir, run),
+      options.fromStep,
+    );
     const needsPi = !hasCompleteRepositoryMapArtifacts(existingPi);
 
     if (needsPi) {
@@ -1060,6 +1081,140 @@ function normalizeRunForResume(run: ScanRunState): void {
   run.steps = (run.steps ?? []).filter((step) => step.status === "success");
 }
 
+function clearRunArtifactsFromStep(run: ScanRunState, fromStep: RunResumeFromStep): void {
+  if (fromStep === "inventory") {
+    delete run.artifacts.inventory;
+  }
+  if (fromStep === "inventory" || fromStep === "deterministic-baseline") {
+    delete run.artifacts.baseline_summary;
+    delete run.artifacts.baseline_tool_availability;
+  }
+  if (fromStep === "inventory" || fromStep === "deterministic-baseline" || fromStep === "context") {
+    delete run.artifacts.pi_context_pack;
+    clearAllRepositoryMapRunArtifacts(run);
+    return;
+  }
+
+  clearRepositoryMapRunArtifactsFromStep(run, fromStep);
+}
+
+function clearAllRepositoryMapRunArtifacts(run: ScanRunState): void {
+  delete run.artifacts.repo_map;
+  delete run.artifacts.repository_map;
+  delete run.artifacts.attack_hypotheses;
+}
+
+function clearRepositoryMapRunArtifactsFromStep(
+  run: ScanRunState,
+  fromStep: RunResumeFromStep,
+): void {
+  const artifactKey = repositoryMapArtifactKeyForResumeStep(fromStep);
+  if (artifactKey === undefined) {
+    return;
+  }
+  if (artifactKey === "attackHypotheses") {
+    delete run.artifacts.attack_hypotheses;
+    return;
+  }
+
+  const firstIndex = repositoryMapArtifacts.findIndex(
+    (definition) => definition.existingKey === artifactKey,
+  );
+  if (firstIndex === -1) {
+    return;
+  }
+
+  for (const definition of repositoryMapArtifacts.slice(firstIndex)) {
+    if (definition.runKey === undefined) {
+      delete run.artifacts.repository_map;
+    } else {
+      delete run.artifacts.repo_map?.[definition.runKey];
+    }
+  }
+  if (run.artifacts.repo_map !== undefined && Object.keys(run.artifacts.repo_map).length === 0) {
+    delete run.artifacts.repo_map;
+  }
+  delete run.artifacts.attack_hypotheses;
+}
+
+function dropExistingRepositoryMapArtifactsFromStep(
+  input: ExistingRepositoryMapArtifacts,
+  fromStep: RunResumeFromStep | undefined,
+): ExistingRepositoryMapArtifacts {
+  if (fromStep === undefined) {
+    return input;
+  }
+  if (fromStep === "inventory" || fromStep === "deterministic-baseline" || fromStep === "context") {
+    return {};
+  }
+
+  const artifactKey = repositoryMapArtifactKeyForResumeStep(fromStep);
+  if (artifactKey === undefined) {
+    return input;
+  }
+  if (artifactKey === "attackHypotheses") {
+    const { attackHypotheses: _ignored, ...rest } = input;
+    return rest;
+  }
+
+  const firstIndex = repositoryMapArtifacts.findIndex(
+    (definition) => definition.existingKey === artifactKey,
+  );
+  if (firstIndex === -1) {
+    return input;
+  }
+
+  const reusable: ExistingRepositoryMapArtifacts = {};
+  for (const definition of repositoryMapArtifacts.slice(0, firstIndex)) {
+    const existing = input[definition.existingKey];
+    if (existing !== undefined) {
+      reusable[definition.existingKey] = existing;
+    }
+  }
+  return reusable;
+}
+
+function repositoryMapArtifactKeyForResumeStep(
+  fromStep: RunResumeFromStep,
+): RepositoryMapExistingKey | "attackHypotheses" | undefined {
+  switch (fromStep) {
+    case "attack-hypotheses":
+      return "attackHypotheses";
+    case "auth-access":
+      return "authAccess";
+    case "config-secrets":
+      return "configSecrets";
+    case "coverage-structure":
+      return "coverageStructure";
+    case "crypto":
+      return "crypto";
+    case "data-flows":
+      return "dataFlows";
+    case "entrypoints":
+      return "entrypoints";
+    case "external-integrations-egress":
+      return "externalIntegrationsEgress";
+    case "infra-deploy":
+      return "infraDeploy";
+    case "logging-observability":
+      return "loggingObservability";
+    case "operation-sinks":
+      return "operationSinks";
+    case "repository-map":
+      return "repositoryMap";
+    case "stack-build-deps":
+      return "stackBuildDeps";
+    case "storage-data-model":
+      return "storageDataModel";
+    case "trust-boundaries":
+      return "trustBoundaries";
+    case "context":
+    case "deterministic-baseline":
+    case "inventory":
+      return undefined;
+  }
+}
+
 async function collectSandboxFailureDiagnostics(input: {
   appendEvent: (event: Omit<RunEvent, "timestamp">) => Promise<void>;
   outputsDir: string;
@@ -1159,11 +1314,23 @@ async function readExistingRepositoryMapArtifacts(
     }
   }
 
+  const attackHypothesesPath = run.artifacts.attack_hypotheses ?? attackHypothesesArtifactPath;
+  const attackHypotheses = await readExistingArtifact<JsonObject>(runDir, attackHypothesesPath);
+  if (attackHypotheses !== undefined) {
+    existing.attackHypotheses = {
+      artifact: attackHypotheses,
+      artifactPath: attackHypothesesPath,
+    };
+  }
+
   return existing;
 }
 
 function hasCompleteRepositoryMapArtifacts(input: ExistingRepositoryMapArtifacts): boolean {
-  return repositoryMapArtifacts.every((definition) => input[definition.existingKey] !== undefined);
+  return (
+    repositoryMapArtifacts.every((definition) => input[definition.existingKey] !== undefined) &&
+    input.attackHypotheses !== undefined
+  );
 }
 
 function leadingExistingRepositoryMapArtifacts(
@@ -1178,6 +1345,13 @@ function leadingExistingRepositoryMapArtifacts(
     }
     reusable[definition.existingKey] = existing;
   }
+  if (
+    repositoryMapArtifacts.every((definition) => reusable[definition.existingKey] !== undefined)
+  ) {
+    if (input.attackHypotheses !== undefined) {
+      reusable.attackHypotheses = input.attackHypotheses;
+    }
+  }
 
   return reusable;
 }
@@ -1190,6 +1364,9 @@ function clearRepositoryMapArtifactsAfterFirstMissing(
     (definition) => input[definition.existingKey] === undefined,
   );
   if (firstMissingIndex === -1) {
+    if (input.attackHypotheses === undefined) {
+      delete run.artifacts.attack_hypotheses;
+    }
     return;
   }
 
@@ -1202,6 +1379,8 @@ function clearRepositoryMapArtifactsAfterFirstMissing(
       delete run.artifacts.repo_map[definition.runKey];
     }
   }
+
+  delete run.artifacts.attack_hypotheses;
 
   if (run.artifacts.repo_map !== undefined && Object.keys(run.artifacts.repo_map).length === 0) {
     delete run.artifacts.repo_map;
@@ -1233,6 +1412,9 @@ function applyCompleteExistingRepositoryMapArtifacts(
       run.artifacts.repo_map[definition.runKey] = existing.artifactPath;
     }
   }
+  if (input.attackHypotheses !== undefined) {
+    run.artifacts.attack_hypotheses = input.attackHypotheses.artifactPath;
+  }
 }
 
 function applyRepositoryMapArtifacts(
@@ -1248,6 +1430,7 @@ function applyRepositoryMapArtifacts(
     run.artifacts.repo_map = run.artifacts.repo_map ?? {};
     run.artifacts.repo_map[definition.runKey] = artifactPath;
   }
+  run.artifacts.attack_hypotheses = result.attackHypothesesPath;
 }
 
 function normalizeRepositoryMapResult(result: unknown): NormalizedRepositoryMapResult {
@@ -1272,6 +1455,15 @@ function normalizeRepositoryMapResult(result: unknown): NormalizedRepositoryMapR
     artifacts[definition.existingKey] = artifactPath;
   }
 
+  const attackHypothesesPath =
+    pathFromUnknown(resultRecord.attackHypothesesPath) ??
+    pathFromUnknown(resultRecord.attack_hypotheses_path) ??
+    pathFromUnknown(resultRecord.attackHypotheses) ??
+    pathFromUnknown(resultRecord.attack_hypotheses);
+  if (attackHypothesesPath === undefined) {
+    missing.push(attackHypothesesArtifactPath);
+  }
+
   if (missing.length > 0) {
     throw new ScanStageError({
       diagnostics: missing.map((artifact) => `Missing Pi artifact path: ${artifact}`),
@@ -1288,6 +1480,7 @@ function normalizeRepositoryMapResult(result: unknown): NormalizedRepositoryMapR
 
   return {
     artifacts,
+    attackHypothesesPath: attackHypothesesPath ?? attackHypothesesArtifactPath,
     jobStates,
   };
 }
@@ -1437,6 +1630,10 @@ function syncKnownArtifacts(run: ScanRunState, store: ArtifactStore): void {
   const context = store.get("pi-context-pack");
   if (context !== undefined) {
     run.artifacts.pi_context_pack = context.path;
+  }
+  const attackHypotheses = store.get("attack-hypotheses");
+  if (attackHypotheses !== undefined) {
+    run.artifacts.attack_hypotheses = attackHypotheses.path;
   }
   for (const definition of repositoryMapArtifacts) {
     const artifact = firstStoredArtifact(store, definition.storeIds);

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { jsonrepair } from "jsonrepair";
 import type {
+  AttackHypothesesArtifact,
   AuthAccessArtifact,
   AuthConfigRecord,
   ConfigSecretsArtifact,
@@ -35,9 +36,11 @@ const defaultPiModel = "deepseek/deepseek-v4-pro";
 const defaultPiProvider = "openrouter";
 const defaultPiThinking = "high";
 const trustBoundariesPiModel = "openai/gpt-5.3-codex";
+const attackHypothesesPiModel = "anthropic/claude-opus-4.8";
 const collectorTools = ["read", "grep", "find", "ls"];
 
 const repoMapPaths = {
+  attackHypotheses: "outputs/attack-hypotheses.json",
   authAccess: "outputs/repo-map/auth-access.json",
   configSecrets: "outputs/repo-map/config-secrets.json",
   coverageStructure: "outputs/repo-map/coverage-structure.json",
@@ -55,6 +58,7 @@ const repoMapPaths = {
 } as const;
 
 type PiStructuredArtifact =
+  | AttackHypothesesArtifact
   | AuthAccessArtifact
   | ConfigSecretsArtifact
   | CoverageStructureArtifact
@@ -71,6 +75,7 @@ type PiStructuredArtifact =
   | TrustBoundariesArtifact;
 
 type PiStageValidationStage =
+  | "attack-hypotheses-validation"
   | "auth-access-validation"
   | "config-secrets-validation"
   | "coverage-structure-validation"
@@ -90,6 +95,7 @@ interface RunPiRepositoryMappingInput {
   contextPack: PiContextPackArtifact;
   contextPath: string;
   existing?: Partial<{
+    attackHypotheses: ExistingPiArtifact<AttackHypothesesArtifact>;
     authAccess: ExistingPiArtifact<AuthAccessArtifact>;
     configSecrets: ExistingPiArtifact<ConfigSecretsArtifact>;
     coverageStructure: ExistingPiArtifact<CoverageStructureArtifact>;
@@ -121,6 +127,8 @@ interface ExistingPiArtifact<TArtifact extends PiStructuredArtifact> {
 }
 
 export interface RunPiRepositoryMappingResult {
+  attackHypotheses: AttackHypothesesArtifact;
+  attackHypothesesPath: string;
   authAccess: AuthAccessArtifact;
   authAccessPath: string;
   configSecrets: ConfigSecretsArtifact;
@@ -530,7 +538,34 @@ export async function runPiRepositoryMapping(
       validationStage: "repository-map-validation",
     }));
 
+  const attackHypothesesContext = buildAttackHypothesesContextMarkdown({
+    repositoryMap: repositoryMap.artifact,
+    repositoryMapContext,
+  });
+  const attackHypotheses =
+    input.existing?.attackHypotheses ??
+    (await runPiStage<AttackHypothesesArtifact>({
+      artifactId: "attack-hypotheses",
+      artifactRelativePath: repoMapPaths.attackHypotheses,
+      contextArtifactLabel: repositoryMap.artifactPath,
+      contextPack: attackHypothesesContext,
+      generatedAt: input.generatedAt,
+      input: stageInput,
+      jobName: "pi-attack-hypotheses",
+      kind: "attack-hypotheses",
+      model: attackHypothesesPiModel,
+      outputBaseName: "attack-hypotheses",
+      prompt: buildAttackHypothesesPrompt(attackHypothesesContext),
+      step: "attack-hypotheses",
+      thinking: "xhigh",
+      tools: [],
+      validateSchema: (artifact) => validateAttackHypothesesArtifact({ artifact }),
+      validationStage: "attack-hypotheses-validation",
+    }));
+
   return {
+    attackHypotheses: attackHypotheses.artifact,
+    attackHypothesesPath: attackHypotheses.artifactPath,
     authAccess: authAccess.artifact,
     authAccessPath: authAccess.artifactPath,
     configSecrets: configSecrets.artifact,
@@ -1248,6 +1283,46 @@ export function buildRepositoryMapContextMarkdown(input: {
     "## Omitted From This Context",
     "- Per-artifact provenance, repeated repo blocks, and runtime metadata.",
   );
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function buildAttackHypothesesContextMarkdown(input: {
+  repositoryMap: RepositoryMapArtifact;
+  repositoryMapContext: string;
+}): string {
+  const repo = input.repositoryMap.repo;
+  const lines: string[] = [
+    "# Attack Hypotheses Context",
+    "",
+    `Repo: ${repo.url}`,
+    `Commit: ${repo.commit_sha ?? "unknown"}`,
+    "",
+    "This is repository knowledge for a post-map security-research step.",
+    "Use only the accepted repository-map facts below. Do not rediscover the repository.",
+    "The goal is a list of attack hypotheses, not confirmed vulnerabilities.",
+    "",
+    "## Repository Map Summary",
+    `- project_kind: ${input.repositoryMap.summary.project_kind ?? "unknown"}`,
+    `- confidence: ${input.repositoryMap.summary.confidence ?? "unknown"}`,
+    `- summary: ${markdownField(input.repositoryMap.summary.text)}`,
+    `- evidence: ${formatMarkdownEvidence(input.repositoryMap.summary.evidence)}`,
+    "",
+    "## Repository Map Sections",
+  ];
+
+  for (const section of input.repositoryMap.sections) {
+    lines.push(
+      `- ${section.artifact ?? "unknown"} | ${section.path ?? "unknown"} | item_count=${
+        section.item_count ?? "unknown"
+      } | ${markdownField(section.summary ?? section.title ?? "n/a")} | evidence: ${formatMarkdownEvidence(
+        section.evidence,
+      )}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.repositoryMap.sections);
+
+  lines.push("", "## Repository Knowledge", input.repositoryMapContext.trim());
 
   return `${lines.join("\n")}\n`;
 }
@@ -2105,6 +2180,33 @@ function createDegradedPiArtifact<TArtifact extends PiStructuredArtifact>(input:
   };
 
   switch (input.kind) {
+    case "attack-hypotheses":
+      return {
+        ...base,
+        blocking_fact_gaps: [],
+        cross_cutting_chains: [],
+        deprioritized_areas: [],
+        executive_summary: {
+          hypothesis_counts: {},
+          limitations: [reason],
+          strong_hypothesis_count: 0,
+          text: "Attack-hypothesis generation did not produce an accepted artifact.",
+          top_risk_areas: [],
+        },
+        hypotheses: [],
+        inputs: {
+          repository_map_artifact: repoMapPaths.repositoryMap,
+        },
+        summary: {
+          evidence: input.rawArtifactPath === undefined ? [] : [input.rawArtifactPath],
+          text: "Attack-hypothesis generation did not produce an accepted artifact.",
+        },
+        validation_roadmap: {
+          deep_dive: [],
+          first_pass: [],
+          later_hardening: [],
+        },
+      } as unknown as TArtifact;
     case "auth-access":
       return { ...base, auth: [], entrypoint_access: [] } as unknown as TArtifact;
     case "config-secrets":
@@ -2480,6 +2582,23 @@ export function validateRepositoryMapArtifact(input: { artifact: RepositoryMapAr
   requireObjectProperty(artifact, "summary", errors);
   requireArrayProperty(artifact, "sections", errors);
   requireOptionalObjectProperty(artifact, "inputs", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
+}
+
+export function validateAttackHypothesesArtifact(input: {
+  artifact: AttackHypothesesArtifact;
+}): void {
+  const artifact = input.artifact;
+  const errors: string[] = [];
+  validateBasePiArtifact(artifact, "attack-hypotheses", errors);
+  requireObjectProperty(artifact, "executive_summary", errors);
+  requireArrayProperty(artifact, "hypotheses", errors);
+  requireObjectProperty(artifact, "inputs", errors);
+  requireObjectProperty(artifact, "summary", errors);
+  requireOptionalArrayProperty(artifact, "blocking_fact_gaps", errors);
+  requireOptionalArrayProperty(artifact, "cross_cutting_chains", errors);
+  requireOptionalArrayProperty(artifact, "deprioritized_areas", errors);
+  requireOptionalObjectProperty(artifact, "validation_roadmap", errors);
   throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
@@ -3238,6 +3357,170 @@ Stage input:
 ${contextMarkdown}`;
 }
 
+function buildAttackHypothesesPrompt(contextMarkdown: string): string {
+  return `You are a senior Application Security researcher and threat modeling analyst.
+
+Task:
+Use the supplied Repository Map to generate high-quality, testable security
+hypotheses: potential attack vectors, attack chains, and a prioritized
+validation plan.
+
+Write every human-readable field in English.
+
+Work like an AppSec specialist, not like a generic SAST scanner. Connect facts
+from the map into concrete chains:
+
+Entry point -> external input -> auth/role context -> data flow/intermediate processing -> dangerous sink -> affected asset -> security impact.
+
+Important boundaries:
+- Use only facts from the supplied Repository Map. This stage has no repository
+  inspection tools and no external search.
+- If a fact is not present, do not invent it. Mark it as a fact gap or needs
+  confirmation.
+- The goal is not to prove vulnerabilities. The goal is to formulate strong
+  hypotheses for manual or automated validation.
+- Do not include exploit payloads, working malicious code, unauthorized attack
+  instructions, or reconstructed secrets.
+- Safe validation guidance is allowed: code review checks, test properties,
+  expected evidence, and defensive validation plans.
+
+Analysis method:
+1. Normalize facts into entrypoints, sources, auth context, dangerous sinks,
+   assets, trust boundaries, and fact gaps.
+2. Build candidate hypotheses for combinations of entrypoint + source + sink
+   when there is a concrete risk signal: public entrypoint, user-controlled
+   input reaching a dangerous sink, auth/role/crypto weakness, secret exposure,
+   filesystem path use, parser/deserializer use, outbound URL use, template
+   rendering, CI/CD command/artifact/cache/deploy surface, sensitive logging,
+   or LLM/tool-calling paths to DB/API operations.
+3. Express strong hypotheses as attack chains with entry point, source, auth
+   context, intermediates, sink, asset, impact, supporting evidence, and missing
+   facts.
+4. Remove weak or duplicate hypotheses. Do not include a hypothesis if it is not
+   tied to a concrete endpoint/source/sink, is based only on a library name, has
+   unclear impact, lacks a validation path, or depends on too many unsupported
+   assumptions.
+5. Prioritize with AppSec judgment:
+   - P0: auth bypass, role escalation, RCE/process execution, high-impact
+     arbitrary file read/write, secret/key compromise, CI/CD compromise, mass
+     sensitive-data exposure, admin/release/deploy control.
+   - P1: SSRF, realistic SQL/NoSQL injection, unsafe upload/parser, template
+     injection, IDOR on sensitive data, exposed logs/keys, strong business logic
+     abuse chain.
+   - P2: recon/metrics leakage, limited file disclosure, weak crypto without
+     immediate exploit path, partial authorization concern, parser/upload DoS,
+     LLM/tool abuse without proven sensitive-data reachability.
+   - P3: hardening issue, best-practice gap, weak chain, low impact, or many
+     unconfirmed conditions.
+6. Assign confidence:
+   - high: entrypoint, source, sink, and auth context are directly present; flow
+     is direct observed; impact follows logically.
+   - medium: several strong facts exist but part of the chain is inferred or
+     middleware/runtime behavior needs confirmation.
+   - low: mostly speculative, blocked by fact gaps, or sink reachability is
+     unclear.
+7. For every hypothesis, include a safe validation plan: code review checks,
+   properties to test, runtime observations or artifacts to collect, evidence
+   that would confirm it, and evidence that would refute it.
+
+Quality bar:
+- Good hypotheses are concrete, evidence-backed, and falsifiable.
+- Bad hypotheses are generic statements such as "check XSS", "maybe SQLi",
+  "review JWT security", or "CI/CD may be insecure".
+- Prefer fewer strong hypotheses over a long checklist.
+- Limit hypotheses to at most 20, sorted P0, P1, P2, P3; within each priority,
+  sort by confidence and impact.
+
+Return your result as your final response: exactly one JSON object matching the attack-hypotheses schema below. No markdown fences, no prose, and nothing before or after it. Schema:
+{
+  "kind": "attack-hypotheses",
+  "generated_at": "ISO timestamp",
+  "generated_by": "pi",
+  "repo": { "url": "string", "commit_sha": "string or null" },
+  "inputs": {
+    "repository_map_artifact": "${repoMapPaths.repositoryMap}"
+  },
+  "executive_summary": {
+    "text": "short English summary",
+    "strong_hypothesis_count": 0,
+    "hypothesis_counts": { "P0": 0, "P1": 0, "P2": 0, "P3": 0 },
+    "top_risk_areas": ["3 to 5 risk areas"],
+    "limitations": ["analysis limits and important fact gaps"]
+  },
+  "summary": {
+    "text": "compact security-research orientation",
+    "confidence": "low|medium|high",
+    "evidence": ["map id or relative/path"]
+  },
+  "hypotheses": [
+    {
+      "id": "H-001",
+      "title": "short descriptive title",
+      "priority": "P0|P1|P2|P3",
+      "confidence": "low|medium|high",
+      "category": "SQLi|SSRF|auth bypass|upload/parser|deserialization|SSTI|CI/CD|secret exposure|IDOR|LLM tool abuse|crypto weakness|other",
+      "status": "hypothesis",
+      "area": "short area name",
+      "attack_vector": "what an attacker might try",
+      "target_surface": "entrypoint, boundary, sink, integration, config, or deploy surface",
+      "target_ids": ["optional map IDs"],
+      "entry_point": "specific endpoint/handler/workflow when known",
+      "source": "specific user-controlled or untrusted input when known",
+      "auth_context": "public|protected|role-based|frontend-only|unknown|other",
+      "intermediates": ["functions, middleware, parser, model, tool, storage path"],
+      "sink": "specific dangerous sink when known",
+      "asset_at_risk": "data, secret, role, filesystem, release artifact, external service",
+      "preconditions": ["conditions that must hold for the hypothesis"],
+      "attack_path": ["validation-level chain using map facts"],
+      "why_plausible": ["facts and logical inferences that make the chain plausible"],
+      "evidence": [
+        { "type": "Entrypoint|Source|Auth|Sink|Data flow status|Trust boundary|Fact gap|Other", "detail": "map fact, id, or path" }
+      ],
+      "supporting_map_evidence": ["map IDs or relative/path evidence"],
+      "missing_facts_to_validate": ["facts needed before calling this a vulnerability"],
+      "validation_plan": ["code review checks and safe tests"],
+      "safe_dynamic_checks": ["behavior properties to verify without payloads"],
+      "refutes_if": ["evidence that would disprove the hypothesis"],
+      "likely_remediation_if_confirmed": ["2 to 5 defensive actions"],
+      "potential_impact": "what could happen if validated",
+      "notes": ["optional fact gaps or nuance"]
+    }
+  ],
+  "cross_cutting_chains": [
+    {
+      "id": "C-001",
+      "title": "short title",
+      "theme": "chain theme",
+      "chain": ["external actor", "entrypoint", "source", "sink 1", "asset/state change", "sink 2", "impact"],
+      "required_conditions": ["condition 1"],
+      "why_it_matters": "business/security impact",
+      "validation_order": ["first check", "second check"]
+    }
+  ],
+  "validation_roadmap": {
+    "first_pass": ["5 to 10 fastest P0/P1 reachability checks"],
+    "deep_dive": ["checks requiring local run, logs, manual tracing, or CI review"],
+    "later_hardening": ["P2/P3 hygiene and defense-in-depth"]
+  },
+  "blocking_fact_gaps": [
+    { "gap": "missing fact", "why_it_matters": "reason", "hypothesis_ids": ["H-001"], "how_to_close": "how to close the gap" }
+  ],
+  "deprioritized_areas": [
+    { "area": "area", "reason": "why not first priority", "evidence": ["map id or relative/path"] }
+  ],
+  "coverage": {
+    "reviewed": [{ "area": "string", "evidence": ["map id or relative/path"] }],
+    "not_covered": [{ "area": "string", "reason": "string" }]
+  },
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "inference": true, "evidence": ["map id or relative/path"] }]
+}
+
+Stage input:
+BEGIN_REPOSITORY_MAP
+${contextMarkdown}
+END_REPOSITORY_MAP`;
+}
+
 function factsOnlyPreamble(): string {
   return `You are a static AppSec repository cartographer in read-only, facts-only mode.
 
@@ -3535,6 +3818,8 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
 
 function validationStageForKind(kind: PiStructuredArtifact["kind"]): PiStageValidationStage {
   switch (kind) {
+    case "attack-hypotheses":
+      return "attack-hypotheses-validation";
     case "auth-access":
       return "auth-access-validation";
     case "config-secrets":
@@ -3570,6 +3855,12 @@ function normalizeParsedArtifact(
   kind: PiStructuredArtifact["kind"],
   parsed: Record<string, unknown>,
 ): void {
+  if (kind === "attack-hypotheses" && !isRecord(parsed.inputs)) {
+    parsed.inputs = {
+      repository_map_artifact: repoMapPaths.repositoryMap,
+    };
+  }
+
   if (kind === "entrypoints") {
     for (const entrypoint of optionalArrayField<Record<string, unknown>>(parsed, "entrypoints")) {
       if (typeof entrypoint.route !== "string" && typeof entrypoint.path === "string") {
@@ -3726,7 +4017,7 @@ function throwIfValidationErrors(
     diagnostics: errors,
     message: `Pi ${kind} artifact failed validation.`,
     stage: asRunStage(validationStage),
-    userMessage: `VibeShield rejected Pi ${kind} output because it did not match the repository-map contract.`,
+    userMessage: `VibeShield rejected Pi ${kind} output because it did not match the artifact contract.`,
   });
 }
 

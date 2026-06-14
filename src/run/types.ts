@@ -3,6 +3,7 @@ import type { GitHubRepoReference } from "./github-url.js";
 export type RunStatus = "failed" | "running" | "success";
 
 export type RunStage =
+  | "attack-hypotheses-validation"
   | "auth-access-validation"
   | "config-secrets-validation"
   | "cleanup"
@@ -47,6 +48,7 @@ export interface ScanRunState {
   artifacts: {
     baseline_summary?: string;
     baseline_tool_availability?: string;
+    attack_hypotheses?: string;
     repo_map?: {
       auth_access?: string;
       config_secrets?: string;

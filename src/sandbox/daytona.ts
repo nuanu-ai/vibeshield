@@ -1502,6 +1502,8 @@ function actorLabel() {
 
 function piStepStartMessage(step) {
   switch (step) {
+    case "attack-hypotheses":
+      return "Generating attack hypotheses from the repository map.";
     case "coverage-structure":
       return "Mapping repository coverage and structure.";
     case "stack-build-deps":
@@ -1537,6 +1539,8 @@ function piStepStartMessage(step) {
 
 function piStepDoneMessage(step) {
   switch (step) {
+    case "attack-hypotheses":
+      return "Attack hypothesis generation completed.";
     case "coverage-structure":
       return "Coverage and structure map completed.";
     case "stack-build-deps":
@@ -1572,6 +1576,8 @@ function piStepDoneMessage(step) {
 
 function piStepFailedMessage(step) {
   switch (step) {
+    case "attack-hypotheses":
+      return "Attack hypothesis generation failed.";
     case "coverage-structure":
       return "Coverage and structure mapping failed.";
     case "stack-build-deps":
