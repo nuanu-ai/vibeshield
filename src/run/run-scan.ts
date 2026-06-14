@@ -20,14 +20,19 @@ import {
   relativeArtifactPath,
   writeJsonAtomic,
 } from "./file-io.js";
-import { parseGitHubRepoUrl } from "./github-url.js";
+import {
+  localRepoSnapshotsEqual,
+  resolveLocalRepoSource,
+  resolveScanSource,
+  type SourceReference,
+} from "./github-url.js";
 import { redactDeep } from "./redaction.js";
 import type { RunResumeFromStep } from "./resume-steps.js";
 import type { RunEvent, RunJobState, RunStepState, ScanRunState } from "./types.js";
 
 export interface RunScanOptions {
-  repoUrlInput: string;
   onProgress?: (event: RunEvent) => unknown | Promise<unknown>;
+  sourceInput: string;
   runsRoot?: string;
   sandboxProvider?: SandboxProvider;
 }
@@ -220,14 +225,15 @@ const repositoryMapArtifacts: RepositoryMapArtifactDefinition[] = [
 ];
 
 export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
-  const parsed = parseGitHubRepoUrl(options.repoUrlInput);
-  if (!parsed.success) {
+  const resolved = await resolveScanSource(options.sourceInput);
+  if (!resolved.success) {
     return {
       exitCode: 1,
-      userMessage: parsed.userMessage,
+      userMessage: resolved.userMessage,
     };
   }
 
+  const source = resolved.source;
   const sandboxProvider = options.sandboxProvider ?? createDefaultSandboxProvider();
   const createdAt = new Date();
   const runId = createRunId(createdAt);
@@ -251,7 +257,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     created_at: createdAt.toISOString(),
     current_stage: "create_run",
     run_id: runId,
-    source: parsed.repo,
+    source,
     status: "running",
   };
 
@@ -285,7 +291,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     });
 
     sandbox = await sandboxProvider.createSandbox({
-      repo: parsed.repo,
+      repo: source,
       runId,
     });
     run.sandbox = {
@@ -308,18 +314,18 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     run.current_stage = "clone";
     await persistRun();
     await appendEvent({
-      message: "Cloning repository inside sandbox.",
+      message: materializeStartedMessage(source),
       sandbox_id: sandbox.id,
       stage: "clone",
       type: "clone.started",
     });
-    const cloneResult = await sandbox.cloneRepository(parsed.repo);
-    if (cloneResult.commitSha !== null) {
-      run.commit_sha = cloneResult.commitSha;
+    const materializeResult = await sandbox.materializeRepository(source);
+    if (materializeResult.commitSha !== null) {
+      run.commit_sha = materializeResult.commitSha;
     }
     await persistRun();
     await appendEvent({
-      message: "Repository cloned inside sandbox.",
+      message: materializeCompletedMessage(source),
       sandbox_id: sandbox.id,
       stage: "clone",
       type: "clone.completed",
@@ -334,9 +340,9 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
       type: "inventory.started",
     });
     const inventoryArtifact = await sandbox.generateInventory({
-      commitSha: cloneResult.commitSha,
+      commitSha: materializeResult.commitSha,
       generatedAt: new Date().toISOString(),
-      repo: parsed.repo,
+      repo: source,
     });
     await sandbox.pullFile(inventoryArtifact.sandboxPath, inventoryPath, {
       artifact: inventoryArtifact.relativePath,
@@ -380,7 +386,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
 
     const activeSandbox = sandbox;
     const baselineResult = await runDeterministicBaseline({
-      commitSha: cloneResult.commitSha,
+      commitSha: materializeResult.commitSha,
       generatedAt: new Date().toISOString(),
       inventory,
       onProgress: (event) =>
@@ -394,7 +400,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
       outputsDir,
       runDir,
       sandbox,
-      sourceUrl: parsed.repo.url,
+      sourceUrl: source.url,
       store,
     });
     baselineStep.jobs = baselineResult.jobStates;
@@ -667,13 +673,7 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
   }
 
   try {
-    if (!isValidCommitSha(run.commit_sha)) {
-      throw new ScanStageError({
-        message: "Cannot resume without a valid commit_sha in run.json.",
-        stage: "resume",
-        userMessage: "VibeShield cannot resume this run because run.json has no valid commit SHA.",
-      });
-    }
+    await validateSourceForResume(run);
 
     await cleanupPreviousSandboxBeforeResume({
       appendEvent,
@@ -712,21 +712,25 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
     run.current_stage = "clone";
     await persistRun();
     await appendEvent({
-      message: "Cloning repository inside sandbox at original commit.",
+      message: materializeResumeStartedMessage(run.source),
       sandbox_id: sandbox.id,
       stage: "clone",
       type: "clone.started",
     });
-    const cloneResult = await sandbox.cloneRepository(run.source, { commitSha: run.commit_sha });
-    if (cloneResult.commitSha !== run.commit_sha) {
+    const materializeOptions =
+      run.source.type === "github" && run.commit_sha !== undefined
+        ? { commitSha: run.commit_sha }
+        : {};
+    const materializeResult = await sandbox.materializeRepository(run.source, materializeOptions);
+    if (run.source.type === "github" && materializeResult.commitSha !== run.commit_sha) {
       throw new ScanStageError({
-        message: `Resume checkout mismatch: expected ${run.commit_sha}, got ${cloneResult.commitSha ?? "unknown"}.`,
+        message: `Resume checkout mismatch: expected ${run.commit_sha}, got ${materializeResult.commitSha ?? "unknown"}.`,
         stage: "clone",
         userMessage: "VibeShield could not checkout the original commit for resume.",
       });
     }
     await appendEvent({
-      message: "Repository cloned at original commit inside sandbox.",
+      message: materializeResumeCompletedMessage(run.source),
       sandbox_id: sandbox.id,
       stage: "clone",
       type: "clone.completed",
@@ -757,7 +761,7 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
         type: "inventory.started",
       });
       const inventoryArtifact = await sandbox.generateInventory({
-        commitSha: cloneResult.commitSha,
+        commitSha: materializeResult.commitSha,
         generatedAt: new Date().toISOString(),
         repo: run.source,
       });
@@ -819,7 +823,7 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
       });
       const activeSandbox = sandbox;
       const baselineResult = await runDeterministicBaseline({
-        commitSha: cloneResult.commitSha,
+        commitSha: materializeResult.commitSha,
         generatedAt: new Date().toISOString(),
         inventory,
         onProgress: (event) =>
@@ -1103,6 +1107,47 @@ async function cleanupPreviousSandboxBeforeResume(input: {
       ? "resume.previous_sandbox_cleanup.completed"
       : "resume.previous_sandbox_cleanup.failed",
   });
+}
+
+async function validateSourceForResume(run: ScanRunState): Promise<void> {
+  if (run.source.type === "github") {
+    if (!isValidCommitSha(run.commit_sha)) {
+      throw new ScanStageError({
+        message: "Cannot resume without a valid commit_sha in run.json.",
+        stage: "resume",
+        userMessage: "VibeShield cannot resume this run because run.json has no valid commit SHA.",
+      });
+    }
+    return;
+  }
+
+  const refreshed = await resolveLocalRepoSource(run.source.path);
+  if (!refreshed.success) {
+    throw new ScanStageError({
+      message: refreshed.userMessage,
+      stage: "resume",
+      userMessage: refreshed.userMessage,
+    });
+  }
+  if (refreshed.source.type !== "local") {
+    throw new ScanStageError({
+      message: "Local run source resolved to a non-local source during resume.",
+      stage: "resume",
+      userMessage: "VibeShield cannot resume this local run because its source path is invalid.",
+    });
+  }
+
+  if (!localRepoSnapshotsEqual(run.source.snapshot, refreshed.source.snapshot)) {
+    throw new ScanStageError({
+      diagnostics: [
+        `Original files: ${run.source.snapshot.file_count}; current files: ${refreshed.source.snapshot.file_count}.`,
+      ],
+      message: "Local repository snapshot changed since this run was created.",
+      stage: "resume",
+      userMessage:
+        "VibeShield cannot resume this local run because the Git-filtered local repository snapshot changed. Start a new scan instead.",
+    });
+  }
 }
 
 function normalizeRunForResume(run: ScanRunState): void {
@@ -1610,6 +1655,30 @@ async function readExistingArtifact<T>(
 
 function isValidCommitSha(value: string | undefined): value is string {
   return typeof value === "string" && /^[0-9a-f]{40}$/i.test(value);
+}
+
+function materializeStartedMessage(source: SourceReference): string {
+  return source.type === "github"
+    ? "Cloning repository inside sandbox."
+    : "Copying Git-filtered local repository snapshot into sandbox.";
+}
+
+function materializeCompletedMessage(source: SourceReference): string {
+  return source.type === "github"
+    ? "Repository cloned inside sandbox."
+    : "Local repository snapshot copied inside sandbox.";
+}
+
+function materializeResumeStartedMessage(source: SourceReference): string {
+  return source.type === "github"
+    ? "Cloning repository inside sandbox at original commit."
+    : "Copying unchanged local repository snapshot into sandbox.";
+}
+
+function materializeResumeCompletedMessage(source: SourceReference): string {
+  return source.type === "github"
+    ? "Repository cloned at original commit inside sandbox."
+    : "Unchanged local repository snapshot copied inside sandbox.";
 }
 
 function createRunId(date: Date): string {

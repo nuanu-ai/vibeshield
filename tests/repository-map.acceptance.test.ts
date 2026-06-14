@@ -98,7 +98,7 @@ describe("AppSec repository map acceptance", () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
-    const result = await runScan({ repoUrlInput: fixtureUrl, runsRoot, sandboxProvider: provider });
+    const result = await runScan({ sourceInput: fixtureUrl, runsRoot, sandboxProvider: provider });
 
     expect(result.exitCode).toBe(0);
     const runDir = expectRunDir(result);
@@ -254,7 +254,7 @@ describe("AppSec repository map acceptance", () => {
     const { provider } = await createProvider();
 
     const result = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot: await createTempRoot("vibeshield-runs-"),
       sandboxProvider: provider,
     });
@@ -297,7 +297,7 @@ describe("AppSec repository map acceptance", () => {
     const { provider, sandboxRoot } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
-    const result = await runScan({ repoUrlInput: fixtureUrl, runsRoot, sandboxProvider: provider });
+    const result = await runScan({ sourceInput: fixtureUrl, runsRoot, sandboxProvider: provider });
 
     expect(result.exitCode).toBe(0);
     const runDir = expectRunDir(result);
@@ -316,7 +316,7 @@ describe("AppSec repository map acceptance", () => {
 
     const failedProvider = (await createProvider({ failAt: "pi" })).provider;
     const failed = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot,
       sandboxProvider: failedProvider,
     });
@@ -341,7 +341,7 @@ describe("AppSec repository map acceptance", () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
-    const result = await runScan({ repoUrlInput: fixtureUrl, runsRoot, sandboxProvider: provider });
+    const result = await runScan({ sourceInput: fixtureUrl, runsRoot, sandboxProvider: provider });
     expect(result.exitCode).toBe(0);
     const runDir = expectRunDir(result);
 
@@ -371,7 +371,7 @@ describe("AppSec repository map acceptance", () => {
 
     const minimal = await createProvider({ minimal: true });
     const minimalResult = await runScan({
-      repoUrlInput: minimalFixtureUrl,
+      sourceInput: minimalFixtureUrl,
       runsRoot,
       sandboxProvider: minimal.provider,
     });
@@ -394,7 +394,7 @@ describe("AppSec repository map acceptance", () => {
   it("continues to repository mapping when a scanner runtime call fails", async () => {
     const { provider } = await createProvider({ failAt: "baseline" });
     const result = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot: await createTempRoot("vibeshield-runs-"),
       sandboxProvider: provider,
     });
@@ -416,7 +416,7 @@ describe("AppSec repository map acceptance", () => {
   it("continues to repository mapping when scanner tool preparation fails", async () => {
     const { provider } = await createProvider({ failAt: "baseline-prepare" });
     const result = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot: await createTempRoot("vibeshield-runs-"),
       sandboxProvider: provider,
     });
@@ -533,7 +533,7 @@ describe("AppSec repository map acceptance", () => {
     });
 
     const result = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot: await createTempRoot("vibeshield-runs-"),
       sandboxProvider: provider,
     });
@@ -746,7 +746,7 @@ describe("AppSec repository map acceptance", () => {
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
     const failed = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot,
       sandboxProvider: failedProvider,
     });
@@ -822,7 +822,7 @@ describe("AppSec repository map acceptance", () => {
     const initial = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
     const scanned = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot,
       sandboxProvider: initial.provider,
     });
@@ -892,7 +892,7 @@ describe("AppSec repository map acceptance", () => {
     const initial = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
     const scanned = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot,
       sandboxProvider: initial.provider,
     });
@@ -939,7 +939,7 @@ describe("AppSec repository map acceptance", () => {
     });
 
     const result = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot: await createTempRoot("vibeshield-runs-"),
       sandboxProvider: provider,
     });
@@ -973,7 +973,7 @@ describe("AppSec repository map acceptance", () => {
     });
 
     const result = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot: await createTempRoot("vibeshield-runs-"),
       sandboxProvider: provider,
     });
@@ -1003,7 +1003,7 @@ describe("AppSec repository map acceptance", () => {
     });
 
     const result = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot: await createTempRoot("vibeshield-runs-"),
       sandboxProvider: provider,
     });
@@ -1038,7 +1038,7 @@ describe("AppSec repository map acceptance", () => {
     });
 
     const result = await runScan({
-      repoUrlInput: fixtureUrl,
+      sourceInput: fixtureUrl,
       runsRoot: await createTempRoot("vibeshield-runs-"),
       sandboxProvider: provider,
     });

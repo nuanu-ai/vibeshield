@@ -1,4 +1,4 @@
-import type { GitHubRepoReference } from "./github-url.js";
+import type { SourceReference } from "./github-url.js";
 
 export type RunStatus = "failed" | "running" | "success";
 
@@ -84,7 +84,7 @@ export interface ScanRunState {
     id: string;
     provider: string;
   };
-  source: GitHubRepoReference;
+  source: SourceReference;
   status: RunStatus;
   steps?: RunStepState[];
 }

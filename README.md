@@ -17,7 +17,7 @@
 
 ---
 
-> **The promise:** GitHub repo in → inspectable run artifacts out.
+> **The promise:** repo in → inspectable run artifacts out.
 >
 > You shipped something an agent wrote. VibeShield helps you answer the only question that matters before you deploy it: **"Is there a hole in here right now?"**
 
@@ -54,12 +54,12 @@ VibeShield is **early-stage**. The current product slice proves one thing end-to
 
 ```mermaid
 flowchart TD
-    A(["vibeshield scan &lt;github-url&gt;"]) --> V[Validate GitHub URL]
+    A(["vibeshield scan &lt;github-url-or-local-path&gt;"]) --> V[Resolve source]
     V --> SBX
 
     subgraph SBX ["🔒 Ephemeral Daytona sandbox — isolated, deleted after the run"]
         direction TB
-        C[Clone repo] --> I[Inventory & classify]
+        C[Clone or copy Git-filtered snapshot] --> I[Inventory & classify]
         I --> B["Deterministic baseline<br/>syft · trivy · gitleaks<br/>actionlint · zizmor · checkov"]
         B --> P["Pi context pack<br/>compact, neutral repo facts"]
         P --> M["Facts-only repository map<br/>section-by-section agentic mapping"]
@@ -71,7 +71,7 @@ flowchart TD
     RPT --> R[("📂 Inspectable run directory<br/>repository-map.json · attack-hypotheses.json<br/>final-report.md · final-report.pdf · events.jsonl")]
 ```
 
-1. **Intake** — validate the URL, clone *inside the sandbox*, and build an inventory of languages, manifests, and structure.
+1. **Intake** — resolve a GitHub URL or local Git worktree root, materialize it *inside the sandbox*, and build an inventory of languages, manifests, and structure. Local paths use Git-filtered snapshots: tracked files plus untracked files that are not ignored by `.gitignore`, `.git/info/exclude`, or global Git excludes.
 2. **Deterministic baseline** — run fast, boring, well-understood scanners (SBOM, vulnerabilities, secrets, CI/IaC linting). A single tool failing never sinks the run.
 3. **Context pack** — distill the repo into compact, neutral facts for the agents — no raw scanner noise, no debug spam.
 4. **Repository map** — agentic "Pi" collectors map the codebase section by section (entrypoints, auth, config & secrets, storage, integrations, operation sinks, data flows, trust boundaries, …). Each fact is **named** and backed by the file it was observed in.
@@ -95,6 +95,8 @@ cp .env.example .env
 
 # 3. Scan a repo
 pnpm scan https://github.com/owner/repo
+# or
+pnpm scan /path/to/local/git-worktree
 ```
 
 A live scan **requires** both keys and will fail clearly if they're missing — it never falls back to cloning an untrusted repo on your host. Results land in a fresh run directory under `runs/`.

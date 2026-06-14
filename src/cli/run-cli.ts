@@ -25,7 +25,7 @@ export interface CliIo {
 export type CliDependencies = Pick<RunScanOptions, "runsRoot" | "sandboxProvider">;
 
 const usage = `Usage:
-  vibeshield scan https://github.com/owner/repo
+  vibeshield scan <github-url-or-local-path>
   vibeshield resume /path/to/run-directory [--from <step>]
 
 Options:
@@ -75,7 +75,7 @@ export async function runCli(
     renderer.event(event);
   };
 
-  const scanOptions: RunScanOptions = { repoUrlInput: target };
+  const scanOptions: RunScanOptions = { sourceInput: target };
   scanOptions.onProgress = onProgress;
   if (dependencies.runsRoot !== undefined) {
     scanOptions.runsRoot = dependencies.runsRoot;

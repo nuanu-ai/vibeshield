@@ -1,8 +1,9 @@
 # Architecture
 
-VibeShield is a local CLI pipeline that accepts a GitHub repository URL and
-returns an inspectable run directory. The current product slice produces repository
-understanding artifacts, not a security verdict.
+VibeShield is a local CLI pipeline that accepts a GitHub repository URL or a
+local Git worktree root and returns an inspectable run directory. The current
+product slice produces repository understanding artifacts, not a security
+verdict.
 
 Repository-map intent and section expectations are defined in
 `docs/repository-map-expectations.md`. Architecture should preserve that product
@@ -12,22 +13,23 @@ boundary: facts-only map first, later threat modeling/manual review second.
 
 Repositories scanned by VibeShield are untrusted input.
 
-The default runtime creates a fresh Daytona sandbox for each scan, clones the
-target repository inside the sandbox, runs scanner and Pi jobs there, pulls only
-expected artifacts back to the local run directory, and deletes the sandbox at
-the end.
+The default runtime creates a fresh Daytona sandbox for each scan, materializes
+the target repository inside the sandbox, runs scanner and Pi jobs there, pulls
+only expected artifacts back to the local run directory, and deletes the sandbox
+at the end.
 
 The local host is responsible for orchestration, artifact storage, reports, and
-tests. It must not clone or execute the scanned repository directly when live
-credentials are available.
+tests. It must not execute the scanned repository directly. For local paths it
+may create a Git-filtered archive on the host, but analysis still runs only
+inside the sandbox.
 
 ## End-To-End Flow
 
 ```text
-vibeshield scan <github-url>
-  -> validate GitHub URL
+vibeshield scan <github-url-or-local-path>
+  -> resolve GitHub URL or local Git worktree root
   -> create fresh Daytona sandbox
-  -> clone repo inside sandbox
+  -> clone repo or copy Git-filtered local snapshot inside sandbox
   -> generate inventory inside sandbox
   -> pull inventory artifact locally
 

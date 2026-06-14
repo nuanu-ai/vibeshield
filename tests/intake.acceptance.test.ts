@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli/run-cli.js";
-import { runScan } from "../src/run/run-scan.js";
+import { runResume, runScan } from "../src/run/run-scan.js";
 import { FakeDaytonaSandboxProvider } from "../src/sandbox/fake-daytona.js";
 
 const execFileAsync = promisify(execFile);
@@ -81,6 +81,53 @@ async function createFixtureGitRepo(): Promise<string> {
   return repoDir;
 }
 
+async function createLocalGitFilteredRepo(): Promise<string> {
+  const repoDir = await createTempRoot("vibeshield-local-fixture-");
+  await mkdir(path.join(repoDir, "src"), { recursive: true });
+  await writeFile(
+    path.join(repoDir, ".gitignore"),
+    [".env", "ignored.txt", "node_modules/", "runs/", ""].join("\n"),
+  );
+  await writeFile(path.join(repoDir, "README.md"), "# Local fixture\n");
+  await writeFile(path.join(repoDir, "src", "app.ts"), "export const marker = 'committed';\n");
+
+  await execFileAsync("git", ["init"], { cwd: repoDir });
+  await execFileAsync("git", ["add", "."], { cwd: repoDir });
+  await execFileAsync(
+    "git",
+    [
+      "-c",
+      "user.name=VibeShield Test",
+      "-c",
+      "user.email=vibeshield@example.test",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "local fixture",
+    ],
+    {
+      cwd: repoDir,
+      env: {
+        ...process.env,
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+      },
+    },
+  );
+
+  await writeFile(path.join(repoDir, "src", "app.ts"), "export const marker = 'modified';\n");
+  await writeFile(path.join(repoDir, "src", "untracked.ts"), "export const extra = true;\n");
+  await mkdir(path.join(repoDir, "node_modules", "package"), { recursive: true });
+  await mkdir(path.join(repoDir, "runs", "run-local"), { recursive: true });
+  await writeFile(path.join(repoDir, ".env"), "SECRET=should-not-copy\n");
+  await writeFile(path.join(repoDir, "ignored.txt"), "ignored\n");
+  await writeFile(path.join(repoDir, "node_modules", "package", "index.js"), "ignored\n");
+  await writeFile(path.join(repoDir, "runs", "run-local", "event.jsonl"), "{}\n");
+
+  return repoDir;
+}
+
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
 }
@@ -136,21 +183,18 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     expect(stderr.join("")).toContain("attack-hypotheses");
   });
 
-  it("rejects unsupported inputs before sandbox creation", async () => {
+  it("rejects unsupported URL and archive inputs before sandbox creation", async () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
     const unsupportedInputs = [
-      "/tmp/local-repo",
-      "../local-repo",
       "repo.zip",
-      "not-a-url",
       "https://gitlab.com/owner/repo",
       "https://github.com/owner/repo/archive/refs/heads/main.zip",
     ];
 
     for (const input of unsupportedInputs) {
       const result = await runScan({
-        repoUrlInput: input,
+        sourceInput: input,
         runsRoot,
         sandboxProvider: provider,
       });
@@ -159,9 +203,30 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
         throw new Error("Unsupported input unexpectedly succeeded.");
       }
       expect(result.runDir).toBeUndefined();
-      expect(result.userMessage).toContain("VibeShield accepts only GitHub repository URLs");
+      expect(result.userMessage).toContain(
+        "VibeShield accepts a GitHub repository URL or a local Git worktree root path",
+      );
     }
 
+    expect(provider.createdSandboxIds).toHaveLength(0);
+  });
+
+  it("rejects non-Git local paths before sandbox creation", async () => {
+    const { provider } = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const nonGitDir = await createTempRoot("vibeshield-non-git-");
+
+    const result = await runScan({
+      runsRoot,
+      sandboxProvider: provider,
+      sourceInput: nonGitDir,
+    });
+
+    if (result.exitCode !== 1) {
+      throw new Error("Non-Git local path unexpectedly succeeded.");
+    }
+    expect(result.runDir).toBeUndefined();
+    expect(result.userMessage).toContain("not inside a Git worktree");
     expect(provider.createdSandboxIds).toHaveLength(0);
   });
 
@@ -224,12 +289,113 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     );
   });
 
+  it("scans a local Git worktree with tracked and untracked non-ignored files only", async () => {
+    const localRepo = await createLocalGitFilteredRepo();
+    const { provider } = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+
+    const result = await runScan({
+      runsRoot,
+      sandboxProvider: provider,
+      sourceInput: localRepo,
+    });
+
+    if (result.exitCode !== 0) {
+      throw new Error(`Local scan unexpectedly failed: ${result.userMessage}`);
+    }
+    const runDir = result.runDir;
+    const run = await readJson<{
+      commit_sha?: string;
+      source: {
+        path: string;
+        snapshot: { files: Array<{ path: string; sha256: string }> };
+        type: string;
+        url: string;
+      };
+    }>(path.join(runDir, "run.json"));
+    const localRepoRealPath = await realpath(localRepo);
+    expect(run.commit_sha).toBeUndefined();
+    expect(run.source).toMatchObject({
+      path: localRepoRealPath,
+      type: "local",
+      url: expect.stringContaining("file://"),
+    });
+
+    const snapshotPaths = run.source.snapshot.files.map((file) => file.path);
+    expect(snapshotPaths).toEqual(
+      expect.arrayContaining([".gitignore", "README.md", "src/app.ts", "src/untracked.ts"]),
+    );
+    expect(snapshotPaths).not.toEqual(
+      expect.arrayContaining([
+        ".env",
+        "ignored.txt",
+        "node_modules/package/index.js",
+        "runs/run-local/event.jsonl",
+      ]),
+    );
+
+    const inventory = await readJson<{
+      files: Array<{ path: string; sha256?: string }>;
+      source: { snapshot?: unknown; type: string; url: string };
+      summary: { manifest_files: string[] };
+    }>(path.join(runDir, "outputs", "inventory.json"));
+    const inventoryPaths = inventory.files.map((file) => file.path);
+    expect(inventory.source).toMatchObject({
+      type: "local",
+      url: run.source.url,
+    });
+    expect(inventory.source.snapshot).toBeUndefined();
+    expect(inventoryPaths).toEqual(
+      expect.arrayContaining([".gitignore", "README.md", "src/app.ts", "src/untracked.ts"]),
+    );
+    expect(inventoryPaths).not.toEqual(
+      expect.arrayContaining([
+        ".env",
+        "ignored.txt",
+        "node_modules/package/index.js",
+        "runs/run-local/event.jsonl",
+      ]),
+    );
+
+    const appFile = inventory.files.find((file) => file.path === "src/app.ts");
+    expect(appFile?.sha256).toBe(
+      "600705ad4c7b25cc0da4e57fd920d8269e1f2e51cd3afdea1bc12d92e557ecd3",
+    );
+  });
+
+  it("refuses to resume a local run when the Git-filtered snapshot changed", async () => {
+    const localRepo = await createLocalGitFilteredRepo();
+    const { provider } = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const result = await runScan({
+      runsRoot,
+      sandboxProvider: provider,
+      sourceInput: localRepo,
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(`Local scan unexpectedly failed: ${result.userMessage}`);
+    }
+
+    await writeFile(path.join(localRepo, "src", "untracked.ts"), "export const extra = false;\n");
+
+    const resume = await runResume({
+      runDir: result.runDir,
+      sandboxProvider: provider,
+    });
+
+    if (resume.exitCode !== 1) {
+      throw new Error("Local resume unexpectedly succeeded.");
+    }
+    expect(resume.userMessage).toContain("snapshot changed");
+    expect(provider.createdSandboxIds).toHaveLength(1);
+  });
+
   it("creates a fresh sandbox per run and keeps the checkout out of local artifacts", async () => {
     const { provider, sandboxRoot } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
-    const first = await runScan({ repoUrlInput: fixtureUrl, runsRoot, sandboxProvider: provider });
-    const second = await runScan({ repoUrlInput: fixtureUrl, runsRoot, sandboxProvider: provider });
+    const first = await runScan({ sourceInput: fixtureUrl, runsRoot, sandboxProvider: provider });
+    const second = await runScan({ sourceInput: fixtureUrl, runsRoot, sandboxProvider: provider });
 
     expect(first.exitCode).toBe(0);
     expect(second.exitCode).toBe(0);
@@ -264,7 +430,7 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
-    const result = await runScan({ repoUrlInput: fixtureUrl, runsRoot, sandboxProvider: provider });
+    const result = await runScan({ sourceInput: fixtureUrl, runsRoot, sandboxProvider: provider });
 
     expect(result.exitCode).toBe(0);
     const commands = provider.sessions.flatMap((session) => session.commands);
@@ -279,7 +445,7 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     const { provider } = await createProvider({ failAt: "inventory" });
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
-    const result = await runScan({ repoUrlInput: fixtureUrl, runsRoot, sandboxProvider: provider });
+    const result = await runScan({ sourceInput: fixtureUrl, runsRoot, sandboxProvider: provider });
 
     expect(result.exitCode).toBe(1);
     expect(result.runDir).toBeDefined();

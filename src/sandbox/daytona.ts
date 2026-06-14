@@ -1,18 +1,22 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { CreateSandboxFromSnapshotParams, DaytonaConfig } from "@daytona/sdk";
 import { CodeLanguage, Daytona } from "@daytona/sdk";
 import type { BaselineToolName } from "../artifacts/contracts.js";
 import { errorMessage, ScanStageError } from "../run/errors.js";
+import { type LocalRepoReference, sourceArtifactReference } from "../run/github-url.js";
 import type { SandboxCleanupState } from "../run/types.js";
 import { buildDaytonaInventoryScript } from "./daytona-inventory-script.js";
 import type {
-  CloneRepositoryOptions,
-  CloneRepositoryResult,
   CollectDiagnosticsInput,
   CollectDiagnosticsResult,
   GenerateInventoryInput,
+  MaterializeRepositoryOptions,
+  MaterializeRepositoryResult,
   PrepareBaselineToolsInput,
   PrepareBaselineToolsResult,
   PullFileContext,
@@ -36,6 +40,7 @@ export interface DaytonaExecuteResponse {
 export interface DaytonaSandboxLike {
   readonly fs: {
     downloadFile(remotePath: string, localPath: string, timeout?: number): Promise<void>;
+    uploadFile(localPath: string, remotePath: string, timeout?: number): Promise<void>;
   };
   readonly git: {
     clone(
@@ -133,6 +138,7 @@ export interface DaytonaSandboxProviderOptions {
 const defaultRepoPath = "repo";
 const defaultArtifactDir = "vibeshield/artifacts";
 const defaultArtifactPath = "vibeshield/artifacts/inventory.json";
+const execFileAsync = promisify(execFile);
 
 export class DaytonaSandboxProvider implements SandboxProvider {
   private client?: DaytonaClientLike;
@@ -141,6 +147,15 @@ export class DaytonaSandboxProvider implements SandboxProvider {
 
   async createSandbox(context: SandboxCreateContext): Promise<SandboxSession> {
     const client = this.getClient();
+    const sourceLabels =
+      context.repo.type === "github"
+        ? {
+            source_owner: context.repo.owner,
+            source_repo: context.repo.repo,
+          }
+        : {
+            source_name: context.repo.name,
+          };
     const sandbox = await client
       .create(
         {
@@ -149,9 +164,8 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           labels: {
             app: "vibeshield",
             run_id: context.runId,
-            source: "github",
-            source_owner: context.repo.owner,
-            source_repo: context.repo.repo,
+            source: context.repo.type,
+            ...sourceLabels,
             workflow: "repository-map",
           },
           language: CodeLanguage.TYPESCRIPT,
@@ -297,10 +311,14 @@ export class DaytonaSandboxSession implements SandboxSession {
     }
   }
 
-  async cloneRepository(
-    repo: { url: string },
-    options: CloneRepositoryOptions = {},
-  ): Promise<CloneRepositoryResult> {
+  async materializeRepository(
+    repo: { type: "github"; url: string } | LocalRepoReference,
+    options: MaterializeRepositoryOptions = {},
+  ): Promise<MaterializeRepositoryResult> {
+    if (repo.type === "local") {
+      return this.uploadLocalRepository(repo);
+    }
+
     await this.sandbox.git.clone(repo.url, this.options.repoPath).catch((error: unknown) => {
       throw new ScanStageError({
         cause: error,
@@ -354,6 +372,102 @@ export class DaytonaSandboxSession implements SandboxSession {
     };
   }
 
+  private async uploadLocalRepository(
+    repo: LocalRepoReference,
+  ): Promise<MaterializeRepositoryResult> {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "vibeshield-local-source-"));
+    const archivePath = path.join(tempDir, "source.tar.gz");
+    const fileListPath = path.join(tempDir, "files.txt");
+    const remoteSourceDir = `${this.options.sandboxArtifactDir}/source`;
+    const remoteArchivePath = `${remoteSourceDir}/local-repository.tar.gz`;
+
+    try {
+      await writeFile(
+        fileListPath,
+        repo.snapshot.files.length === 0
+          ? ""
+          : `${repo.snapshot.files.map((file) => file.path).join("\0")}\0`,
+        "utf8",
+      );
+      await execFileAsync("tar", [
+        "-czf",
+        archivePath,
+        "-C",
+        repo.path,
+        "--null",
+        "-T",
+        fileListPath,
+      ]).catch((error: unknown) => {
+        throw new ScanStageError({
+          cause: error,
+          message: errorMessage(error),
+          stage: "clone",
+          userMessage: `Could not create local repository snapshot archive: ${errorMessage(error)}`,
+        });
+      });
+
+      const prepareResponse = await this.sandbox.process
+        .executeCommand(
+          `rm -rf ${shellQuote(this.options.repoPath)} && mkdir -p ${shellQuote(
+            this.options.repoPath,
+          )} ${shellQuote(remoteSourceDir)}`,
+          undefined,
+          {},
+          this.options.commandTimeoutSeconds,
+        )
+        .catch((error: unknown) => {
+          throw new ScanStageError({
+            cause: error,
+            message: errorMessage(error),
+            stage: "clone",
+            userMessage: `Could not prepare sandbox for local repository upload: ${errorMessage(
+              error,
+            )}`,
+          });
+        });
+      assertSandboxCommandSucceeded(prepareResponse, "clone", "prepare local repository upload");
+
+      await this.sandbox.fs
+        .uploadFile(archivePath, remoteArchivePath, this.options.downloadTimeoutSeconds)
+        .catch((error: unknown) => {
+          throw new ScanStageError({
+            cause: error,
+            message: errorMessage(error),
+            stage: "clone",
+            userMessage: `Could not upload local repository snapshot to Daytona: ${errorMessage(
+              error,
+            )}`,
+          });
+        });
+
+      const extractResponse = await this.sandbox.process
+        .executeCommand(
+          `tar -xzf ${shellQuote(remoteArchivePath)} -C ${shellQuote(this.options.repoPath)}`,
+          undefined,
+          {},
+          this.options.commandTimeoutSeconds,
+        )
+        .catch((error: unknown) => {
+          throw new ScanStageError({
+            cause: error,
+            message: errorMessage(error),
+            stage: "clone",
+            userMessage: `Could not extract local repository snapshot inside Daytona: ${errorMessage(
+              error,
+            )}`,
+          });
+        });
+      assertSandboxCommandSucceeded(extractResponse, "clone", "extract local repository snapshot");
+
+      return {
+        commitSha: null,
+        repoPath: this.options.repoPath,
+      };
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  }
+
   async generateInventory(input: GenerateInventoryInput): Promise<SandboxArtifact> {
     const script = buildDaytonaInventoryScript({
       artifactPath: this.options.sandboxArtifactPath,
@@ -361,7 +475,7 @@ export class DaytonaSandboxSession implements SandboxSession {
       generatedAt: input.generatedAt,
       repoRoot: this.options.repoPath,
       sandboxId: this.id,
-      source: input.repo,
+      source: sourceArtifactReference(input.repo),
     });
 
     const response = await this.sandbox.process
@@ -737,6 +851,10 @@ function assertSandboxCommandSucceeded(
 
 function readCommandStdout(response: DaytonaExecuteResponse): string {
   return response.artifacts?.stdout ?? response.result ?? "";
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function parseJsonObjectFromText(text: string): unknown {

@@ -3,27 +3,27 @@ import type {
   BaselineToolName,
   ToolAvailabilityArtifact,
 } from "../artifacts/contracts.js";
-import type { GitHubRepoReference } from "../run/github-url.js";
+import type { SourceReference } from "../run/github-url.js";
 import type { RunStage, SandboxCleanupState } from "../run/types.js";
 
 export interface SandboxCreateContext {
-  repo: GitHubRepoReference;
+  repo: SourceReference;
   runId: string;
 }
 
-export interface CloneRepositoryResult {
+export interface MaterializeRepositoryResult {
   commitSha: string | null;
   repoPath: string;
 }
 
-export interface CloneRepositoryOptions {
+export interface MaterializeRepositoryOptions {
   commitSha?: string;
 }
 
 export interface GenerateInventoryInput {
   commitSha: string | null;
   generatedAt: string;
-  repo: GitHubRepoReference;
+  repo: SourceReference;
 }
 
 export interface SandboxArtifact {
@@ -131,13 +131,13 @@ export interface SandboxCommandLogEntry {
 export interface SandboxSession {
   readonly id: string;
   readonly providerName: string;
-  cloneRepository(
-    repo: GitHubRepoReference,
-    options?: CloneRepositoryOptions,
-  ): Promise<CloneRepositoryResult>;
   collectDiagnostics?(input: CollectDiagnosticsInput): Promise<CollectDiagnosticsResult>;
   delete(): Promise<SandboxCleanupState>;
   generateInventory(input: GenerateInventoryInput): Promise<SandboxArtifact>;
+  materializeRepository(
+    repo: SourceReference,
+    options?: MaterializeRepositoryOptions,
+  ): Promise<MaterializeRepositoryResult>;
   prepareBaselineTools(input: PrepareBaselineToolsInput): Promise<PrepareBaselineToolsResult>;
   pullFile(sandboxPath: string, localPath: string, context?: PullFileContext): Promise<void>;
   runJob(input: RuntimeJobInput): Promise<RuntimeJobResult>;

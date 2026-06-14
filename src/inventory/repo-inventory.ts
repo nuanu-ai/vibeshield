@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
-import type { GitHubRepoReference } from "../run/github-url.js";
+import type { ArtifactSourceReference } from "../run/github-url.js";
 
 export interface RepoInventoryFile {
   line_count?: number;
@@ -23,7 +23,7 @@ export interface RepoInventory {
     id: string;
     inventory_location: "inside_sandbox";
   };
-  source: GitHubRepoReference & {
+  source: ArtifactSourceReference & {
     commit_sha: string | null;
   };
   summary: {
@@ -58,7 +58,7 @@ export async function buildRepoInventory(input: {
   generatedAt: string;
   repoRoot: string;
   sandboxId: string;
-  source: GitHubRepoReference;
+  source: ArtifactSourceReference;
 }): Promise<RepoInventory> {
   const directories: RepoInventoryDirectory[] = [];
   const files: RepoInventoryFile[] = [];

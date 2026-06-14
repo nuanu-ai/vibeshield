@@ -1,4 +1,4 @@
-import type { GitHubRepoReference } from "../run/github-url.js";
+import type { ArtifactSourceReference } from "../run/github-url.js";
 
 export interface DaytonaInventoryScriptInput {
   artifactPath: string;
@@ -6,7 +6,7 @@ export interface DaytonaInventoryScriptInput {
   generatedAt: string;
   repoRoot: string;
   sandboxId: string;
-  source: GitHubRepoReference;
+  source: ArtifactSourceReference;
 }
 
 export function buildDaytonaInventoryScript(input: DaytonaInventoryScriptInput): string {

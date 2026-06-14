@@ -1,4 +1,4 @@
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,7 +23,7 @@ const repo = {
 const tempFiles: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(tempFiles.splice(0).map((file) => rm(file, { force: true })));
+  await Promise.all(tempFiles.splice(0).map((file) => rm(file, { force: true, recursive: true })));
 });
 
 describe("Daytona production adapter boundary", () => {
@@ -78,7 +78,7 @@ describe("Daytona production adapter boundary", () => {
     });
 
     const session = await provider.createSandbox({ repo, runId: "run_test_123" });
-    const cloneResult = await session.cloneRepository(repo);
+    const cloneResult = await session.materializeRepository(repo);
     const inventory = await session.generateInventory({
       commitSha: cloneResult.commitSha,
       generatedAt: "2026-06-12T00:00:00.000Z",
@@ -140,6 +140,70 @@ describe("Daytona production adapter boundary", () => {
     ]);
     expect(await readFile(localArtifactPath, "utf8")).toBe("{}\n");
     expect(sandbox.deleteCalls).toEqual([{ timeout: 13 }]);
+  });
+
+  it("uploads a Git-filtered local source archive instead of calling SDK git clone", async () => {
+    const localRoot = await mkdtemp(path.join(tmpdir(), "vibeshield-local-source-"));
+    tempFiles.push(localRoot);
+    await mkdir(path.join(localRoot, "src"), { recursive: true });
+    await writeFile(path.join(localRoot, "README.md"), "# Local\n", "utf8");
+    await writeFile(path.join(localRoot, "src", "app.ts"), "export const local = true;\n", "utf8");
+
+    const sandbox = new MockDaytonaSandbox();
+    const provider = new DaytonaSandboxProvider({
+      client: new MockDaytonaClient(sandbox),
+      commandTimeoutSeconds: 7,
+      downloadTimeoutSeconds: 17,
+    });
+    const source = {
+      name: "local-source",
+      path: localRoot,
+      snapshot: {
+        file_count: 2,
+        files: [
+          {
+            path: "README.md",
+            sha256: "readme",
+            size_bytes: 8,
+            type: "file" as const,
+          },
+          {
+            path: "src/app.ts",
+            sha256: "app",
+            size_bytes: 27,
+            type: "file" as const,
+          },
+        ],
+        head_sha: null,
+        total_file_bytes: 35,
+      },
+      type: "local" as const,
+      url: `file://${localRoot}`,
+    };
+
+    const session = await provider.createSandbox({ repo: source, runId: "run_test_local_123" });
+    const result = await session.materializeRepository(source);
+
+    expect(result).toEqual({ commitSha: null, repoPath: "repo" });
+    expect(sandbox.gitCloneCalls).toEqual([]);
+    expect(sandbox.uploadFileCalls).toEqual([
+      {
+        remotePath: "vibeshield/artifacts/source/local-repository.tar.gz",
+        timeout: 17,
+      },
+    ]);
+    expect(sandbox.executeCommandCalls).toEqual([
+      expect.objectContaining({
+        command: expect.stringContaining("mkdir -p 'repo'"),
+        timeout: 7,
+      }),
+      expect.objectContaining({
+        command: expect.stringContaining(
+          "tar -xzf 'vibeshield/artifacts/source/local-repository.tar.gz' -C 'repo'",
+        ),
+        timeout: 7,
+      }),
+    ]);
   });
 
   it("attributes artifact pull failures to the caller stage and artifact context", async () => {
@@ -257,6 +321,7 @@ class MockDaytonaSandbox implements DaytonaSandboxLike {
   }> = [];
   readonly gitCloneCalls: Array<{ path: string; url: string }> = [];
   readonly codeRunCalls: Array<{ code: string; timeout?: number }> = [];
+  readonly uploadFileCalls: Array<{ remotePath: string; timeout?: number }> = [];
   readonly id = "daytona-sandbox-123";
   downloadFailure?: Error;
 
@@ -276,6 +341,13 @@ class MockDaytonaSandbox implements DaytonaSandboxLike {
       await import("node:fs/promises").then(({ writeFile }) =>
         writeFile(localPath, "{}\n", "utf8"),
       );
+    },
+    uploadFile: async (_localPath: string, remotePath: string, timeout?: number) => {
+      const call: { remotePath: string; timeout?: number } = { remotePath };
+      if (timeout !== undefined) {
+        call.timeout = timeout;
+      }
+      this.uploadFileCalls.push(call);
     },
   };
 

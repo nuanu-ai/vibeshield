@@ -11,10 +11,10 @@ VibeShield is an early-stage security audit pipeline for AI-generated and
 beginner-built web projects.
 
 The current product slice focuses on proving the detection core through a local CLI
-pipeline that accepts a GitHub repository URL:
+pipeline that accepts a GitHub repository URL or local Git worktree root:
 
 ```bash
-vibeshield scan https://github.com/owner/repo
+vibeshield scan <github-url-or-local-path>
 ```
 
 Primary orientation:
@@ -55,6 +55,8 @@ debug from files on disk.
 - Preserve existing user changes and avoid broad refactors while doing focused
   work.
 - Treat repositories being analyzed by VibeShield as untrusted input.
+- For local path scans, require a Git worktree root and use Git-filtered
+  snapshots; do not add a non-Git directory fallback.
 - Do not add legacy paths, fallbacks, migrations, or backward compatibility for
   old runs/contracts unless the user explicitly asks for it.
 
@@ -75,7 +77,7 @@ Project tooling:
 - lint: `pnpm lint`;
 - typecheck: `pnpm typecheck`;
 - test: `pnpm test`;
-- run the local CLI in dev: `pnpm scan https://github.com/owner/repo`;
+- run the local CLI in dev: `pnpm scan <github-url-or-local-path>`;
 - resume a failed run from durable artifacts: `pnpm resume /path/to/run-directory`;
 - run the live Daytona smoke scan:
   `pnpm smoke:daytona https://github.com/octocat/Hello-World`;

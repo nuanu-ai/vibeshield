@@ -18,7 +18,7 @@ if (missingEnvVars.length > 0) {
   process.exitCode = 2;
 } else {
   const repoUrl = process.argv[2] ?? "https://github.com/octocat/Hello-World";
-  const result = await runScan({ repoUrlInput: repoUrl });
+  const result = await runScan({ sourceInput: repoUrl });
 
   if (result.exitCode === 0) {
     console.log(`Live Daytona smoke scan succeeded. Run directory: ${result.runDir}`);

@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  readlink,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type {
@@ -12,14 +21,15 @@ import type {
 } from "../artifacts/contracts.js";
 import { buildRepoInventory } from "../inventory/repo-inventory.js";
 import { ScanStageError } from "../run/errors.js";
+import { type SourceReference, sourceArtifactReference } from "../run/github-url.js";
 import { redactDeep } from "../run/redaction.js";
 import type { SandboxCleanupState } from "../run/types.js";
 import type {
-  CloneRepositoryOptions,
-  CloneRepositoryResult,
   CollectDiagnosticsInput,
   CollectDiagnosticsResult,
   GenerateInventoryInput,
+  MaterializeRepositoryOptions,
+  MaterializeRepositoryResult,
   PrepareBaselineToolsInput,
   PrepareBaselineToolsResult,
   PullFileContext,
@@ -81,8 +91,8 @@ export class FakeDaytonaSandboxProvider implements SandboxProvider {
       fixtureRepos: this.options.fixtureRepos,
       id,
       piOutputs: this.options.piOutputs ?? {},
-      repoUrl: context.repo.url,
       sandboxDir,
+      source: context.repo,
       unavailableTools: this.options.unavailableTools ?? [],
       removeLiveSandboxId: () => {
         const index = this.liveSandboxIds.indexOf(id);
@@ -173,10 +183,10 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
     };
   }
 
-  async cloneRepository(
-    _repo?: unknown,
-    options: CloneRepositoryOptions = {},
-  ): Promise<CloneRepositoryResult> {
+  async materializeRepository(
+    _repo?: SourceReference,
+    options: MaterializeRepositoryOptions = {},
+  ): Promise<MaterializeRepositoryResult> {
     this.commands.push({
       command: "git clone --no-local <fixture-repo> <sandbox-repo>",
       cwd: this.options.sandboxDir,
@@ -192,10 +202,24 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       });
     }
 
-    const fixtureRepo = this.options.fixtureRepos.get(this.options.repoUrl);
+    if (this.options.source.type === "local") {
+      this.commands[this.commands.length - 1] = {
+        command: "vibeshield-local-snapshot <git-filtered-files> <sandbox-repo>",
+        cwd: this.options.sandboxDir,
+        repoDefinedCommand: false,
+        stage: "clone",
+      };
+      await copyLocalSnapshotToSandbox(this.options.source, this.repoPath);
+      return {
+        commitSha: null,
+        repoPath: this.repoPath,
+      };
+    }
+
+    const fixtureRepo = this.options.fixtureRepos.get(this.options.source.url);
     if (fixtureRepo === undefined) {
       throw new ScanStageError({
-        message: `No fake fixture repo is mapped for ${this.options.repoUrl}.`,
+        message: `No fake fixture repo is mapped for ${this.options.source.url}.`,
         stage: "clone",
         userMessage: "No fake fixture repository is configured for this GitHub URL.",
       });
@@ -255,7 +279,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       generatedAt: input.generatedAt,
       repoRoot: this.repoPath,
       sandboxId: this.id,
-      source: input.repo,
+      source: sourceArtifactReference(input.repo),
     });
     const artifactPath = path.join(this.artifactsDir, "inventory.json");
     await writeFile(artifactPath, `${JSON.stringify(inventory, null, 2)}\n`, "utf8");
@@ -596,9 +620,37 @@ interface FakeDaytonaSandboxSessionOptions {
   id: string;
   piOutputs: Partial<Record<string, FakePiOutput>>;
   removeLiveSandboxId: () => void;
-  repoUrl: string;
   sandboxDir: string;
+  source: SourceReference;
   unavailableTools: BaselineToolName[];
+}
+
+async function copyLocalSnapshotToSandbox(
+  source: Extract<SourceReference, { type: "local" }>,
+  repoPath: string,
+): Promise<void> {
+  await rm(repoPath, { force: true, recursive: true });
+  await mkdir(repoPath, { recursive: true });
+
+  for (const file of source.snapshot.files) {
+    const from = path.join(source.path, ...file.path.split("/"));
+    const to = path.join(repoPath, ...file.path.split("/"));
+    const stats = await lstat(from).catch(() => undefined);
+    if (stats === undefined || stats.isDirectory()) {
+      continue;
+    }
+
+    await mkdir(path.dirname(to), { recursive: true });
+    if (stats.isSymbolicLink()) {
+      const target = await readlink(from);
+      await symlink(target, to);
+      continue;
+    }
+
+    if (stats.isFile()) {
+      await copyFile(from, to);
+    }
+  }
 }
 
 async function listRepoFiles(repoPath: string): Promise<string[]> {

@@ -1,4 +1,4 @@
-import type { GitHubRepoReference } from "../run/github-url.js";
+import type { ArtifactSourceReference } from "../run/github-url.js";
 
 export type ArtifactKind =
   | "attack-hypotheses"
@@ -45,7 +45,7 @@ export interface InventoryArtifact {
     id: string;
     inventory_location: "inside_sandbox";
   };
-  source: GitHubRepoReference & {
+  source: ArtifactSourceReference & {
     commit_sha: string | null;
   };
   summary: {
