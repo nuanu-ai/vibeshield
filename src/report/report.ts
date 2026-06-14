@@ -520,19 +520,20 @@ function renderPdf(doc: PDFKit.PDFDocument, model: FinalReportModel): void {
     });
   }
 
-  drawSectionTitle(doc, "Issues to fix", 120);
-  drawCardGroups(
+  drawCardSection(
     doc,
+    "Issues to fix",
     model.confirmedGroups,
     "No issues were confirmed by the automated scanners. That isn't a clean bill of health — also read the leads below.",
   );
 
-  drawSectionTitle(doc, "Leads to check", 150);
-  drawMutedLine(
+  drawCardSection(
     doc,
+    "Leads to check",
+    model.leadGroups,
+    "The AI review didn't flag any leads worth checking.",
     "These are unconfirmed — possible problems for you to verify, not proven bugs.",
   );
-  drawCardGroups(doc, model.leadGroups, "The AI review didn't flag any leads worth checking.");
 
   if (model.limitations.length > 0) {
     drawSectionTitle(doc, "What we couldn't fully check", 80);
@@ -644,85 +645,219 @@ function drawCardGroups(
     return;
   }
   for (const group of groups) {
-    drawGroupLabel(doc, group.label, group.color, group.cards.length, 150);
-    for (const card of group.cards) {
-      drawCard(doc, card, group.label);
-    }
+    const firstCard = group.cards[0];
+    const firstHeight =
+      firstCard === undefined
+        ? 0
+        : Math.min(cardLayout(doc, firstCard).height, pageContentHeight(doc));
+    ensureSpace(doc, 52 + firstHeight);
+    drawGroupLabel(doc, group.label, group.color, group.cards.length);
+    group.cards.forEach((card, index) => {
+      drawCard(doc, card, group.label, index === 0);
+    });
   }
 }
 
-function drawCard(doc: PDFKit.PDFDocument, card: ReportCard, groupLabel: string): void {
+const cardLabelWidth = 88;
+
+const cardGaps = {
+  end: 14,
+  fact: 7,
+  meta: 4,
+  pillRow: 28,
+  prompt: 11,
+  promptLabel: 12,
+  why: 7,
+};
+
+interface CardLayout {
+  factHeights: number[];
+  height: number;
+  meta: string;
+  metaH: number;
+  promptTextH: number;
+  titleH: number;
+  whyH: number;
+}
+
+function cardLayout(doc: PDFKit.PDFDocument, card: ReportCard): CardLayout {
+  const bodyWidth = pageWidth(doc) - 14;
+  const valueWidth = bodyWidth - cardLabelWidth;
+
+  doc.font("Helvetica-Bold").fontSize(12);
+  const titleH = doc.heightOfString(card.title, { lineGap: 2, width: bodyWidth });
+
+  const meta = [card.category, card.confidenceNote].filter((entry) => entry !== "").join("  ·  ");
+  let metaH = 0;
+  if (meta !== "") {
+    doc.font("Helvetica").fontSize(8);
+    metaH = doc.heightOfString(meta, { width: bodyWidth });
+  }
+
+  let whyH = 0;
+  if (card.why !== "") {
+    doc.font("Helvetica").fontSize(9.5);
+    whyH = doc.heightOfString(card.why, { lineGap: 1.5, width: bodyWidth });
+  }
+
+  const factHeights = card.facts.map((fact) => {
+    doc.font("Helvetica").fontSize(9);
+    const valueH = doc.heightOfString(fact.value, { lineGap: 1.5, width: valueWidth });
+    doc.font("Helvetica-Bold").fontSize(7.5);
+    const labelH = doc.heightOfString(fact.label.toUpperCase(), { width: cardLabelWidth - 8 });
+    return Math.max(14, valueH, labelH);
+  });
+
+  let promptTextH = 0;
+  if (card.agentPrompt.trim() !== "") {
+    doc.font("Courier").fontSize(8.5);
+    promptTextH = doc.heightOfString(card.agentPrompt, { lineGap: 1.5, width: bodyWidth - 24 });
+  }
+
+  let height = cardGaps.pillRow + titleH;
+  if (metaH > 0) {
+    height += cardGaps.meta + metaH;
+  }
+  if (whyH > 0) {
+    height += cardGaps.why + whyH;
+  }
+  for (const factHeight of factHeights) {
+    height += cardGaps.fact + factHeight;
+  }
+  if (promptTextH > 0) {
+    height += cardGaps.prompt + cardGaps.promptLabel + promptTextH + 18;
+  }
+  height += cardGaps.end;
+
+  return { factHeights, height, meta, metaH, promptTextH, titleH, whyH };
+}
+
+function drawCardSection(
+  doc: PDFKit.PDFDocument,
+  title: string,
+  groups: ReportCardGroup[],
+  emptyText: string,
+  intro?: string,
+): void {
+  let keep = 58;
+  if (intro !== undefined) {
+    keep += 26;
+  }
+  const firstCard = groups[0]?.cards[0];
+  keep +=
+    firstCard === undefined
+      ? 28
+      : 52 + Math.min(cardLayout(doc, firstCard).height, pageContentHeight(doc));
+  drawSectionTitle(doc, title, keep);
+  if (intro !== undefined) {
+    drawMutedLine(doc, intro);
+  }
+  drawCardGroups(doc, groups, emptyText);
+}
+
+function drawCard(
+  doc: PDFKit.PDFDocument,
+  card: ReportCard,
+  groupLabel: string,
+  keptWithLabel = false,
+): void {
+  const layout = cardLayout(doc, card);
+  if (
+    !keptWithLabel &&
+    doc.y + layout.height > pageBottom(doc) &&
+    layout.height <= pageContentHeight(doc)
+  ) {
+    doc.addPage();
+  }
+
   const x = doc.page.margins.left;
-  const width = pageWidth(doc);
-  ensureSpace(doc, 130);
-  const y = doc.y;
-  doc.circle(x + 4, y + 8, 4).fill(card.color);
-  drawPill(doc, groupLabel, card.color, x + 14, y);
+  const bodyX = x + 14;
+  const bodyWidth = pageWidth(doc) - 14;
+  let cy = doc.y;
+
+  doc.circle(x + 4, cy + 8, 4).fill(card.color);
+  drawPill(doc, groupLabel, card.color, bodyX, cy);
   drawPill(
     doc,
     card.confirmed ? "Confirmed" : "Unconfirmed",
     card.confirmed ? colors.low : colors.unknown,
-    x + 14 + 96,
-    y,
+    bodyX + 96,
+    cy,
   );
+  cy += cardGaps.pillRow;
+
   doc
     .fillColor(colors.ink)
     .font("Helvetica-Bold")
     .fontSize(12)
-    .text(card.title, x + 14, y + 24, { lineGap: 2, width: width - 14 });
-  const meta = [card.category, card.confidenceNote].filter((entry) => entry !== "").join("  ·  ");
-  if (meta !== "") {
+    .text(card.title, bodyX, cy, { lineGap: 2, width: bodyWidth });
+  cy += layout.titleH;
+
+  if (layout.metaH > 0) {
+    cy += cardGaps.meta;
     doc
       .fillColor(colors.muted)
       .font("Helvetica")
       .fontSize(8)
-      .text(meta, x + 14, doc.y + 2, { width: width - 14 });
+      .text(layout.meta, bodyX, cy, { width: bodyWidth });
+    cy += layout.metaH;
   }
-  if (card.why !== "") {
+
+  if (layout.whyH > 0) {
+    cy += cardGaps.why;
     doc
       .fillColor(colors.ink)
       .font("Helvetica")
       .fontSize(9.5)
-      .text(card.why, x + 14, doc.y + 4, { lineGap: 1.5, width: width - 14 });
+      .text(card.why, bodyX, cy, { lineGap: 1.5, width: bodyWidth });
+    cy += layout.whyH;
   }
-  for (const fact of card.facts) {
-    drawFactLine(doc, fact.label, fact.value);
+
+  const valueX = bodyX + cardLabelWidth;
+  const valueWidth = bodyWidth - cardLabelWidth;
+  card.facts.forEach((fact, index) => {
+    cy += cardGaps.fact;
+    doc
+      .fillColor(colors.muted)
+      .font("Helvetica-Bold")
+      .fontSize(7.5)
+      .text(fact.label.toUpperCase(), bodyX, cy, { width: cardLabelWidth - 8 });
+    doc
+      .fillColor(colors.ink)
+      .font("Helvetica")
+      .fontSize(9)
+      .text(fact.value, valueX, cy, { lineGap: 1.5, width: valueWidth });
+    cy += layout.factHeights[index] ?? 14;
+  });
+
+  if (layout.promptTextH > 0) {
+    cy += cardGaps.prompt;
+    doc
+      .fillColor(colors.muted)
+      .font("Helvetica-Bold")
+      .fontSize(7)
+      .text("PASTE THIS TO YOUR AI AGENT", bodyX, cy);
+    cy += cardGaps.promptLabel;
+    const boxHeight = layout.promptTextH + 18;
+    doc
+      .roundedRect(bodyX, cy, bodyWidth, boxHeight, 8)
+      .fillAndStroke(colors.background, colors.border);
+    doc
+      .fillColor(colors.ink)
+      .font("Courier")
+      .fontSize(8.5)
+      .text(card.agentPrompt, bodyX + 12, cy + 9, { lineGap: 1.5, width: bodyWidth - 24 });
+    cy += boxHeight;
   }
-  drawPromptBlock(doc, card.agentPrompt);
+
+  cy += 7;
   doc
-    .moveTo(x + 14, doc.y + 4)
-    .lineTo(doc.page.width - doc.page.margins.right, doc.y + 4)
+    .moveTo(bodyX, cy)
+    .lineTo(doc.page.width - doc.page.margins.right, cy)
     .strokeColor(colors.border)
     .lineWidth(0.5)
     .stroke();
-  doc.y += 14;
-}
-
-function drawPromptBlock(doc: PDFKit.PDFDocument, prompt: string): void {
-  if (prompt.trim() === "") {
-    return;
-  }
-  const x = doc.page.margins.left + 14;
-  const width = pageWidth(doc) - 14;
-  const innerWidth = width - 24;
-  doc.font("Courier").fontSize(8.5);
-  const textHeight = doc.heightOfString(prompt, { lineGap: 1.5, width: innerWidth });
-  const boxHeight = textHeight + 18;
-  ensureSpace(doc, boxHeight + 18);
-  const labelY = doc.y + 4;
-  doc
-    .fillColor(colors.muted)
-    .font("Helvetica-Bold")
-    .fontSize(7)
-    .text("PASTE THIS TO YOUR AI AGENT", x, labelY);
-  const boxY = labelY + 12;
-  doc.roundedRect(x, boxY, width, boxHeight, 8).fillAndStroke(colors.background, colors.border);
-  doc
-    .fillColor(colors.ink)
-    .font("Courier")
-    .fontSize(8.5)
-    .text(prompt, x + 12, boxY + 9, { lineGap: 1.5, width: innerWidth });
-  doc.y = boxY + boxHeight + 6;
+  doc.y = cy + 7;
 }
 
 function drawSectionTitle(doc: PDFKit.PDFDocument, title: string, keepWithNext = 80): void {
@@ -761,9 +896,7 @@ function drawGroupLabel(
   label: string,
   color: string,
   count: number,
-  keepWithNext: number,
 ): void {
-  ensureSpace(doc, keepWithNext);
   const text = `${label}  ${count}`;
   const width = Math.max(88, doc.widthOfString(text) + 26);
   doc.roundedRect(doc.page.margins.left, doc.y, width, 22, 11).fill(color);
@@ -771,8 +904,8 @@ function drawGroupLabel(
     .fillColor("#FFFFFF")
     .font("Helvetica-Bold")
     .fontSize(9)
-    .text(text.toUpperCase(), doc.page.margins.left + 13, doc.y + 6);
-  doc.y += 34;
+    .text(text.toUpperCase(), doc.page.margins.left + 13, doc.y + 7);
+  doc.y += 30;
 }
 
 function drawMutedLine(doc: PDFKit.PDFDocument, text: string): void {
@@ -798,29 +931,6 @@ function drawPill(
   doc.fillColor("#FFFFFF").text(text.toUpperCase(), x + 10, y + 5, { width: width - 20 });
 }
 
-function drawFactLine(doc: PDFKit.PDFDocument, label: string, value: string): void {
-  if (value.trim() === "") {
-    return;
-  }
-  const x = doc.page.margins.left + 14;
-  const labelWidth = 88;
-  const valueX = x + labelWidth;
-  const width = pageWidth(doc) - 14 - labelWidth;
-  const height = Math.max(16, doc.heightOfString(value, { lineGap: 1.5, width }) + 2);
-  ensureSpace(doc, height + 4);
-  const y = doc.y + 4;
-  doc
-    .fillColor(colors.muted)
-    .font("Helvetica-Bold")
-    .fontSize(7.5)
-    .text(label.toUpperCase(), x, y, { width: labelWidth - 8 });
-  doc.fillColor(colors.ink).font("Helvetica").fontSize(9).text(value, valueX, y, {
-    lineGap: 1.5,
-    width,
-  });
-  doc.y = y + height;
-}
-
 function drawFooter(doc: PDFKit.PDFDocument, model: FinalReportModel): void {
   drawSectionTitle(doc, "Run details", 80);
   drawKeyValue(doc, "Repository", model.repo.url);
@@ -842,9 +952,17 @@ function drawKeyValue(doc: PDFKit.PDFDocument, key: string, value: string): void
 }
 
 function ensureSpace(doc: PDFKit.PDFDocument, height: number): void {
-  if (doc.y + height > doc.page.height - doc.page.margins.bottom - 8) {
+  if (doc.y + height > pageBottom(doc)) {
     doc.addPage();
   }
+}
+
+function pageBottom(doc: PDFKit.PDFDocument): number {
+  return doc.page.height - doc.page.margins.bottom - 8;
+}
+
+function pageContentHeight(doc: PDFKit.PDFDocument): number {
+  return pageBottom(doc) - doc.page.margins.top;
 }
 
 function pageWidth(doc: PDFKit.PDFDocument): number {
