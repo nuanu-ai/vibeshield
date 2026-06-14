@@ -365,22 +365,44 @@ function isLowSignalPath(normalizedPath: string): boolean {
   return /(^|\/)(\.git|coverage|dist|build|node_modules|vendor)\//.test(normalizedPath);
 }
 
+const lockFileBasenames = new Set([
+  "bun.lock",
+  "bun.lockb",
+  "cargo.lock",
+  "composer.lock",
+  "flake.lock",
+  "gemfile.lock",
+  "go.sum",
+  "gradle.lockfile",
+  "mix.lock",
+  "npm-shrinkwrap.json",
+  "package-lock.json",
+  "packages.lock.json",
+  "pdm.lock",
+  "pipfile.lock",
+  "pnpm-lock.yaml",
+  "poetry.lock",
+  "uv.lock",
+  "yarn.lock",
+]);
+
+const manifestBasenames = new Set([
+  "build.gradle",
+  "build.gradle.kts",
+  "cargo.toml",
+  "composer.json",
+  "gemfile",
+  "go.mod",
+  "package.json",
+  "pipfile",
+  "pom.xml",
+  "pyproject.toml",
+  "requirements.txt",
+]);
+
 function isManifestOrLockCandidate(filePath: string): boolean {
   const basename = filePath.split("/").at(-1)?.toLowerCase() ?? filePath.toLowerCase();
-  return (
-    basename.includes("lock") ||
-    basename.endsWith(".lock") ||
-    basename === "package.json" ||
-    basename === "composer.json" ||
-    basename === "pyproject.toml" ||
-    basename === "requirements.txt" ||
-    basename === "go.mod" ||
-    basename === "cargo.toml" ||
-    basename === "pom.xml" ||
-    basename === "build.gradle" ||
-    basename === "build.gradle.kts" ||
-    basename === "gemfile"
-  );
+  return lockFileBasenames.has(basename) || manifestBasenames.has(basename);
 }
 
 function uniqueSorted(values: string[]): string[] {
