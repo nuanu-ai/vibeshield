@@ -90,6 +90,10 @@ function formatProgressLine(event: RunEvent, piState: PiProgressState): string |
     return `[${formatTimestamp(event.timestamp)}] [${progressLabel(event)}] ${event.message}\n`;
   }
 
+  if (isRepositoryMapCoordinatorEvent(event) || isDeterministicRepositoryMapEvent(event)) {
+    return `[${formatTimestamp(event.timestamp)}] [${progressLabel(event)}] ${event.message}\n`;
+  }
+
   return formatPiProgressLine(event, piState);
 }
 
@@ -98,6 +102,7 @@ function formatPiProgressLine(event: RunEvent, state: PiProgressState): string |
   const jobKey = actor.step ?? stringValue(event.details?.step) ?? event.job ?? "pi";
   const timestampMs = timestampToMs(event.timestamp);
   const message = normalizePiMessage(event.message);
+  const periodicProgress = isPeriodicPiProgress(event, message);
   const lastPrintedAt = state.lastPrintedAtByJob.get(jobKey);
 
   if (
@@ -109,7 +114,7 @@ function formatPiProgressLine(event: RunEvent, state: PiProgressState): string |
   }
 
   if (
-    (event.type === "pi.heartbeat" || message === "still running.") &&
+    periodicProgress &&
     lastPrintedAt !== undefined &&
     timestampMs - lastPrintedAt < quietPiProgressIntervalMs
   ) {
@@ -118,7 +123,7 @@ function formatPiProgressLine(event: RunEvent, state: PiProgressState): string |
 
   const displayMessage = actor.step === undefined ? message : `${actor.step}: ${message}`;
   const printedMessageKey = `${progressLabel(event)} ${displayMessage}`;
-  if (state.lastPrintedMessageByJob.get(jobKey) === printedMessageKey) {
+  if (!periodicProgress && state.lastPrintedMessageByJob.get(jobKey) === printedMessageKey) {
     return undefined;
   }
 
@@ -133,12 +138,37 @@ function progressLabel(event: RunEvent): string {
     return event.stage;
   }
 
+  if (isRepositoryMapCoordinatorEvent(event)) {
+    return "repository-map";
+  }
+
+  if (isDeterministicRepositoryMapEvent(event)) {
+    return event.job ?? "deterministic-map";
+  }
+
   return isEvaluatorEvent(event) ? "evaluator-agent" : "collector-agent";
+}
+
+function isRepositoryMapCoordinatorEvent(event: RunEvent): boolean {
+  return event.type.startsWith("repository-map.") || event.type === "resume.artifact_reused";
+}
+
+function isDeterministicRepositoryMapEvent(event: RunEvent): boolean {
+  return event.type.startsWith("coverage-structure.");
 }
 
 function isEvaluatorEvent(event: RunEvent): boolean {
   const values = [event.job, event.message, event.type, event.details?.step, event.details?.role];
   return values.some((value) => typeof value === "string" && value.includes("evaluator"));
+}
+
+function isPeriodicPiProgress(event: RunEvent, normalizedMessage: string): boolean {
+  return (
+    event.type.endsWith(".heartbeat") ||
+    event.type === "pi.thinking" ||
+    normalizedMessage === "agent still running." ||
+    normalizedMessage === "thinking..."
+  );
 }
 
 function normalizePiMessage(message: string): string {

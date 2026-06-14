@@ -1,16 +1,21 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
-  AuthConfigSecretsArtifact,
+  AuthAccessArtifact,
+  ConfigSecretsArtifact,
   CoverageStructureArtifact,
+  CryptoArtifact,
   DataFlowsArtifact,
   EntrypointsArtifact,
+  ExternalIntegrationsEgressArtifact,
+  InfraDeployArtifact,
   InventoryArtifact,
+  LoggingObservabilityArtifact,
   OperationSinksArtifact,
   PiContextPackArtifact,
   RepositoryMapArtifact,
   StackBuildDepsArtifact,
-  StorageIntegrationsInfraArtifact,
+  StorageDataModelArtifact,
   TrustBoundariesArtifact,
 } from "../artifacts/contracts.js";
 import type { ArtifactStore } from "../artifacts/store.js";
@@ -29,51 +34,71 @@ const defaultPiProvider = "openrouter";
 const collectorTools = ["read", "grep", "find", "ls", "write"];
 
 const repoMapPaths = {
-  authConfigSecrets: "outputs/repo-map/auth-config-secrets.json",
+  authAccess: "outputs/repo-map/auth-access.json",
+  configSecrets: "outputs/repo-map/config-secrets.json",
   coverageStructure: "outputs/repo-map/coverage-structure.json",
+  crypto: "outputs/repo-map/crypto.json",
   dataFlows: "outputs/repo-map/data-flows.json",
   entrypoints: "outputs/repo-map/entrypoints.json",
+  externalIntegrationsEgress: "outputs/repo-map/external-integrations-egress.json",
+  infraDeploy: "outputs/repo-map/infra-deploy.json",
+  loggingObservability: "outputs/repo-map/logging-observability.json",
   operationSinks: "outputs/repo-map/operation-sinks.json",
   repositoryMap: "outputs/repository-map.json",
   stackBuildDeps: "outputs/repo-map/stack-build-deps.json",
-  storageIntegrationsInfra: "outputs/repo-map/storage-integrations-infra.json",
+  storageDataModel: "outputs/repo-map/storage-data-model.json",
   trustBoundaries: "outputs/repo-map/trust-boundaries.json",
 } as const;
 
 type PiStructuredArtifact =
-  | AuthConfigSecretsArtifact
+  | AuthAccessArtifact
+  | ConfigSecretsArtifact
   | CoverageStructureArtifact
+  | CryptoArtifact
   | DataFlowsArtifact
   | EntrypointsArtifact
+  | ExternalIntegrationsEgressArtifact
+  | InfraDeployArtifact
+  | LoggingObservabilityArtifact
   | OperationSinksArtifact
   | RepositoryMapArtifact
   | StackBuildDepsArtifact
-  | StorageIntegrationsInfraArtifact
+  | StorageDataModelArtifact
   | TrustBoundariesArtifact;
 
 type PiStageValidationStage =
-  | "auth-config-secrets-validation"
+  | "auth-access-validation"
+  | "config-secrets-validation"
   | "coverage-structure-validation"
+  | "crypto-validation"
   | "data-flows-validation"
   | "entrypoints-validation"
+  | "external-integrations-egress-validation"
+  | "infra-deploy-validation"
+  | "logging-observability-validation"
   | "operation-sinks-validation"
   | "repository-map-validation"
   | "stack-build-deps-validation"
-  | "storage-integrations-infra-validation"
+  | "storage-data-model-validation"
   | "trust-boundaries-validation";
 
 interface RunPiRepositoryMappingInput {
   contextPack: PiContextPackArtifact;
   contextPath: string;
   existing?: Partial<{
-    authConfigSecrets: ExistingPiArtifact<AuthConfigSecretsArtifact>;
+    authAccess: ExistingPiArtifact<AuthAccessArtifact>;
+    configSecrets: ExistingPiArtifact<ConfigSecretsArtifact>;
     coverageStructure: ExistingPiArtifact<CoverageStructureArtifact>;
+    crypto: ExistingPiArtifact<CryptoArtifact>;
     dataFlows: ExistingPiArtifact<DataFlowsArtifact>;
     entrypoints: ExistingPiArtifact<EntrypointsArtifact>;
+    externalIntegrationsEgress: ExistingPiArtifact<ExternalIntegrationsEgressArtifact>;
+    infraDeploy: ExistingPiArtifact<InfraDeployArtifact>;
+    loggingObservability: ExistingPiArtifact<LoggingObservabilityArtifact>;
     operationSinks: ExistingPiArtifact<OperationSinksArtifact>;
     repositoryMap: ExistingPiArtifact<RepositoryMapArtifact>;
     stackBuildDeps: ExistingPiArtifact<StackBuildDepsArtifact>;
-    storageIntegrationsInfra: ExistingPiArtifact<StorageIntegrationsInfraArtifact>;
+    storageDataModel: ExistingPiArtifact<StorageDataModelArtifact>;
     trustBoundaries: ExistingPiArtifact<TrustBoundariesArtifact>;
   }>;
   generatedAt: string;
@@ -92,23 +117,33 @@ interface ExistingPiArtifact<TArtifact extends PiStructuredArtifact> {
 }
 
 export interface RunPiRepositoryMappingResult {
-  authConfigSecrets: AuthConfigSecretsArtifact;
-  authConfigSecretsPath: string;
+  authAccess: AuthAccessArtifact;
+  authAccessPath: string;
+  configSecrets: ConfigSecretsArtifact;
+  configSecretsPath: string;
   coverageStructure: CoverageStructureArtifact;
   coverageStructurePath: string;
+  crypto: CryptoArtifact;
+  cryptoPath: string;
   dataFlows: DataFlowsArtifact;
   dataFlowsPath: string;
   entrypoints: EntrypointsArtifact;
   entrypointsPath: string;
+  externalIntegrationsEgress: ExternalIntegrationsEgressArtifact;
+  externalIntegrationsEgressPath: string;
+  infraDeploy: InfraDeployArtifact;
+  infraDeployPath: string;
   jobStates: RunJobState[];
+  loggingObservability: LoggingObservabilityArtifact;
+  loggingObservabilityPath: string;
   operationSinks: OperationSinksArtifact;
   operationSinksPath: string;
   repositoryMap: RepositoryMapArtifact;
   repositoryMapPath: string;
   stackBuildDeps: StackBuildDepsArtifact;
   stackBuildDepsPath: string;
-  storageIntegrationsInfra: StorageIntegrationsInfraArtifact;
-  storageIntegrationsInfraPath: string;
+  storageDataModel: StorageDataModelArtifact;
+  storageDataModelPath: string;
   trustBoundaries: TrustBoundariesArtifact;
   trustBoundariesPath: string;
 }
@@ -136,6 +171,9 @@ interface PiStageResult<TArtifact extends PiStructuredArtifact> {
   jobState: RunJobState;
 }
 
+const repositoryMapProductIntent =
+  "facts-only AppSec repository map for later attack-hypothesis building and manual review";
+
 export async function runPiRepositoryMapping(
   input: RunPiRepositoryMappingInput,
 ): Promise<RunPiRepositoryMappingResult> {
@@ -148,125 +186,216 @@ export async function runPiRepositoryMapping(
 
   const coverageStructure =
     input.existing?.coverageStructure ??
-    (await runPiStage<CoverageStructureArtifact>({
-      artifactId: "coverage-structure",
-      artifactRelativePath: repoMapPaths.coverageStructure,
-      contextArtifactLabel: input.contextPath,
-      contextPack: input.contextPack,
+    (await buildDeterministicCoverageStructure({
       generatedAt: input.generatedAt,
       input: stageInput,
-      jobName: "pi-coverage-structure",
-      kind: "coverage-structure",
-      outputBaseName: "coverage-structure",
-      prompt: buildCoverageStructurePrompt(input.contextPack),
-      step: "coverage-structure",
-      validateSchema: (artifact) => validateCoverageStructureArtifact({ artifact }),
-      validationStage: "coverage-structure-validation",
     }));
 
+  const stackBuildDepsContext = buildStackBuildDepsContext(input.contextPack);
   const stackBuildDeps =
     input.existing?.stackBuildDeps ??
     (await runPiStage<StackBuildDepsArtifact>({
       artifactId: "stack-build-deps",
       artifactRelativePath: repoMapPaths.stackBuildDeps,
       contextArtifactLabel: input.contextPath,
-      contextPack: input.contextPack,
+      contextPack: stackBuildDepsContext,
       generatedAt: input.generatedAt,
       input: stageInput,
       jobName: "pi-stack-deps",
       kind: "stack-build-deps",
       outputBaseName: "stack-build-deps",
-      prompt: buildStackBuildDepsPrompt(input.contextPack),
+      prompt: buildStackBuildDepsPrompt(stackBuildDepsContext),
       step: "stack-build-deps",
       validateSchema: (artifact) => validateStackBuildDepsArtifact({ artifact }),
       validationStage: "stack-build-deps-validation",
     }));
 
+  const entrypointsContext = buildEntrypointsContext(input.contextPack);
   const entrypoints =
     input.existing?.entrypoints ??
     (await runPiStage<EntrypointsArtifact>({
       artifactId: "entrypoints",
       artifactRelativePath: repoMapPaths.entrypoints,
       contextArtifactLabel: input.contextPath,
-      contextPack: input.contextPack,
+      contextPack: entrypointsContext,
       generatedAt: input.generatedAt,
       input: stageInput,
       jobName: "pi-entrypoints",
       kind: "entrypoints",
       outputBaseName: "entrypoints",
-      prompt: buildEntrypointsPrompt(input.contextPack),
+      prompt: buildEntrypointsPrompt(entrypointsContext),
       step: "entrypoints",
       validateSchema: (artifact) => validateEntrypointsArtifact({ artifact }),
       validationStage: "entrypoints-validation",
     }));
 
-  const authConfigContext = {
-    inputs: {
-      entrypoints: entrypoints.artifact,
-    },
-    inventory: input.contextPack.inventory,
-    repo: input.contextPack.repo,
-  };
-  const authConfigSecrets =
-    input.existing?.authConfigSecrets ??
-    (await runPiStage<AuthConfigSecretsArtifact>({
-      artifactId: "auth-config-secrets",
-      artifactRelativePath: repoMapPaths.authConfigSecrets,
-      contextArtifactLabel: `${input.contextPath}, ${entrypoints.artifactPath}`,
-      contextPack: authConfigContext,
-      generatedAt: input.generatedAt,
-      input: stageInput,
-      jobName: "pi-auth-config-secrets",
-      kind: "auth-config-secrets",
-      outputBaseName: "auth-config-secrets",
-      prompt: buildAuthConfigSecretsPrompt(authConfigContext),
-      step: "auth-config-secrets",
-      validateSchema: (artifact) => validateAuthConfigSecretsArtifact({ artifact }),
-      validationStage: "auth-config-secrets-validation",
-    }));
-
-  const storageIntegrationsInfra =
-    input.existing?.storageIntegrationsInfra ??
-    (await runPiStage<StorageIntegrationsInfraArtifact>({
-      artifactId: "storage-integrations-infra",
-      artifactRelativePath: repoMapPaths.storageIntegrationsInfra,
+  const configSecretsContext = buildConfigSecretsContext(input.contextPack);
+  const configSecrets =
+    input.existing?.configSecrets ??
+    (await runPiStage<ConfigSecretsArtifact>({
+      artifactId: "config-secrets",
+      artifactRelativePath: repoMapPaths.configSecrets,
       contextArtifactLabel: input.contextPath,
-      contextPack: input.contextPack,
+      contextPack: configSecretsContext,
       generatedAt: input.generatedAt,
       input: stageInput,
-      jobName: "pi-storage-integrations-infra",
-      kind: "storage-integrations-infra",
-      outputBaseName: "storage-integrations-infra",
-      prompt: buildStorageIntegrationsInfraPrompt(input.contextPack),
-      step: "storage-integrations-infra",
-      validateSchema: (artifact) => validateStorageIntegrationsInfraArtifact({ artifact }),
-      validationStage: "storage-integrations-infra-validation",
+      jobName: "pi-config-secrets",
+      kind: "config-secrets",
+      outputBaseName: "config-secrets",
+      prompt: buildConfigSecretsPrompt(configSecretsContext),
+      step: "config-secrets",
+      validateSchema: (artifact) => validateConfigSecretsArtifact({ artifact }),
+      validationStage: "config-secrets-validation",
     }));
 
+  const authAccessContext = buildAuthAccessContext(
+    input.contextPack,
+    entrypoints.artifact,
+    configSecrets.artifact,
+  );
+  const authAccess =
+    input.existing?.authAccess ??
+    (await runPiStage<AuthAccessArtifact>({
+      artifactId: "auth-access",
+      artifactRelativePath: repoMapPaths.authAccess,
+      contextArtifactLabel: `${input.contextPath}, ${entrypoints.artifactPath}, ${configSecrets.artifactPath}`,
+      contextPack: authAccessContext,
+      generatedAt: input.generatedAt,
+      input: stageInput,
+      jobName: "pi-auth-access",
+      kind: "auth-access",
+      outputBaseName: "auth-access",
+      prompt: buildAuthAccessPrompt(authAccessContext),
+      step: "auth-access",
+      validateSchema: (artifact) => validateAuthAccessArtifact({ artifact }),
+      validationStage: "auth-access-validation",
+    }));
+
+  const storageDataModelContext = buildStorageDataModelContext(
+    input.contextPack,
+    configSecrets.artifact,
+  );
+  const storageDataModel =
+    input.existing?.storageDataModel ??
+    (await runPiStage<StorageDataModelArtifact>({
+      artifactId: "storage-data-model",
+      artifactRelativePath: repoMapPaths.storageDataModel,
+      contextArtifactLabel: `${input.contextPath}, ${configSecrets.artifactPath}`,
+      contextPack: storageDataModelContext,
+      generatedAt: input.generatedAt,
+      input: stageInput,
+      jobName: "pi-storage-data-model",
+      kind: "storage-data-model",
+      outputBaseName: "storage-data-model",
+      prompt: buildStorageDataModelPrompt(storageDataModelContext),
+      step: "storage-data-model",
+      validateSchema: (artifact) => validateStorageDataModelArtifact({ artifact }),
+      validationStage: "storage-data-model-validation",
+    }));
+
+  const externalIntegrationsEgressContext = buildExternalIntegrationsEgressContext(
+    input.contextPack,
+    configSecrets.artifact,
+  );
+  const externalIntegrationsEgress =
+    input.existing?.externalIntegrationsEgress ??
+    (await runPiStage<ExternalIntegrationsEgressArtifact>({
+      artifactId: "external-integrations-egress",
+      artifactRelativePath: repoMapPaths.externalIntegrationsEgress,
+      contextArtifactLabel: `${input.contextPath}, ${configSecrets.artifactPath}`,
+      contextPack: externalIntegrationsEgressContext,
+      generatedAt: input.generatedAt,
+      input: stageInput,
+      jobName: "pi-external-integrations-egress",
+      kind: "external-integrations-egress",
+      outputBaseName: "external-integrations-egress",
+      prompt: buildExternalIntegrationsEgressPrompt(externalIntegrationsEgressContext),
+      step: "external-integrations-egress",
+      validateSchema: (artifact) => validateExternalIntegrationsEgressArtifact({ artifact }),
+      validationStage: "external-integrations-egress-validation",
+    }));
+
+  const infraDeployContext = buildInfraDeployContext(input.contextPack);
+  const infraDeploy =
+    input.existing?.infraDeploy ??
+    (await runPiStage<InfraDeployArtifact>({
+      artifactId: "infra-deploy",
+      artifactRelativePath: repoMapPaths.infraDeploy,
+      contextArtifactLabel: input.contextPath,
+      contextPack: infraDeployContext,
+      generatedAt: input.generatedAt,
+      input: stageInput,
+      jobName: "pi-infra-deploy",
+      kind: "infra-deploy",
+      outputBaseName: "infra-deploy",
+      prompt: buildInfraDeployPrompt(infraDeployContext),
+      step: "infra-deploy",
+      validateSchema: (artifact) => validateInfraDeployArtifact({ artifact }),
+      validationStage: "infra-deploy-validation",
+    }));
+
+  const operationSinksContext = buildOperationSinksContext(input.contextPack);
   const operationSinks =
     input.existing?.operationSinks ??
     (await runPiStage<OperationSinksArtifact>({
       artifactId: "operation-sinks",
       artifactRelativePath: repoMapPaths.operationSinks,
       contextArtifactLabel: input.contextPath,
-      contextPack: input.contextPack,
+      contextPack: operationSinksContext,
       generatedAt: input.generatedAt,
       input: stageInput,
       jobName: "pi-operation-sinks",
       kind: "operation-sinks",
       outputBaseName: "operation-sinks",
-      prompt: buildOperationSinksPrompt(input.contextPack),
+      prompt: buildOperationSinksPrompt(operationSinksContext),
       step: "operation-sinks",
       validateSchema: (artifact) => validateOperationSinksArtifact({ artifact }),
       validationStage: "operation-sinks-validation",
     }));
 
+  const cryptoContext = buildCryptoContext(input.contextPack);
+  const crypto =
+    input.existing?.crypto ??
+    (await runPiStage<CryptoArtifact>({
+      artifactId: "crypto",
+      artifactRelativePath: repoMapPaths.crypto,
+      contextArtifactLabel: input.contextPath,
+      contextPack: cryptoContext,
+      generatedAt: input.generatedAt,
+      input: stageInput,
+      jobName: "pi-crypto",
+      kind: "crypto",
+      outputBaseName: "crypto",
+      prompt: buildCryptoPrompt(cryptoContext),
+      step: "crypto",
+      validateSchema: (artifact) => validateCryptoArtifact({ artifact }),
+      validationStage: "crypto-validation",
+    }));
+
+  const loggingObservabilityContext = buildLoggingObservabilityContext(input.contextPack);
+  const loggingObservability =
+    input.existing?.loggingObservability ??
+    (await runPiStage<LoggingObservabilityArtifact>({
+      artifactId: "logging-observability",
+      artifactRelativePath: repoMapPaths.loggingObservability,
+      contextArtifactLabel: input.contextPath,
+      contextPack: loggingObservabilityContext,
+      generatedAt: input.generatedAt,
+      input: stageInput,
+      jobName: "pi-logging-observability",
+      kind: "logging-observability",
+      outputBaseName: "logging-observability",
+      prompt: buildLoggingObservabilityPrompt(loggingObservabilityContext),
+      step: "logging-observability",
+      validateSchema: (artifact) => validateLoggingObservabilityArtifact({ artifact }),
+      validationStage: "logging-observability-validation",
+    }));
+
   const dataFlowContext = {
     inputs: {
-      entrypoints: entrypoints.artifact,
-      operation_sinks: operationSinks.artifact,
+      entrypoints: piHandoffArtifact(entrypoints.artifact),
+      operation_sinks: piHandoffArtifact(operationSinks.artifact),
     },
-    repo: input.contextPack.repo,
   };
   const dataFlows =
     input.existing?.dataFlows ??
@@ -288,14 +417,18 @@ export async function runPiRepositoryMapping(
 
   const priorMapArtifacts = {
     artifacts: {
-      auth_config_secrets: piHandoffArtifact(authConfigSecrets.artifact),
+      auth_access: piHandoffArtifact(authAccess.artifact),
+      config_secrets: piHandoffArtifact(configSecrets.artifact),
+      crypto: piHandoffArtifact(crypto.artifact),
       data_flows: piHandoffArtifact(dataFlows.artifact),
       entrypoints: piHandoffArtifact(entrypoints.artifact),
+      external_integrations_egress: piHandoffArtifact(externalIntegrationsEgress.artifact),
+      infra_deploy: piHandoffArtifact(infraDeploy.artifact),
+      logging_observability: piHandoffArtifact(loggingObservability.artifact),
       operation_sinks: piHandoffArtifact(operationSinks.artifact),
-      storage_integrations_infra: piHandoffArtifact(storageIntegrationsInfra.artifact),
+      storage_data_model: piHandoffArtifact(storageDataModel.artifact),
     },
     paths: priorMapArtifactPaths(),
-    repo: input.contextPack.repo,
   };
   const trustBoundaries =
     input.existing?.trustBoundaries ??
@@ -306,9 +439,14 @@ export async function runPiRepositoryMapping(
         coverageStructure.artifactPath,
         stackBuildDeps.artifactPath,
         entrypoints.artifactPath,
-        authConfigSecrets.artifactPath,
-        storageIntegrationsInfra.artifactPath,
+        authAccess.artifactPath,
+        configSecrets.artifactPath,
+        storageDataModel.artifactPath,
+        externalIntegrationsEgress.artifactPath,
+        infraDeploy.artifactPath,
         operationSinks.artifactPath,
+        crypto.artifactPath,
+        loggingObservability.artifactPath,
         dataFlows.artifactPath,
       ].join(", "),
       contextPack: priorMapArtifacts,
@@ -325,17 +463,21 @@ export async function runPiRepositoryMapping(
 
   const repositoryMapContext = {
     artifacts: {
-      auth_config_secrets: piHandoffArtifact(authConfigSecrets.artifact),
+      auth_access: piHandoffArtifact(authAccess.artifact),
+      config_secrets: piHandoffArtifact(configSecrets.artifact),
       coverage_structure: piHandoffArtifact(coverageStructure.artifact),
+      crypto: piHandoffArtifact(crypto.artifact),
       data_flows: piHandoffArtifact(dataFlows.artifact),
       entrypoints: piHandoffArtifact(entrypoints.artifact),
+      external_integrations_egress: piHandoffArtifact(externalIntegrationsEgress.artifact),
+      infra_deploy: piHandoffArtifact(infraDeploy.artifact),
+      logging_observability: piHandoffArtifact(loggingObservability.artifact),
       operation_sinks: piHandoffArtifact(operationSinks.artifact),
       stack_build_deps: piHandoffArtifact(stackBuildDeps.artifact),
-      storage_integrations_infra: piHandoffArtifact(storageIntegrationsInfra.artifact),
+      storage_data_model: piHandoffArtifact(storageDataModel.artifact),
       trust_boundaries: piHandoffArtifact(trustBoundaries.artifact),
     },
     paths: allMapArtifactPaths(),
-    repo: input.contextPack.repo,
   };
   const repositoryMap =
     input.existing?.repositoryMap ??
@@ -346,9 +488,14 @@ export async function runPiRepositoryMapping(
         coverageStructure.artifactPath,
         stackBuildDeps.artifactPath,
         entrypoints.artifactPath,
-        authConfigSecrets.artifactPath,
-        storageIntegrationsInfra.artifactPath,
+        authAccess.artifactPath,
+        configSecrets.artifactPath,
+        storageDataModel.artifactPath,
+        externalIntegrationsEgress.artifactPath,
+        infraDeploy.artifactPath,
         operationSinks.artifactPath,
+        crypto.artifactPath,
+        loggingObservability.artifactPath,
         dataFlows.artifactPath,
         trustBoundaries.artifactPath,
       ].join(", "),
@@ -365,26 +512,774 @@ export async function runPiRepositoryMapping(
     }));
 
   return {
-    authConfigSecrets: authConfigSecrets.artifact,
-    authConfigSecretsPath: authConfigSecrets.artifactPath,
+    authAccess: authAccess.artifact,
+    authAccessPath: authAccess.artifactPath,
+    configSecrets: configSecrets.artifact,
+    configSecretsPath: configSecrets.artifactPath,
     coverageStructure: coverageStructure.artifact,
     coverageStructurePath: coverageStructure.artifactPath,
+    crypto: crypto.artifact,
+    cryptoPath: crypto.artifactPath,
     dataFlows: dataFlows.artifact,
     dataFlowsPath: dataFlows.artifactPath,
     entrypoints: entrypoints.artifact,
     entrypointsPath: entrypoints.artifactPath,
+    externalIntegrationsEgress: externalIntegrationsEgress.artifact,
+    externalIntegrationsEgressPath: externalIntegrationsEgress.artifactPath,
+    infraDeploy: infraDeploy.artifact,
+    infraDeployPath: infraDeploy.artifactPath,
     jobStates,
+    loggingObservability: loggingObservability.artifact,
+    loggingObservabilityPath: loggingObservability.artifactPath,
     operationSinks: operationSinks.artifact,
     operationSinksPath: operationSinks.artifactPath,
     repositoryMap: repositoryMap.artifact,
     repositoryMapPath: repositoryMap.artifactPath,
     stackBuildDeps: stackBuildDeps.artifact,
     stackBuildDepsPath: stackBuildDeps.artifactPath,
-    storageIntegrationsInfra: storageIntegrationsInfra.artifact,
-    storageIntegrationsInfraPath: storageIntegrationsInfra.artifactPath,
+    storageDataModel: storageDataModel.artifact,
+    storageDataModelPath: storageDataModel.artifactPath,
     trustBoundaries: trustBoundaries.artifact,
     trustBoundariesPath: trustBoundaries.artifactPath,
   };
+}
+
+function buildStackBuildDepsContext(contextPack: PiContextPackArtifact): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inventory: {
+      config_files: inventory.config_files,
+      github_actions_workflows: inventory.github_actions_workflows,
+      iac_candidates: inventory.iac_candidates,
+      infra_files: inventory.infra_files,
+      language_summary: inventory.language_summary,
+      manifest_files: inventory.manifest_files,
+      package_and_lock_files: inventory.package_and_lock_files,
+      summary: inventory.summary,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildEntrypointsContext(contextPack: PiContextPackArtifact): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inventory: {
+      language_summary: inventory.language_summary,
+      manifest_files: inventory.manifest_files,
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+      top_level_directories: inventory.top_level_directories,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildAuthAccessContext(
+  contextPack: PiContextPackArtifact,
+  entrypoints: EntrypointsArtifact,
+  configSecrets: ConfigSecretsArtifact,
+): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inputs: {
+      config_secrets: piHandoffArtifact(configSecrets),
+      entrypoints: piHandoffArtifact(entrypoints),
+    },
+    inventory: {
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildConfigSecretsContext(contextPack: PiContextPackArtifact): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inventory: {
+      config_files: inventory.config_files,
+      manifest_files: inventory.manifest_files,
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+      top_level_directories: inventory.top_level_directories,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildStorageDataModelContext(
+  contextPack: PiContextPackArtifact,
+  configSecrets: ConfigSecretsArtifact,
+): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inputs: {
+      config_secrets: piHandoffArtifact(configSecrets),
+    },
+    inventory: {
+      manifest_files: inventory.manifest_files,
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildExternalIntegrationsEgressContext(
+  contextPack: PiContextPackArtifact,
+  configSecrets: ConfigSecretsArtifact,
+): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inputs: {
+      config_secrets: piHandoffArtifact(configSecrets),
+    },
+    inventory: {
+      manifest_files: inventory.manifest_files,
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildInfraDeployContext(contextPack: PiContextPackArtifact): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inventory: {
+      config_files: inventory.config_files,
+      github_actions_workflows: inventory.github_actions_workflows,
+      iac_candidates: inventory.iac_candidates,
+      infra_files: inventory.infra_files,
+      summary: inventory.summary,
+      top_level_directories: inventory.top_level_directories,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildOperationSinksContext(contextPack: PiContextPackArtifact): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inventory: {
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildCryptoContext(contextPack: PiContextPackArtifact): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inventory: {
+      config_files: inventory.config_files,
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+function buildLoggingObservabilityContext(contextPack: PiContextPackArtifact): unknown {
+  const inventory = contextPack.inventory;
+  return {
+    inventory: {
+      config_files: inventory.config_files,
+      manifest_files: inventory.manifest_files,
+      source_index: inventory.source_index,
+      summary: inventory.summary,
+    },
+    purpose: repositoryMapProductIntent,
+    repo: contextPack.repo,
+  };
+}
+
+async function buildDeterministicCoverageStructure(input: {
+  generatedAt: string;
+  input: RunPiRepositoryMappingInput;
+}): Promise<PiStageResult<CoverageStructureArtifact>> {
+  const startedAt = new Date().toISOString();
+  await input.input.onProgress?.({
+    details: { role: "deterministic", step: "coverage-structure" },
+    job: "coverage-structure",
+    message: "Building coverage and structure map from deterministic inventory.",
+    type: "coverage-structure.started",
+  });
+
+  const artifact = createCoverageStructureArtifact({
+    contextPack: input.input.contextPack,
+    generatedAt: input.generatedAt,
+    inventory: input.input.inventory,
+  });
+  validateCoverageStructureArtifact({ artifact });
+  const artifactPath = await input.input.store.writeJson({
+    data: artifact,
+    id: "coverage-structure",
+    kind: "coverage-structure",
+    relativePath: repoMapPaths.coverageStructure,
+  });
+
+  const jobState: RunJobState = {
+    artifacts: [artifactPath],
+    diagnostics: [],
+    finished_at: new Date().toISOString(),
+    invocation: {
+      command: "vibeshield-inventory",
+      metadata: {
+        source_artifact: "outputs/inventory.json",
+      },
+    },
+    name: "coverage-structure",
+    observations: 0,
+    started_at: startedAt,
+    status: "success",
+  };
+  await input.input.onJobFinished?.(jobState);
+  await input.input.onProgress?.({
+    details: { role: "deterministic", step: "coverage-structure" },
+    job: "coverage-structure",
+    message: "Coverage and structure map built from deterministic inventory.",
+    type: "coverage-structure.completed",
+  });
+
+  return {
+    artifact,
+    artifactPath,
+    jobState,
+  };
+}
+
+type CoverageDirectoryKind = CoverageStructureArtifact["repository_structure"][number]["kind"];
+
+const maxCoverageTreeEntries = 80;
+const maxReviewedDirectories = 80;
+
+const dependencyDirectoryNames = new Set([
+  "bower_components",
+  "node_modules",
+  "third_party",
+  "vendor",
+  "vendors",
+]);
+const generatedDirectoryNames = new Set([
+  ".cache",
+  ".next",
+  ".nuxt",
+  ".parcel-cache",
+  ".turbo",
+  "build",
+  "coverage",
+  "dist",
+  "generated",
+  "out",
+  "screenshots",
+  "target",
+  "tmp",
+  "uploads",
+]);
+const docDirectoryNames = new Set(["doc", "docs", "documentation"]);
+const testDirectoryNames = new Set(["__tests__", "e2e", "spec", "specs", "test", "tests"]);
+const infraDirectoryNames = new Set([
+  ".devcontainer",
+  ".github",
+  ".gitlab",
+  ".k8s",
+  "ansible",
+  "chart",
+  "charts",
+  "deploy",
+  "deployment",
+  "deployments",
+  "docker",
+  "helm",
+  "infra",
+  "infrastructure",
+  "k8s",
+  "kubernetes",
+  "terraform",
+]);
+const configDirectoryNames = new Set([
+  ".circleci",
+  ".config",
+  ".dependabot",
+  ".well-known",
+  ".zap",
+  "config",
+  "configs",
+  "configuration",
+]);
+const sourceDirectoryNames = new Set([
+  "api",
+  "app",
+  "apps",
+  "bin",
+  "cmd",
+  "frontend",
+  "lib",
+  "models",
+  "packages",
+  "routes",
+  "server",
+  "services",
+  "src",
+  "web",
+  "worker",
+  "workers",
+]);
+
+const binaryLikeExtensions = new Set([
+  "7z",
+  "avi",
+  "bin",
+  "bmp",
+  "class",
+  "dll",
+  "dmg",
+  "exe",
+  "gif",
+  "gz",
+  "ico",
+  "jar",
+  "jpeg",
+  "jpg",
+  "mov",
+  "mp3",
+  "mp4",
+  "pdf",
+  "png",
+  "so",
+  "tar",
+  "tgz",
+  "ttf",
+  "webm",
+  "webp",
+  "woff",
+  "woff2",
+  "zip",
+]);
+
+function createCoverageStructureArtifact(input: {
+  contextPack: PiContextPackArtifact;
+  generatedAt: string;
+  inventory: InventoryArtifact;
+}): CoverageStructureArtifact {
+  const languageSummary =
+    input.contextPack.inventory.language_summary ?? languageSummaryFromInventory(input.inventory);
+  const totalLoc = languageSummary.reduce((sum, language) => sum + language.loc, 0);
+  const candidateDirectories = coverageTreeDirectories(input.inventory);
+  const excludedDirectories = excludedCoverageDirectories(input.inventory, candidateDirectories);
+  const excludedDirectoryPaths = new Set(excludedDirectories.map((directory) => directory.path));
+  const includedDirectories = candidateDirectories.filter(
+    (directory) => !isInsideAnyDirectory(directory, excludedDirectoryPaths),
+  );
+  const truncatedDirectoryCount = Math.max(0, includedDirectories.length - maxCoverageTreeEntries);
+  const treeDirectories = includedDirectories.slice(0, maxCoverageTreeEntries);
+
+  const topLevelTree = treeDirectories.map((directory) => ({
+    depth: directoryDepth(directory),
+    evidence: [],
+    kind: directoryKind(directory),
+    path: directory,
+    role: directoryRole(directory),
+  }));
+  const rootStructure = importantRootFiles(input.inventory).map((file) => ({
+    evidence: [] as string[],
+    kind: rootFileKind(file),
+    path: file,
+    role: rootFileRole(file),
+  }));
+  const repositoryStructure = [...topLevelTree, ...rootStructure];
+  const reviewedDirectories = treeDirectories.slice(0, maxReviewedDirectories).map((directory) => ({
+    evidence: [] as string[],
+    path: directory,
+    reason: "included in deterministic repository inventory",
+  }));
+  const accessGaps = coverageAccessGaps(input.inventory);
+  const factGaps = [
+    ...accessGaps.map((gap) => ({
+      area: gap.area,
+      evidence: [] as string[],
+      missing_fact: gap.reason,
+    })),
+    ...(truncatedDirectoryCount > 0
+      ? [
+          {
+            area: "repository structure",
+            evidence: [] as string[],
+            missing_fact: `${truncatedDirectoryCount} additional directories were not expanded in the compact coverage map`,
+          },
+        ]
+      : []),
+  ];
+
+  return {
+    access_gaps: accessGaps,
+    coverage: {
+      not_covered: [
+        ...excludedDirectories.map((directory) => ({
+          area: directory.path,
+          reason: directory.reason,
+        })),
+        ...(truncatedDirectoryCount > 0
+          ? [
+              {
+                area: "additional directories",
+                reason: `${truncatedDirectoryCount} directories omitted from compact structure map`,
+              },
+            ]
+          : []),
+      ],
+      reviewed: [
+        {
+          area: "repository inventory",
+          evidence: [],
+        },
+      ],
+    },
+    excluded_directories: excludedDirectories,
+    fact_gaps: factGaps,
+    generated_at: input.generatedAt,
+    generated_by: "vibeshield",
+    kind: "coverage-structure",
+    language_summary: languageSummary,
+    metadata: {
+      deterministic: {
+        source_artifact: "outputs/inventory.json",
+        source_kind: "inventory",
+      },
+    },
+    repo: {
+      commit_sha: input.inventory.source.commit_sha,
+      url: input.inventory.source.url,
+    },
+    repo_size: {
+      file_count: input.inventory.summary.file_count,
+      source: "inventory",
+      total_loc: totalLoc,
+    },
+    repository_structure: repositoryStructure,
+    reviewed_directories: reviewedDirectories,
+    top_level_tree: topLevelTree,
+  };
+}
+
+function coverageTreeDirectories(inventory: InventoryArtifact): string[] {
+  return uniqueSorted(
+    inventory.directories
+      .map((directory) => directory.path.split("/").slice(0, 2).join("/"))
+      .filter((directory) => directory !== ""),
+  );
+}
+
+function excludedCoverageDirectories(
+  inventory: InventoryArtifact,
+  directories: string[],
+): Array<{ evidence: string[]; path: string; reason: string }> {
+  return directories
+    .flatMap((directory) => {
+      const reason = excludedDirectoryReason(inventory, directory);
+      return reason === undefined ? [] : [{ evidence: [], path: directory, reason }];
+    })
+    .filter(
+      (directory, index, all) =>
+        all.findIndex((candidate) => candidate.path === directory.path) === index,
+    );
+}
+
+function excludedDirectoryReason(
+  inventory: InventoryArtifact,
+  directory: string,
+): string | undefined {
+  const segments = directory.toLowerCase().split("/");
+  if (segments.some((segment) => dependencyDirectoryNames.has(segment))) {
+    return "vendored or dependency directory";
+  }
+  if (segments.some((segment) => generatedDirectoryNames.has(segment))) {
+    return "generated, build, coverage, cache, or runtime-output directory";
+  }
+
+  const stats = directoryStats(inventory, directory);
+  if (stats.fileCount >= 5 && stats.binaryOrNonTextFileCount / stats.fileCount >= 0.8) {
+    return "binary-heavy directory";
+  }
+
+  return undefined;
+}
+
+function coverageAccessGaps(
+  inventory: InventoryArtifact,
+): Array<{ area: string; evidence: string[]; reason: string }> {
+  const nonTextFiles = inventory.files.filter(
+    (file) => file.type !== "file" || file.line_count === undefined || isBinaryLikePath(file.path),
+  );
+  const symlinkCount = inventory.files.filter((file) => file.type === "symlink").length;
+
+  return [
+    ...(nonTextFiles.length > 0
+      ? [
+          {
+            area: "binary or non-text files",
+            evidence: [] as string[],
+            reason: `${nonTextFiles.length} files were counted by path and size but not included in LOC totals`,
+          },
+        ]
+      : []),
+    ...(symlinkCount > 0
+      ? [
+          {
+            area: "symbolic links",
+            evidence: [] as string[],
+            reason: `${symlinkCount} symlinks were recorded as links, not traversed as source files`,
+          },
+        ]
+      : []),
+  ];
+}
+
+function directoryStats(
+  inventory: InventoryArtifact,
+  directory: string,
+): { binaryOrNonTextFileCount: number; fileCount: number } {
+  const prefix = `${directory}/`;
+  const files = inventory.files.filter((file) => file.path.startsWith(prefix));
+  return {
+    binaryOrNonTextFileCount: files.filter(
+      (file) =>
+        file.type !== "file" || file.line_count === undefined || isBinaryLikePath(file.path),
+    ).length,
+    fileCount: files.length,
+  };
+}
+
+function directoryKind(directory: string): CoverageDirectoryKind {
+  const segments = directory.toLowerCase().split("/");
+  if (segments.some((segment) => dependencyDirectoryNames.has(segment))) {
+    return "dependency";
+  }
+  if (segments.some((segment) => generatedDirectoryNames.has(segment))) {
+    return "generated";
+  }
+  if (segments.some((segment) => testDirectoryNames.has(segment))) {
+    return "test";
+  }
+  if (segments.some((segment) => docDirectoryNames.has(segment))) {
+    return "docs";
+  }
+  if (segments.some((segment) => infraDirectoryNames.has(segment))) {
+    return "infra";
+  }
+  if (segments.some((segment) => configDirectoryNames.has(segment))) {
+    return "config";
+  }
+  if ((segments[0] ?? "").startsWith(".")) {
+    return "config";
+  }
+  if (segments.some((segment) => sourceDirectoryNames.has(segment))) {
+    return "source";
+  }
+  return "other";
+}
+
+function directoryRole(directory: string): string {
+  const basename = directory.split("/").at(-1)?.toLowerCase() ?? directory.toLowerCase();
+  if (basename === ".github") {
+    return "GitHub metadata and workflow configuration";
+  }
+  if (basename === ".gitlab") {
+    return "GitLab CI/CD configuration";
+  }
+  if (basename === ".devcontainer") {
+    return "development container configuration";
+  }
+  if (configDirectoryNames.has(basename)) {
+    return "configuration files";
+  }
+  if (basename.startsWith(".")) {
+    return "hidden repository configuration or tooling directory";
+  }
+  if (infraDirectoryNames.has(basename)) {
+    return "infrastructure and deployment files";
+  }
+  if (docDirectoryNames.has(basename)) {
+    return "documentation";
+  }
+  if (testDirectoryNames.has(basename)) {
+    return "tests";
+  }
+  if (sourceDirectoryNames.has(basename)) {
+    return "application source";
+  }
+  return "repository directory";
+}
+
+function importantRootFiles(inventory: InventoryArtifact): string[] {
+  return inventory.files
+    .map((file) => file.path)
+    .filter((file) => !file.includes("/"))
+    .filter((file) => rootFileKind(file) !== "other")
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function rootFileKind(filePath: string): CoverageDirectoryKind {
+  const basename = filePath.toLowerCase();
+  if (basename === "dockerfile" || basename.startsWith("docker-compose")) {
+    return "infra";
+  }
+  if (basename === "readme.md" || basename.endsWith(".md")) {
+    return "docs";
+  }
+  if (isManifestOrConfigRootFile(basename)) {
+    return "config";
+  }
+  return "other";
+}
+
+function rootFileRole(filePath: string): string {
+  const basename = filePath.toLowerCase();
+  if (basename === "dockerfile") {
+    return "container image definition";
+  }
+  if (basename.startsWith("docker-compose")) {
+    return "compose service definition";
+  }
+  if (basename === "readme.md") {
+    return "repository overview documentation";
+  }
+  if (basename === "package.json") {
+    return "Node.js package manifest";
+  }
+  return "root configuration or manifest";
+}
+
+function isManifestOrConfigRootFile(basename: string): boolean {
+  return (
+    basename.endsWith(".json") ||
+    basename.endsWith(".toml") ||
+    basename.endsWith(".yaml") ||
+    basename.endsWith(".yml") ||
+    basename.endsWith(".config") ||
+    basename.endsWith(".conf") ||
+    basename === ".env.example" ||
+    basename === "cargo.toml" ||
+    basename === "gemfile" ||
+    basename === "go.mod" ||
+    basename === "makefile" ||
+    basename === "package.json" ||
+    basename === "pyproject.toml" ||
+    basename === "requirements.txt"
+  );
+}
+
+function isInsideAnyDirectory(directory: string, excludedDirectories: Set<string>): boolean {
+  for (const excludedDirectory of excludedDirectories) {
+    if (directory === excludedDirectory || directory.startsWith(`${excludedDirectory}/`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function directoryDepth(directory: string): number {
+  return directory.split("/").length;
+}
+
+function isBinaryLikePath(filePath: string): boolean {
+  const extension = filePath.toLowerCase().split(".").at(-1);
+  return extension !== undefined && binaryLikeExtensions.has(extension);
+}
+
+function languageSummaryFromInventory(inventory: InventoryArtifact): Array<{
+  file_count: number;
+  language: string;
+  loc: number;
+  source: "inventory";
+}> {
+  const byLanguage = new Map<string, { file_count: number; language: string; loc: number }>();
+
+  for (const file of inventory.files) {
+    if (file.type !== "file" || file.line_count === undefined) {
+      continue;
+    }
+    const language = languageForInventoryPath(file.path);
+    if (language === undefined) {
+      continue;
+    }
+    const current = byLanguage.get(language) ?? { file_count: 0, language, loc: 0 };
+    current.file_count += 1;
+    current.loc += file.line_count;
+    byLanguage.set(language, current);
+  }
+
+  return [...byLanguage.values()]
+    .sort((left, right) => right.loc - left.loc || left.language.localeCompare(right.language))
+    .slice(0, 20)
+    .map((record) => ({ ...record, source: "inventory" }));
+}
+
+function languageForInventoryPath(filePath: string): string | undefined {
+  const basename = filePath.split("/").at(-1)?.toLowerCase() ?? filePath.toLowerCase();
+  if (basename === "dockerfile") {
+    return "Dockerfile";
+  }
+
+  const extension = basename.split(".").at(-1);
+  if (extension === undefined) {
+    return undefined;
+  }
+
+  return (
+    {
+      c: "C",
+      cc: "C++",
+      cljs: "ClojureScript",
+      clj: "Clojure",
+      cpp: "C++",
+      cs: "C#",
+      cjs: "JavaScript",
+      dart: "Dart",
+      erl: "Erlang",
+      ex: "Elixir",
+      exs: "Elixir",
+      fs: "F#",
+      fsx: "F#",
+      go: "Go",
+      java: "Java",
+      js: "JavaScript",
+      jsx: "JavaScript",
+      kt: "Kotlin",
+      kts: "Kotlin",
+      lua: "Lua",
+      mjs: "JavaScript",
+      php: "PHP",
+      pl: "Perl",
+      pm: "Perl",
+      ps1: "PowerShell",
+      py: "Python",
+      r: "R",
+      rb: "Ruby",
+      rs: "Rust",
+      scala: "Scala",
+      sh: "Shell",
+      swift: "Swift",
+      ts: "TypeScript",
+      tsx: "TypeScript",
+    } as Record<string, string | undefined>
+  )[extension];
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 async function runPiStage<TArtifact extends PiStructuredArtifact>(
@@ -473,7 +1368,7 @@ function startPiStageHeartbeat<TArtifact extends PiStructuredArtifact>(
         stage.input.onProgress?.({
           details: { heartbeat_source: "host", step: stage.step },
           job: stage.jobName,
-          message: `${stage.step} collector: still running in Daytona sandbox.`,
+          message: `${stage.step} collector: agent still running.`,
           type: "pi.host.heartbeat",
         }),
       ).catch(() => undefined),
@@ -578,7 +1473,29 @@ export function validateCoverageStructureArtifact(input: {
 }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
-  validateBasePiArtifact(artifact, "coverage-structure", errors);
+  if (artifact.kind !== "coverage-structure") {
+    errors.push("coverage-structure schema kind is missing or invalid.");
+  }
+  if (artifact.generated_by !== "vibeshield" && artifact.generated_by !== "pi") {
+    errors.push("coverage-structure.generated_by must be vibeshield or pi.");
+  }
+  if (typeof artifact.generated_at !== "string" || artifact.generated_at.trim() === "") {
+    errors.push("coverage-structure.generated_at must be a string.");
+  }
+  if (!isRecord(artifact.repo)) {
+    errors.push("coverage-structure.repo must be an object.");
+  }
+  if (!isRecord(artifact.metadata)) {
+    errors.push("coverage-structure.metadata must be an object.");
+  }
+  if (artifact.coverage !== undefined) {
+    requireObjectProperty(artifact, "coverage", errors);
+    requireArrayProperty(artifact.coverage, "reviewed", errors);
+    requireArrayProperty(artifact.coverage, "not_covered", errors);
+  }
+  if (artifact.fact_gaps !== undefined && !Array.isArray(artifact.fact_gaps)) {
+    errors.push("coverage-structure.fact_gaps must be an array.");
+  }
   requireArrayProperty(artifact, "repository_structure", errors);
   throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
@@ -606,31 +1523,51 @@ export function validateEntrypointsArtifact(input: { artifact: EntrypointsArtifa
   throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
-export function validateAuthConfigSecretsArtifact(input: {
-  artifact: AuthConfigSecretsArtifact;
-}): void {
+export function validateAuthAccessArtifact(input: { artifact: AuthAccessArtifact }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
-  validateBasePiArtifact(artifact, "auth-config-secrets", errors);
+  validateBasePiArtifact(artifact, "auth-access", errors);
   requireArrayProperty(artifact, "auth", errors);
-  requireArrayProperty(artifact, "config", errors);
   requireOptionalArrayProperty(artifact, "entrypoint_access", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
+}
+
+export function validateConfigSecretsArtifact(input: { artifact: ConfigSecretsArtifact }): void {
+  const artifact = input.artifact;
+  const errors: string[] = [];
+  validateBasePiArtifact(artifact, "config-secrets", errors);
+  requireArrayProperty(artifact, "config", errors);
   requireOptionalArrayProperty(artifact, "secret_locations", errors);
   requireOptionalArrayProperty(artifact, "secret_references", errors);
   throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
-export function validateStorageIntegrationsInfraArtifact(input: {
-  artifact: StorageIntegrationsInfraArtifact;
+export function validateStorageDataModelArtifact(input: {
+  artifact: StorageDataModelArtifact;
 }): void {
   const artifact = input.artifact;
   const errors: string[] = [];
-  validateBasePiArtifact(artifact, "storage-integrations-infra", errors);
+  validateBasePiArtifact(artifact, "storage-data-model", errors);
   requireArrayProperty(artifact, "storage", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
+}
+
+export function validateExternalIntegrationsEgressArtifact(input: {
+  artifact: ExternalIntegrationsEgressArtifact;
+}): void {
+  const artifact = input.artifact;
+  const errors: string[] = [];
+  validateBasePiArtifact(artifact, "external-integrations-egress", errors);
   requireArrayProperty(artifact, "integrations", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
+}
+
+export function validateInfraDeployArtifact(input: { artifact: InfraDeployArtifact }): void {
+  const artifact = input.artifact;
+  const errors: string[] = [];
+  validateBasePiArtifact(artifact, "infra-deploy", errors);
   requireArrayProperty(artifact, "infra", errors);
   requireOptionalArrayProperty(artifact, "ci", errors);
-  requireOptionalArrayProperty(artifact, "infrastructure", errors);
   throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
@@ -639,7 +1576,24 @@ export function validateOperationSinksArtifact(input: { artifact: OperationSinks
   const errors: string[] = [];
   validateBasePiArtifact(artifact, "operation-sinks", errors);
   requireArrayProperty(artifact, "operation_sinks", errors);
-  requireOptionalArrayProperty(artifact, "sinks", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
+}
+
+export function validateCryptoArtifact(input: { artifact: CryptoArtifact }): void {
+  const artifact = input.artifact;
+  const errors: string[] = [];
+  validateBasePiArtifact(artifact, "crypto", errors);
+  requireArrayProperty(artifact, "crypto", errors);
+  throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
+}
+
+export function validateLoggingObservabilityArtifact(input: {
+  artifact: LoggingObservabilityArtifact;
+}): void {
+  const artifact = input.artifact;
+  const errors: string[] = [];
+  validateBasePiArtifact(artifact, "logging-observability", errors);
+  requireArrayProperty(artifact, "logging", errors);
   throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
@@ -673,66 +1627,7 @@ export function validateRepositoryMapArtifact(input: { artifact: RepositoryMapAr
   throwIfValidationErrors(errors, validationStageForKind(artifact.kind), artifact.kind);
 }
 
-function buildCoverageStructurePrompt(contextPack: PiContextPackArtifact): string {
-  return `${factsOnlyPreamble()}
-
-Task:
-Create the coverage-structure section artifact. This artifact answers assignment sections 0 and 2:
-- coverage and completeness;
-- shallow repository structure.
-
-Collect only observable facts:
-- repository size and language LOC from Stage input inventory only;
-- top-level tree, 1-2 levels deep;
-- meaningful source/test/config/infra/docs/dependency areas and their purpose;
-- directories reviewed;
-- directories excluded or not covered and why;
-- places without access or without enough evidence.
-
-Depth bounds:
-- Use inventory and focused file reads only.
-- Do not treat README, docs, examples, or marketing copy as truth about code behavior. They may be cited only as documentation files.
-- Do not perform exhaustive directory traversal when inventory already gives the structure.
-- Do not inspect every source file.
-- Do not list individual files except as representative evidence for a directory role.
-
-Write ONLY valid JSON matching coverage-structure:
-{
-  "kind": "coverage-structure",
-  "generated_at": "ISO timestamp",
-  "generated_by": "pi",
-  "repo": { "url": "string", "commit_sha": "string or null" },
-  "repo_size": { "file_count": 0, "total_loc": 0, "source": "inventory" },
-  "language_summary": [
-    { "language": "string", "file_count": 0, "loc": 0, "source": "inventory" }
-  ],
-  "top_level_tree": [
-    { "path": "relative/path", "depth": 1, "kind": "source|test|config|docs|infra|generated|dependency|other", "role": "directory purpose", "evidence": ["relative/path:line"] }
-  ],
-  "reviewed_directories": [
-    { "path": "relative/path", "reason": "why reviewed", "evidence": ["relative/path:line"] }
-  ],
-  "excluded_directories": [
-    { "path": "relative/path", "reason": "vendored|generated|binary|too large|not relevant|not present", "evidence": ["relative/path:line"] }
-  ],
-  "access_gaps": [
-    { "area": "string", "reason": "string", "evidence": ["relative/path:line"] }
-  ],
-  "repository_structure": [
-    { "path": "relative/path", "kind": "source|test|config|docs|infra|generated|dependency|other", "role": "string", "evidence": ["relative/path:line"] }
-  ],
-  "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
-    "not_covered": [{ "area": "string", "reason": "string" }]
-  },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
-}
-
-Stage input:
-${JSON.stringify(contextPack, null, 2)}`;
-}
-
-function buildStackBuildDepsPrompt(contextPack: PiContextPackArtifact): string {
+function buildStackBuildDepsPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
@@ -753,11 +1648,18 @@ Collect only observable facts from manifests and config files:
 - vendored dependency directories as a fact when observable.
 
 Depth bounds:
+- Use the supplied repository navigation index as the starting map. Prioritize
+  manifest, package, lock, CI, IaC, config, and infra paths from that input.
 - Do not install dependencies.
 - Do not run package scripts, builds, tests, migrations, or generators.
+- Do not inspect source files unless a manifest/config points to a declared
+  framework, runtime, command, dependency, or CI/deploy fact that needs minimal
+  confirmation.
 - Do not infer runtime behavior from dependency names alone.
 - Do not expand transitive dependencies manually. If a lockfile exists, record that transitive dependencies are available through it.
 - Commands are declarations found in manifests/config, not commands you ran.
+- Keep direct dependency output compact. Group repetitive dependency families in
+  dependency_notes instead of dumping large dependency lists.
 
 Write ONLY valid JSON matching stack-build-deps:
 {
@@ -793,7 +1695,7 @@ Stage input:
 ${JSON.stringify(contextPack, null, 2)}`;
 }
 
-function buildEntrypointsPrompt(contextPack: PiContextPackArtifact): string {
+function buildEntrypointsPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
@@ -811,13 +1713,18 @@ Collect externally reachable or externally triggered boundaries only:
 - parsers of external formats when they are the invoked boundary.
 
 Depth bounds:
+- Use the supplied repository navigation index as the starting map, not as proof
+  and not as an exhaustive truth source.
+- Use find/grep/read to discover boundary declarations and registrations from
+  the repository when the index is not enough.
 - Stay at boundary level.
 - Do not perform line-by-line handler analysis.
 - Do not analyze handler bodies beyond what is needed to classify the boundary.
 - Do not list internal helper functions, serializers, SDK calls, or transformations as entrypoints.
 - Prefer declaration and registration evidence when both are visible.
 - Include handler or callback name/path when observable.
-- If a framework generates many equivalent routes, group only when necessary and explain the gap in coverage.not_covered.
+- If patterns repeat heavily, group by boundary family with representative
+  evidence and explain the unexpanded area in coverage.not_covered.
 
 Write ONLY valid JSON matching entrypoints:
 {
@@ -851,34 +1758,37 @@ Stage input:
 ${JSON.stringify(contextPack, null, 2)}`;
 }
 
-function buildAuthConfigSecretsPrompt(contextPack: unknown): string {
+function buildAuthAccessPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the auth-config-secrets section artifact. This artifact answers assignment sections 4 and 7:
+Create the auth-access section artifact. This artifact answers assignment section 4:
 - authentication and authorization;
-- secrets and configuration.
+- observable access status for accepted entrypoints.
 
 Collect only:
 - auth mechanisms: session, JWT, OAuth, API key, mTLS, provider config;
 - middleware, guards, decorators, authorization checks, role/scope checks;
 - where sessions or credentials are stored or checked when observable;
-- protected/public/unknown status for entrypoints from inputs.entrypoints;
-- config files, environment variable names, config loaders, default values by name only;
-- .env files and examples;
-- secret-manager references;
-- hardcoded secret-like string locations as facts only, never values.
+- protected/public/unknown status for entrypoints from inputs.entrypoints.
 
 Depth bounds:
+- Use the supplied accepted entrypoints as the entrypoint list.
+- Use the repository navigation index only to find auth, authorization,
+  middleware, guard, decorator, role/scope, session, or token check facts.
+- Inspect route registration, middleware declarations, guards/decorators, and
+  minimal nearby handler code when needed to classify access status.
+- If access status is not obvious from those facts, record "unknown".
 - Do not verify auth correctness.
 - Do not infer missing authorization.
 - Do not rediscover entrypoints. Use inputs.entrypoints for endpoint IDs and status mapping.
-- Do not output secret values, connection strings, cookies, tokens, private keys, or passwords. Use only names and set value_redacted true for secret_references.
-- Do not root-cause configuration behavior.
+- Do not map general config, env, or secret references unless they directly
+  identify an auth mechanism or session/token storage/check.
+- Group repeated auth patterns by family with representative evidence.
 
-Write ONLY valid JSON matching auth-config-secrets:
+Write ONLY valid JSON matching auth-access:
 {
-  "kind": "auth-config-secrets",
+  "kind": "auth-access",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
@@ -888,6 +1798,50 @@ Write ONLY valid JSON matching auth-config-secrets:
   "entrypoint_access": [
     { "entrypoint_id": "id from inputs.entrypoints", "status": "protected|public|unknown", "mechanism": "optional string", "roles_scopes": ["optional role or scope names"], "session_storage": "optional observed storage/check location", "evidence": ["relative/path:line"] }
   ],
+  "coverage": {
+    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "not_covered": [{ "area": "string", "reason": "string" }]
+  },
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+}
+
+Stage input:
+${JSON.stringify(contextPack, null, 2)}`;
+}
+
+function buildConfigSecretsPrompt(contextPack: unknown): string {
+  return `${factsOnlyPreamble()}
+
+Task:
+Create the config-secrets section artifact. This artifact answers assignment section 7:
+- secrets and configuration.
+
+Collect only:
+- config files and configuration modules;
+- environment variable names and config loaders;
+- default/example config values by name or status only;
+- .env files and examples;
+- secret-manager or credential-store references;
+- hardcoded secret-like string locations as facts only, never values.
+
+Depth bounds:
+- Use the supplied repository navigation index and config/manifest file lists as
+  the starting map.
+- Stay at configuration-source level.
+- Do not classify entrypoint access or auth protection.
+- Do not perform broad repo-wide secret hunting; deterministic scanners provide
+  concrete secret observations separately.
+- Do not output secret values, connection strings, cookies, tokens, private keys, or passwords. Use only names and set value_redacted true for secret_references.
+- Do not root-cause configuration behavior.
+- Group repeated config/env/secret references by family when exact values or all
+  occurrences are not needed for the map.
+
+Write ONLY valid JSON matching config-secrets:
+{
+  "kind": "config-secrets",
+  "generated_at": "ISO timestamp",
+  "generated_by": "pi",
+  "repo": { "url": "string", "commit_sha": "string or null" },
   "config": [
     { "id": "stable short id", "kind": "config_source|other", "name": "env/config key name", "location": "relative/path", "value_status": "unset|defaulted|required|example|unknown", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
   ],
@@ -905,46 +1859,37 @@ Stage input:
 ${JSON.stringify(contextPack, null, 2)}`;
 }
 
-function buildStorageIntegrationsInfraPrompt(contextPack: PiContextPackArtifact): string {
+function buildStorageDataModelPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the storage-integrations-infra section artifact. This artifact answers assignment sections 9, 10, and 12:
-- storage and data model;
-- external integrations and network egress;
-- infrastructure and deployment.
+Create the storage-data-model section artifact. This artifact answers assignment section 9:
+- storage and data model.
 
 Collect only map facts:
 - databases and their types;
 - ORM models, schemas, migrations;
 - caches, queues, object/file storage and buckets;
-- entities or fields that appear personal/sensitive by schema or field name only;
-- external APIs, SDK providers, configured hosts, message brokers;
-- Dockerfile facts: base image, user, exposed ports, entrypoint;
-- compose/k8s facts: services, ports, mounts, secrets;
-- IaC and proxy/server config declarations.
+- entities or fields that appear personal/sensitive by schema or field name only.
 
 Depth bounds:
-- Do not call external services.
-- Do not run Docker, Terraform, package scripts, or workflow commands.
-- Do not assess exposure, permissions, risk, or misconfiguration.
-- Do not trace integration call chains; record declarations and direct client setup at map level.
+- Use manifests, accepted config-secrets, and the source index as the starting map.
+- Use find/grep/read to discover storage, model, schema, migration, cache, queue,
+  bucket, and file-storage declarations.
+- Do not trace storage call chains.
 - Do not infer data sensitivity beyond field/schema names.
+- Do not include external API, egress, infra, deploy, crypto, logging, or operation-sink facts.
+- Group repeated storage/model/schema declarations by family when exhaustive
+  enumeration would make the map noisy.
 
-Write ONLY valid JSON matching storage-integrations-infra:
+Write ONLY valid JSON matching storage-data-model:
 {
-  "kind": "storage-integrations-infra",
+  "kind": "storage-data-model",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "storage": [
     { "id": "stable short id", "kind": "database|cache|message_queue|object_storage|file_storage|other", "name": "string", "type": "optional string", "location": "relative/path", "role": "string", "fields": ["optional observed field names"], "data_categories": ["optional observed categories by field name"], "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
-  ],
-  "integrations": [
-    { "id": "stable short id", "kind": "external_api|service|message_broker|other", "name": "string", "from": "relative/path", "target": "host/service/sdk when observable", "location": "relative/path", "role": "purpose as declared", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
-  ],
-  "infra": [
-    { "id": "stable short id", "kind": "dockerfile|compose|kubernetes|iac|proxy|hosting|runtime|service|other", "name": "string", "location": "relative/path", "base_image": "optional string", "user": "optional string", "ports": ["optional observed ports"], "mounts": ["optional observed mounts"], "secrets": ["optional secret names only"], "entrypoint": "optional string", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
   ],
   "coverage": {
     "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
@@ -957,14 +1902,99 @@ Stage input:
 ${JSON.stringify(contextPack, null, 2)}`;
 }
 
-function buildOperationSinksPrompt(contextPack: PiContextPackArtifact): string {
+function buildExternalIntegrationsEgressPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the operation-sinks section artifact. This artifact answers assignment sections 6, 8, and 13:
-- operation sink inventory;
-- cryptography;
-- logging and observability.
+Create the external-integrations-egress section artifact. This artifact answers assignment section 10:
+- external integrations and network egress.
+
+Collect only map facts:
+- third-party APIs and services;
+- SDK integrations;
+- configured hosts, service URLs, and outbound destinations;
+- brokers and external message services;
+- direct client setup and destination construction.
+
+Depth bounds:
+- Use accepted config-secrets, manifests, and source index as the starting map.
+- Use find/grep/read to discover client setup, SDK usage, hosts, service URLs,
+  brokers, and outbound destination declarations.
+- Do not trace business call chains.
+- Do not call external services.
+- Do not include infra/deploy, storage model, crypto, logging, or data-flow facts.
+- Group repeated integrations by family with representative evidence.
+
+Write ONLY valid JSON matching external-integrations-egress:
+{
+  "kind": "external-integrations-egress",
+  "generated_at": "ISO timestamp",
+  "generated_by": "pi",
+  "repo": { "url": "string", "commit_sha": "string or null" },
+  "integrations": [
+    { "id": "stable short id", "kind": "external_api|service|message_broker|sdk|outbound_host|other", "name": "string", "from": "relative/path", "target": "host/service/sdk when observable", "location": "relative/path", "role": "purpose as declared", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+  ],
+  "coverage": {
+    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "not_covered": [{ "area": "string", "reason": "string" }]
+  },
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+}
+
+Stage input:
+${JSON.stringify(contextPack, null, 2)}`;
+}
+
+function buildInfraDeployPrompt(contextPack: unknown): string {
+  return `${factsOnlyPreamble()}
+
+Task:
+Create the infra-deploy section artifact. This artifact answers assignment section 12:
+- infrastructure and deployment.
+
+Collect only map facts:
+- Dockerfile facts: base image, user, exposed ports, entrypoint;
+- compose/k8s facts: services, ports, mounts, secrets;
+- IaC, proxy, hosting, runtime, CI/deploy infrastructure declarations.
+
+Depth bounds:
+- Use infra files, IaC candidates, workflow paths, config files, and top-level
+  structure as the starting map.
+- Use find/grep/read to discover deployment and runtime declarations.
+- Do not run Docker, Terraform, workflows, package scripts, or deploy commands.
+- Do not assess exposure, permissions, risk, or misconfiguration.
+- Do not include storage model, external integration, operation-sink, crypto, or logging facts.
+- Group repeated infra declarations by family with representative evidence.
+
+Write ONLY valid JSON matching infra-deploy:
+{
+  "kind": "infra-deploy",
+  "generated_at": "ISO timestamp",
+  "generated_by": "pi",
+  "repo": { "url": "string", "commit_sha": "string or null" },
+  "infra": [
+    { "id": "stable short id", "kind": "dockerfile|compose|kubernetes|iac|proxy|hosting|runtime|service|workflow|other", "name": "string", "location": "relative/path", "base_image": "optional string", "user": "optional string", "ports": ["optional observed ports"], "mounts": ["optional observed mounts"], "secrets": ["optional secret names only"], "entrypoint": "optional string", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+  ],
+  "ci": [
+    { "id": "stable short id", "kind": "workflow|deploy|runtime|other", "name": "string", "location": "relative/path", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+  ],
+  "coverage": {
+    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "not_covered": [{ "area": "string", "reason": "string" }]
+  },
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+}
+
+Stage input:
+${JSON.stringify(contextPack, null, 2)}`;
+}
+
+function buildOperationSinksPrompt(contextPack: unknown): string {
+  return `${factsOnlyPreamble()}
+
+Task:
+Create the operation-sinks section artifact. This artifact answers assignment section 6:
+- operation sink inventory.
 
 Collect observable operation families only. Do not make security claims.
 
@@ -977,19 +2007,19 @@ Operation families:
 - deserialization/parsing of external data;
 - template rendering;
 - redirects;
-- outbound HTTP/client SDK URL construction;
-- crypto operations, algorithms, modes, key/IV/salt parameters when directly visible;
-- password hashing calls;
-- TLS configuration calls;
-- randomness sources;
-- logging/observability calls, destinations, and logged external-input or storage-field names when directly visible.
+- outbound HTTP/client SDK URL construction.
 
 Depth bounds:
+- Use the supplied repository navigation index as the starting map.
+- Use find/grep/read to discover operation families instead of relying on file
+  names.
 - Stay at operation-family level.
 - Do not trace callers, taint, exploitability, severity, impact, or fixes.
 - Do not create one item per repeated helper call or log line.
 - Do not perform root-cause or full business-logic analysis.
+- Do not include crypto, randomness, password hashing, TLS, logging, or observability facts.
 - Cite operation lines or nearby variable construction lines that directly support classification.
+- Group repeated operation calls by family with representative evidence.
 
 Write ONLY valid JSON matching operation-sinks:
 {
@@ -1000,19 +2030,97 @@ Write ONLY valid JSON matching operation-sinks:
   "operation_sinks": [
     {
       "id": "stable short id",
-      "kind": "sql_or_orm_query|nosql_query|process_execution|filesystem_operation|path_construction|deserialization_or_parsing|template_rendering|redirect|outbound_http_or_sdk_url|crypto_operation|randomness|logging|other",
+      "kind": "sql_or_orm_query|nosql_query|process_execution|filesystem_operation|path_construction|deserialization_or_parsing|template_rendering|redirect|outbound_http_or_sdk_url|other",
       "operation": "observable operation only",
       "location": "relative/path",
       "input_variables": ["optional variable names"],
       "query_construction": "optional parameterized|concatenated|literal|unknown",
-      "algorithm": "optional observed crypto/hash algorithm",
-      "mode": "optional observed crypto mode",
       "parameters": ["optional observed parameter names only"],
-      "destination": "optional logging/egress destination",
-      "logged_fields": ["optional observed field or variable names"],
+      "destination": "optional egress destination",
       "confidence": "low|medium|high",
       "evidence": ["relative/path:line"]
     }
+  ],
+  "coverage": {
+    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "not_covered": [{ "area": "string", "reason": "string" }]
+  },
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+}
+
+Stage input:
+${JSON.stringify(contextPack, null, 2)}`;
+}
+
+function buildCryptoPrompt(contextPack: unknown): string {
+  return `${factsOnlyPreamble()}
+
+Task:
+Create the crypto section artifact. This artifact answers assignment section 8:
+- cryptography.
+
+Collect only observable crypto and randomness facts:
+- crypto operations, algorithms, modes, key/IV/salt parameters when directly visible;
+- password hashing calls;
+- TLS configuration calls;
+- randomness sources.
+
+Depth bounds:
+- Use source index and config files as the starting map.
+- Use find/grep/read to discover crypto, password hashing, randomness, and TLS config facts.
+- Do not assess algorithm strength, correctness, exploitability, severity, impact, or fixes.
+- Do not include generic operation sinks, storage, integration, or logging facts.
+- Group repeated crypto/randomness calls by family with representative evidence.
+
+Write ONLY valid JSON matching crypto:
+{
+  "kind": "crypto",
+  "generated_at": "ISO timestamp",
+  "generated_by": "pi",
+  "repo": { "url": "string", "commit_sha": "string or null" },
+  "crypto": [
+    { "id": "stable short id", "kind": "crypto_operation|password_hashing|randomness|tls_configuration|other", "name": "string", "operation": "observable operation only", "location": "relative/path", "algorithm": "optional observed algorithm", "mode": "optional observed mode", "parameters": ["optional observed parameter names only"], "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+  ],
+  "coverage": {
+    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "not_covered": [{ "area": "string", "reason": "string" }]
+  },
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+}
+
+Stage input:
+${JSON.stringify(contextPack, null, 2)}`;
+}
+
+function buildLoggingObservabilityPrompt(contextPack: unknown): string {
+  return `${factsOnlyPreamble()}
+
+Task:
+Create the logging-observability section artifact. This artifact answers assignment section 13:
+- logging and observability.
+
+Collect only observable logging and telemetry facts:
+- logging/observability calls;
+- logged field or variable names when directly visible;
+- whether external input or storage-field names appear in log calls as observable facts;
+- logging, metrics, tracing, or telemetry destinations when configured.
+
+Depth bounds:
+- Use source index, manifests, and config files as the starting map.
+- Use find/grep/read to discover logging, metrics, tracing, telemetry, and destination facts.
+- Do not infer runtime log contents.
+- Do not judge sensitivity, exposure, risk, severity, impact, or fixes.
+- Do not include operation sinks, crypto, storage, or integration facts unless they are directly logging/telemetry destinations.
+- Group repeated logging calls by family with representative evidence.
+
+Write ONLY valid JSON matching logging-observability:
+{
+  "kind": "logging-observability",
+  "generated_at": "ISO timestamp",
+  "generated_by": "pi",
+  "repo": { "url": "string", "commit_sha": "string or null" },
+  "logging": [
+    { "id": "stable short id", "kind": "logging|metrics|tracing|telemetry|other", "name": "string", "operation": "observable call or destination", "location": "relative/path", "destination": "optional configured destination", "logged_fields": ["optional observed field or variable names"], "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
   ],
   "coverage": {
     "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
@@ -1033,14 +2141,18 @@ Create the data-flows section artifact. This artifact answers assignment section
 Use only inputs.entrypoints and inputs.operation_sinks from the stage input.
 
 Rules:
-- Do not use coverage-structure, stack-build-deps, auth-config-secrets, storage-integrations-infra, trust-boundaries, or repository-map as data-flow inputs.
+- Do not use coverage-structure, stack-build-deps, auth-access, config-secrets, storage-data-model, external-integrations-egress, infra-deploy, crypto, logging-observability, trust-boundaries, or repository-map as data-flow inputs.
 - Start from externally controlled entrypoints and operation-sink evidence only.
+- Use the supplied entrypoints and operation_sinks artifacts as the complete
+  navigation plan for this step.
 - Read repository files only to confirm a direct or shallow named connection.
 - Prefer key externally controlled inputs; do not enumerate every possible variable flow.
 - Do not perform exhaustive tracing, line-by-line handler review, callback resolution, framework internals analysis, or root-cause analysis.
 - Use "multi-step inferred" only for one or two named function hops with evidence.
 - Use "not traced beyond path:line" or "not established" when deeper analysis would be required.
 - Every row with a connection across functions or files must set inference true.
+- Group similar flows and record not_covered/fact_gaps instead of producing a
+  large speculative flow list.
 
 Write ONLY valid JSON matching data-flows:
 {
@@ -1102,9 +2214,14 @@ Write ONLY valid JSON matching trust-boundaries:
     "coverage_structure_artifact": "${repoMapPaths.coverageStructure}",
     "stack_build_deps_artifact": "${repoMapPaths.stackBuildDeps}",
     "entrypoints_artifact": "${repoMapPaths.entrypoints}",
-    "auth_config_secrets_artifact": "${repoMapPaths.authConfigSecrets}",
-    "storage_integrations_infra_artifact": "${repoMapPaths.storageIntegrationsInfra}",
+    "auth_access_artifact": "${repoMapPaths.authAccess}",
+    "config_secrets_artifact": "${repoMapPaths.configSecrets}",
+    "storage_data_model_artifact": "${repoMapPaths.storageDataModel}",
+    "external_integrations_egress_artifact": "${repoMapPaths.externalIntegrationsEgress}",
+    "infra_deploy_artifact": "${repoMapPaths.infraDeploy}",
     "operation_sinks_artifact": "${repoMapPaths.operationSinks}",
+    "crypto_artifact": "${repoMapPaths.crypto}",
+    "logging_observability_artifact": "${repoMapPaths.loggingObservability}",
     "data_flows_artifact": "${repoMapPaths.dataFlows}"
   },
   "boundaries": [
@@ -1153,9 +2270,14 @@ Write ONLY valid JSON matching repository-map:
     "coverage_structure_artifact": "${repoMapPaths.coverageStructure}",
     "stack_build_deps_artifact": "${repoMapPaths.stackBuildDeps}",
     "entrypoints_artifact": "${repoMapPaths.entrypoints}",
-    "auth_config_secrets_artifact": "${repoMapPaths.authConfigSecrets}",
-    "storage_integrations_infra_artifact": "${repoMapPaths.storageIntegrationsInfra}",
+    "auth_access_artifact": "${repoMapPaths.authAccess}",
+    "config_secrets_artifact": "${repoMapPaths.configSecrets}",
+    "storage_data_model_artifact": "${repoMapPaths.storageDataModel}",
+    "external_integrations_egress_artifact": "${repoMapPaths.externalIntegrationsEgress}",
+    "infra_deploy_artifact": "${repoMapPaths.infraDeploy}",
     "operation_sinks_artifact": "${repoMapPaths.operationSinks}",
+    "crypto_artifact": "${repoMapPaths.crypto}",
+    "logging_observability_artifact": "${repoMapPaths.loggingObservability}",
     "data_flows_artifact": "${repoMapPaths.dataFlows}",
     "trust_boundaries_artifact": "${repoMapPaths.trustBoundaries}"
   },
@@ -1184,8 +2306,13 @@ function factsOnlyPreamble(): string {
   return `You are a static AppSec repository cartographer in read-only, facts-only mode.
 
 Goal:
-Create compact, evidence-backed JSON map artifacts for later human review.
-Stay at map level: identify observable repository structure, declared stack, entrypoints, config references, integrations, operation families, shallow data connections, and explicit inference boundaries.
+Create compact, evidence-backed JSON map artifacts for later AppSec
+attack-hypothesis building and manual review.
+Stay at map level: identify observable repository structure, declared stack,
+entrypoints, config references, integrations, operation families, shallow data
+connections, and explicit inference boundaries.
+Prefer declarations, registrations, manifests, configs, schemas, and the
+minimum nearby code needed to classify a fact.
 
 Forbidden:
 - Do not look for vulnerabilities.
@@ -1456,22 +2583,32 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
 
 function validationStageForKind(kind: PiStructuredArtifact["kind"]): PiStageValidationStage {
   switch (kind) {
-    case "auth-config-secrets":
-      return "auth-config-secrets-validation";
+    case "auth-access":
+      return "auth-access-validation";
+    case "config-secrets":
+      return "config-secrets-validation";
     case "coverage-structure":
       return "coverage-structure-validation";
+    case "crypto":
+      return "crypto-validation";
     case "data-flows":
       return "data-flows-validation";
     case "entrypoints":
       return "entrypoints-validation";
+    case "external-integrations-egress":
+      return "external-integrations-egress-validation";
+    case "infra-deploy":
+      return "infra-deploy-validation";
+    case "logging-observability":
+      return "logging-observability-validation";
     case "operation-sinks":
       return "operation-sinks-validation";
     case "repository-map":
       return "repository-map-validation";
     case "stack-build-deps":
       return "stack-build-deps-validation";
-    case "storage-integrations-infra":
-      return "storage-integrations-infra-validation";
+    case "storage-data-model":
+      return "storage-data-model-validation";
     case "trust-boundaries":
       return "trust-boundaries-validation";
   }
@@ -1489,33 +2626,13 @@ function normalizeParsedArtifact(
     }
   }
 
-  if (kind === "auth-config-secrets") {
+  if (kind === "auth-access") {
     for (const auth of optionalArrayField<Record<string, unknown>>(parsed, "auth")) {
       if (typeof auth.kind !== "string") {
         auth.kind =
           typeof auth.mechanism === "string" && auth.mechanism.includes("middleware")
             ? "middleware"
             : "other";
-      }
-    }
-  }
-
-  if (kind === "storage-integrations-infra") {
-    const infra = optionalArrayField(parsed, "infra");
-    if (infra.length === 0) {
-      const infrastructure = optionalArrayField(parsed, "infrastructure");
-      if (infrastructure.length > 0) {
-        parsed.infra = infrastructure;
-      }
-    }
-  }
-
-  if (kind === "operation-sinks") {
-    const operationSinks = optionalArrayField(parsed, "operation_sinks");
-    if (operationSinks.length === 0) {
-      const sinks = optionalArrayField(parsed, "sinks");
-      if (sinks.length > 0) {
-        parsed.operation_sinks = sinks;
       }
     }
   }
@@ -1667,13 +2784,18 @@ function asRunStage(stage: PiStageValidationStage): RunStage {
 
 function priorMapArtifactPaths(): Record<string, string> {
   return {
-    auth_config_secrets_artifact: repoMapPaths.authConfigSecrets,
+    auth_access_artifact: repoMapPaths.authAccess,
+    config_secrets_artifact: repoMapPaths.configSecrets,
     coverage_structure_artifact: repoMapPaths.coverageStructure,
+    crypto_artifact: repoMapPaths.crypto,
     data_flows_artifact: repoMapPaths.dataFlows,
     entrypoints_artifact: repoMapPaths.entrypoints,
+    external_integrations_egress_artifact: repoMapPaths.externalIntegrationsEgress,
+    infra_deploy_artifact: repoMapPaths.infraDeploy,
+    logging_observability_artifact: repoMapPaths.loggingObservability,
     operation_sinks_artifact: repoMapPaths.operationSinks,
     stack_build_deps_artifact: repoMapPaths.stackBuildDeps,
-    storage_integrations_infra_artifact: repoMapPaths.storageIntegrationsInfra,
+    storage_data_model_artifact: repoMapPaths.storageDataModel,
   };
 }
 

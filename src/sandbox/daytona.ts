@@ -74,6 +74,10 @@ export interface DaytonaSandboxLike {
     getSessionCommandLogs?(
       sessionId: string,
       commandId: string,
+    ): Promise<{ output?: string; stderr?: string; stdout?: string }>;
+    getSessionCommandLogs?(
+      sessionId: string,
+      commandId: string,
       onStdout: (chunk: string) => void,
       onStderr: (chunk: string) => void,
     ): Promise<void>;
@@ -105,6 +109,10 @@ interface DaytonaSessionProcessApi {
   getSessionCommandLogs(
     sessionId: string,
     commandId: string,
+  ): Promise<{ output?: string; stderr?: string; stdout?: string }>;
+  getSessionCommandLogs(
+    sessionId: string,
+    commandId: string,
     onStdout: (chunk: string) => void,
     onStderr: (chunk: string) => void,
   ): Promise<void>;
@@ -122,7 +130,7 @@ export interface DaytonaSandboxProviderOptions {
 
 const defaultRepoPath = "repo";
 const defaultArtifactDir = "vibeshield/artifacts";
-const defaultArtifactPath = "vibeshield/artifacts/repo-inventory.json";
+const defaultArtifactPath = "vibeshield/artifacts/inventory.json";
 
 export class DaytonaSandboxProvider implements SandboxProvider {
   private client?: DaytonaClientLike;
@@ -585,6 +593,7 @@ export class DaytonaSandboxSession implements SandboxSession {
           stage: "pi",
         });
       }
+      const commandId = started.cmdId;
 
       let logsSettled = false;
       let progressQueue: Promise<unknown> = Promise.resolve();
@@ -596,11 +605,25 @@ export class DaytonaSandboxSession implements SandboxSession {
           Promise.resolve(onProgress(event)).catch(() => undefined),
         );
       });
+      let consumedStdout = "";
+      const consumeStdout = (chunk: string) => {
+        if (chunk === "") {
+          return;
+        }
+        if (chunk.startsWith(consumedStdout)) {
+          const delta = chunk.slice(consumedStdout.length);
+          consumedStdout = chunk;
+          progressParser.consume(delta);
+          return;
+        }
+        consumedStdout += chunk;
+        progressParser.consume(chunk);
+      };
       const logsPromise = processApi
         .getSessionCommandLogs(
           sessionId,
-          started.cmdId,
-          (chunk) => progressParser.consume(chunk),
+          commandId,
+          (chunk) => consumeStdout(chunk),
           () => {},
         )
         .catch(() => undefined)
@@ -610,9 +633,13 @@ export class DaytonaSandboxSession implements SandboxSession {
         });
 
       const exitCode = await waitForSessionCommandExit({
-        commandId: started.cmdId,
+        commandId,
         getCommand: (commandId) => processApi.getSessionCommand(sessionId, commandId),
         logsSettled: () => logsSettled,
+        pollLogs: async () => {
+          const logs = await processApi.getSessionCommandLogs(sessionId, commandId);
+          consumeStdout(logs.stdout ?? logs.output ?? "");
+        },
         timeoutMs: 900_000,
       });
 
@@ -1331,12 +1358,22 @@ function piStepStartMessage(step) {
       return "Collecting stack, build, and dependency facts.";
     case "entrypoints":
       return "Collecting externally reachable entrypoints.";
-    case "auth-config-secrets":
-      return "Mapping auth, config, and secret references.";
-    case "storage-integrations-infra":
-      return "Collecting storage, integration, and infrastructure facts.";
+    case "auth-access":
+      return "Mapping auth and access-control facts.";
+    case "config-secrets":
+      return "Mapping configuration and secret-reference facts.";
+    case "storage-data-model":
+      return "Collecting storage and data-model facts.";
+    case "external-integrations-egress":
+      return "Collecting external integration and egress facts.";
+    case "infra-deploy":
+      return "Collecting infrastructure and deployment facts.";
     case "operation-sinks":
       return "Collecting observable operation sinks.";
+    case "crypto":
+      return "Collecting crypto and randomness facts.";
+    case "logging-observability":
+      return "Collecting logging and observability facts.";
     case "data-flows":
       return "Tracing bounded entrypoint-to-sink flows.";
     case "trust-boundaries":
@@ -1356,12 +1393,22 @@ function piStepDoneMessage(step) {
       return "Stack, build, and dependency facts completed.";
     case "entrypoints":
       return "Entrypoint collection completed.";
-    case "auth-config-secrets":
-      return "Auth, config, and secret-reference map completed.";
-    case "storage-integrations-infra":
-      return "Storage, integration, and infrastructure facts completed.";
+    case "auth-access":
+      return "Auth and access-control map completed.";
+    case "config-secrets":
+      return "Configuration and secret-reference map completed.";
+    case "storage-data-model":
+      return "Storage and data-model facts completed.";
+    case "external-integrations-egress":
+      return "External integration and egress facts completed.";
+    case "infra-deploy":
+      return "Infrastructure and deployment facts completed.";
     case "operation-sinks":
       return "Operation sink inventory completed.";
+    case "crypto":
+      return "Crypto and randomness facts completed.";
+    case "logging-observability":
+      return "Logging and observability facts completed.";
     case "data-flows":
       return "Bounded data-flow tracing completed.";
     case "trust-boundaries":
@@ -1381,12 +1428,22 @@ function piStepFailedMessage(step) {
       return "Stack, build, and dependency collection failed.";
     case "entrypoints":
       return "Entrypoint collection failed.";
-    case "auth-config-secrets":
-      return "Auth, config, and secret-reference mapping failed.";
-    case "storage-integrations-infra":
-      return "Storage, integration, and infrastructure collection failed.";
+    case "auth-access":
+      return "Auth and access-control mapping failed.";
+    case "config-secrets":
+      return "Configuration and secret-reference mapping failed.";
+    case "storage-data-model":
+      return "Storage and data-model collection failed.";
+    case "external-integrations-egress":
+      return "External integration and egress collection failed.";
+    case "infra-deploy":
+      return "Infrastructure and deployment collection failed.";
     case "operation-sinks":
       return "Operation sink collection failed.";
+    case "crypto":
+      return "Crypto and randomness collection failed.";
+    case "logging-observability":
+      return "Logging and observability collection failed.";
     case "data-flows":
       return "Bounded data-flow tracing failed.";
     case "trust-boundaries":
@@ -1503,7 +1560,6 @@ function runPiJsonStream(command, args) {
     let stdoutBuffer = "";
     let stderr = "";
     let finalText = "";
-    let rawJsonlBytes = 0;
     let emittedOutputStarted = false;
     let toolCallCount = 0;
     let childError;
@@ -1528,9 +1584,7 @@ function runPiJsonStream(command, args) {
     timeout.unref();
 
     const heartbeat = setInterval(() => {
-      emitProgress("pi.heartbeat", actorLabel() + ": still running.", {
-        raw_jsonl_bytes: rawJsonlBytes,
-        stderr_bytes: Buffer.byteLength(stderr, "utf8"),
+      emitProgress("pi.heartbeat", actorLabel() + ": agent still running.", {
         step: config.step,
         tool_calls: toolCallCount,
       });
@@ -1583,7 +1637,6 @@ function runPiJsonStream(command, args) {
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-      rawJsonlBytes += Buffer.byteLength(chunk, "utf8");
       stdoutBuffer += chunk;
       const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() || "";
@@ -1610,7 +1663,6 @@ function runPiJsonStream(command, args) {
       resolve({
         error: childError,
         finalText,
-        rawJsonlBytes,
         signal,
         status: timedOut ? 124 : code,
         stderr,
@@ -1704,7 +1756,6 @@ runPiJsonStream(command, args)
       pi_exit_code: result.status,
       prompt_bytes: Buffer.byteLength(config.prompt, "utf8"),
       provider: config.provider,
-      raw_jsonl_bytes: result.rawJsonlBytes,
       runner_package: "@earendil-works/pi-coding-agent",
       stderr_bytes: Buffer.byteLength(stderr, "utf8"),
       step: config.step,
@@ -1892,6 +1943,7 @@ async function waitForSessionCommandExit(input: {
   commandId: string;
   getCommand: (commandId: string) => Promise<unknown>;
   logsSettled: () => boolean;
+  pollLogs?: () => Promise<void>;
   timeoutMs: number;
 }): Promise<number> {
   const startedAt = Date.now();
@@ -1909,8 +1961,11 @@ async function waitForSessionCommandExit(input: {
       continue;
     }
 
+    await input.pollLogs?.().catch(() => undefined);
+
     const exitCode = readOptionalSessionExitCode(command);
     if (exitCode !== undefined) {
+      await input.pollLogs?.().catch(() => undefined);
       return exitCode;
     }
 

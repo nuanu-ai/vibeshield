@@ -5,6 +5,7 @@ import type {
   BaselineToolName,
   BaselineToolSummary,
   InventoryArtifact,
+  ToolAvailabilityArtifact,
 } from "../artifacts/contracts.js";
 import type { ArtifactStore } from "../artifacts/store.js";
 import { errorMessage } from "../run/errors.js";
@@ -62,30 +63,65 @@ export async function runDeterministicBaseline(
   const jobStates: RunJobState[] = [];
   let sbomSandboxPath: string | undefined;
 
-  const availabilityResult = await input.sandbox.prepareBaselineTools({
-    generatedAt: input.generatedAt,
-    tools: baselineToolOrder.map((tool) => {
-      const skippedReason = skipReasonForTool(tool, githubActionsWorkflows, iacCandidates);
+  const toolRequests = baselineToolOrder.map((tool) => {
+    const skippedReason = skipReasonForTool(tool, githubActionsWorkflows, iacCandidates);
+    return {
+      required: isToolRequired(tool, githubActionsWorkflows, iacCandidates),
+      ...(skippedReason === undefined ? {} : { skippedReason }),
+      tool,
+    };
+  });
+
+  const availabilityResult = await input.sandbox
+    .prepareBaselineTools({
+      generatedAt: input.generatedAt,
+      tools: toolRequests,
+    })
+    .catch(async (error: unknown) => {
+      const diagnostic = `Could not prepare deterministic baseline tools inside Daytona sandbox: ${errorMessage(
+        error,
+      )}`;
+      await input.onProgress?.({
+        message: diagnostic,
+        type: "baseline.tools.prepare_failed",
+      });
+
+      const availability = buildFailedToolAvailability({
+        diagnostic,
+        generatedAt: input.generatedAt,
+        tools: toolRequests,
+      });
+      const artifactPath = await input.store.writeJson({
+        data: availability,
+        id: "baseline-tool-availability",
+        kind: "tool-availability",
+        relativePath: "outputs/baseline/tool-availability.json",
+      });
+
       return {
-        required: isToolRequired(tool, githubActionsWorkflows, iacCandidates),
-        ...(skippedReason === undefined ? {} : { skippedReason }),
-        tool,
+        artifactPath,
+        availability,
       };
-    }),
-  });
-  const toolAvailabilityPath = await pullRuntimeArtifact({
-    artifact: availabilityResult.artifact,
-    job: "tool-availability",
-    outputsDir: input.outputsDir,
-    runDir: input.runDir,
-    sandbox: input.sandbox,
-    stage: "deterministic-baseline",
-  });
-  input.store.register({
-    id: "baseline-tool-availability",
-    kind: "tool-availability",
-    path: toolAvailabilityPath,
-  });
+    });
+
+  const toolAvailabilityPath =
+    "artifactPath" in availabilityResult
+      ? availabilityResult.artifactPath
+      : await pullRuntimeArtifact({
+          artifact: availabilityResult.artifact,
+          job: "tool-availability",
+          outputsDir: input.outputsDir,
+          runDir: input.runDir,
+          sandbox: input.sandbox,
+          stage: "deterministic-baseline",
+        });
+  if (!("artifactPath" in availabilityResult)) {
+    input.store.register({
+      id: "baseline-tool-availability",
+      kind: "tool-availability",
+      path: toolAvailabilityPath,
+    });
+  }
 
   const availabilityByTool = new Map(
     availabilityResult.availability.tools.map((tool) => [tool.tool, tool]),
@@ -219,6 +255,42 @@ export async function runDeterministicBaseline(
     jobStates,
     summary,
     summaryPath,
+  };
+}
+
+function buildFailedToolAvailability(input: {
+  diagnostic: string;
+  generatedAt: string;
+  tools: Array<{
+    required: boolean;
+    skippedReason?: string;
+    tool: BaselineToolName;
+  }>;
+}): ToolAvailabilityArtifact {
+  return {
+    generated_at: input.generatedAt,
+    kind: "tool-availability",
+    tool_bin_dir: "",
+    tools: input.tools.map((tool) => {
+      if (!tool.required) {
+        return {
+          attempts: [],
+          diagnostics: [],
+          required: false,
+          ...(tool.skippedReason === undefined ? {} : { skipped_reason: tool.skippedReason }),
+          status: "not_required",
+          tool: tool.tool,
+        };
+      }
+
+      return {
+        attempts: [],
+        diagnostics: [input.diagnostic],
+        required: true,
+        status: "failed",
+        tool: tool.tool,
+      };
+    }),
   };
 }
 

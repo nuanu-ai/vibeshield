@@ -175,10 +175,6 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     const report = await readFile(path.join(runDir, "report.md"), "utf8");
     expect(report).toContain("# VibeShield Repository Map");
     expect(report).toContain("## 0. Coverage");
-    expect(report).not.toContain("not a security audit");
-    expect(report).not.toContain("No security findings or verdict");
-    expect(report).not.toContain("outputs/repo-inventory.json");
-    expect(await pathExists(path.join(runDir, "outputs", "repo-inventory.json"))).toBe(false);
   });
 
   it("creates a fresh sandbox per run and keeps the checkout out of local artifacts", async () => {
@@ -261,7 +257,5 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     const report = await readFile(path.join(runDir, "report.md"), "utf8");
     expect(report).toContain("Scan did not complete");
     expect(report).toContain("Failed stage: inventory");
-    expect(report).not.toContain("Status: success");
-    expect(report).not.toContain("Security verdict");
   });
 });

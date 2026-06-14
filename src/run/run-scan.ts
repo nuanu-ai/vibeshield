@@ -59,14 +59,19 @@ type JsonObject = Record<string, unknown>;
 type RepoMapRunArtifactKey = keyof NonNullable<ScanRunState["artifacts"]["repo_map"]>;
 
 type RepositoryMapExistingKey =
-  | "authConfigSecrets"
+  | "authAccess"
+  | "configSecrets"
   | "coverageStructure"
+  | "crypto"
   | "dataFlows"
   | "entrypoints"
+  | "externalIntegrationsEgress"
+  | "infraDeploy"
+  | "loggingObservability"
   | "operationSinks"
   | "repositoryMap"
   | "stackBuildDeps"
-  | "storageIntegrationsInfra"
+  | "storageDataModel"
   | "trustBoundaries";
 
 interface RepositoryMapArtifactDefinition {
@@ -128,18 +133,39 @@ const repositoryMapArtifacts: RepositoryMapArtifactDefinition[] = [
     storeIds: ["repo-map-entrypoints", "entrypoints"],
   },
   {
-    existingKey: "authConfigSecrets",
-    path: "outputs/repo-map/auth-config-secrets.json",
-    resultPathKeys: ["authConfigSecretsPath", "auth_config_secrets_path"],
-    runKey: "auth_config_secrets",
-    storeIds: ["repo-map-auth-config-secrets", "auth-config-secrets"],
+    existingKey: "configSecrets",
+    path: "outputs/repo-map/config-secrets.json",
+    resultPathKeys: ["configSecretsPath", "config_secrets_path"],
+    runKey: "config_secrets",
+    storeIds: ["repo-map-config-secrets", "config-secrets"],
   },
   {
-    existingKey: "storageIntegrationsInfra",
-    path: "outputs/repo-map/storage-integrations-infra.json",
-    resultPathKeys: ["storageIntegrationsInfraPath", "storage_integrations_infra_path"],
-    runKey: "storage_integrations_infra",
-    storeIds: ["repo-map-storage-integrations-infra", "storage-integrations-infra"],
+    existingKey: "authAccess",
+    path: "outputs/repo-map/auth-access.json",
+    resultPathKeys: ["authAccessPath", "auth_access_path"],
+    runKey: "auth_access",
+    storeIds: ["repo-map-auth-access", "auth-access"],
+  },
+  {
+    existingKey: "storageDataModel",
+    path: "outputs/repo-map/storage-data-model.json",
+    resultPathKeys: ["storageDataModelPath", "storage_data_model_path"],
+    runKey: "storage_data_model",
+    storeIds: ["repo-map-storage-data-model", "storage-data-model"],
+  },
+  {
+    existingKey: "externalIntegrationsEgress",
+    path: "outputs/repo-map/external-integrations-egress.json",
+    resultPathKeys: ["externalIntegrationsEgressPath", "external_integrations_egress_path"],
+    runKey: "external_integrations_egress",
+    storeIds: ["repo-map-external-integrations-egress", "external-integrations-egress"],
+  },
+  {
+    existingKey: "infraDeploy",
+    path: "outputs/repo-map/infra-deploy.json",
+    resultPathKeys: ["infraDeployPath", "infra_deploy_path"],
+    runKey: "infra_deploy",
+    storeIds: ["repo-map-infra-deploy", "infra-deploy"],
   },
   {
     existingKey: "operationSinks",
@@ -147,6 +173,20 @@ const repositoryMapArtifacts: RepositoryMapArtifactDefinition[] = [
     resultPathKeys: ["operationSinksPath", "operation_sinks_path"],
     runKey: "operation_sinks",
     storeIds: ["repo-map-operation-sinks", "operation-sinks"],
+  },
+  {
+    existingKey: "crypto",
+    path: "outputs/repo-map/crypto.json",
+    resultPathKeys: ["cryptoPath", "crypto_path"],
+    runKey: "crypto",
+    storeIds: ["repo-map-crypto", "crypto"],
+  },
+  {
+    existingKey: "loggingObservability",
+    path: "outputs/repo-map/logging-observability.json",
+    resultPathKeys: ["loggingObservabilityPath", "logging_observability_path"],
+    runKey: "logging_observability",
+    storeIds: ["repo-map-logging-observability", "logging-observability"],
   },
   {
     existingKey: "dataFlows",
@@ -396,10 +436,10 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     run.steps.push(piStep);
     await persistRun();
     await appendEvent({
-      message: "Running staged Pi repository mapping from curated context pack.",
+      message: "Building repository map artifacts.",
       sandbox_id: sandbox.id,
       stage: "pi",
-      type: "pi.started",
+      type: "repository-map.started",
     });
     const piResult = await executePiRepositoryMapping({
       contextPack: contextResult.contextPack,
@@ -801,10 +841,10 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
       run.steps.push(piStep);
       await persistRun();
       await appendEvent({
-        message: "Continuing staged Pi repository mapping from first missing artifact.",
+        message: "Continuing repository map from first missing artifact.",
         sandbox_id: sandbox.id,
         stage: "pi",
-        type: "pi.started",
+        type: "repository-map.started",
       });
       const activeSandbox = sandbox;
       const piResult = await executePiRepositoryMapping({
@@ -842,10 +882,10 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
     } else {
       applyCompleteExistingRepositoryMapArtifacts(run, existingPi);
       await appendEvent({
-        message: "All Pi artifacts already accepted; only report will be regenerated.",
+        message: "All repository map artifacts already accepted; only report will be regenerated.",
         sandbox_id: sandbox.id,
         stage: "pi",
-        type: "resume.artifact_reused",
+        type: "repository-map.reused",
       });
     }
 

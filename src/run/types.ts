@@ -3,7 +3,8 @@ import type { GitHubRepoReference } from "./github-url.js";
 export type RunStatus = "failed" | "running" | "success";
 
 export type RunStage =
-  | "auth-config-secrets-validation"
+  | "auth-access-validation"
+  | "config-secrets-validation"
   | "cleanup"
   | "clone"
   | "completed"
@@ -11,17 +12,21 @@ export type RunStage =
   | "coverage-structure-validation"
   | "create_run"
   | "create_sandbox"
+  | "crypto-validation"
   | "data-flows-validation"
   | "deterministic-baseline"
   | "entrypoints-validation"
+  | "external-integrations-egress-validation"
+  | "infra-deploy-validation"
   | "inventory"
+  | "logging-observability-validation"
   | "operation-sinks-validation"
   | "pi"
   | "report"
   | "repository-map-validation"
   | "resume"
   | "stack-build-deps-validation"
-  | "storage-integrations-infra-validation"
+  | "storage-data-model-validation"
   | "trust-boundaries-validation";
 
 export interface RunError {
@@ -43,13 +48,18 @@ export interface ScanRunState {
     baseline_summary?: string;
     baseline_tool_availability?: string;
     repo_map?: {
-      auth_config_secrets?: string;
+      auth_access?: string;
+      config_secrets?: string;
       coverage_structure?: string;
+      crypto?: string;
       data_flows?: string;
       entrypoints?: string;
+      external_integrations_egress?: string;
+      infra_deploy?: string;
+      logging_observability?: string;
       operation_sinks?: string;
       stack_build_deps?: string;
-      storage_integrations_infra?: string;
+      storage_data_model?: string;
       trust_boundaries?: string;
     };
     events: string;

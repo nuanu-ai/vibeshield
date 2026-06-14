@@ -6,8 +6,8 @@ import { promisify } from "node:util";
 import type {
   BaselineObservation,
   BaselineToolName,
+  PiArtifactMetadata,
   PiContextPackArtifact,
-  RepositoryMapArtifact,
   ToolAvailabilityArtifact,
 } from "../artifacts/contracts.js";
 import { buildRepoInventory } from "../inventory/repo-inventory.js";
@@ -33,7 +33,7 @@ import type {
 const execFileAsync = promisify(execFile);
 
 export interface FakeDaytonaSandboxProviderOptions {
-  failAt?: "baseline" | "clone" | "inventory" | "pi";
+  failAt?: "baseline" | "baseline-prepare" | "clone" | "inventory" | "pi";
   fixtureRepos: Map<string, string>;
   piOutputs?: Partial<Record<string, FakePiOutput>>;
   sandboxRoot: string;
@@ -43,14 +43,19 @@ export interface FakeDaytonaSandboxProviderOptions {
 type FakePiOutput = unknown | ((input: RuntimeJobInput) => unknown);
 
 type RepoMapStep =
-  | "auth-config-secrets"
+  | "auth-access"
+  | "config-secrets"
   | "coverage-structure"
+  | "crypto"
   | "data-flows"
   | "entrypoints"
+  | "external-integrations-egress"
+  | "infra-deploy"
+  | "logging-observability"
   | "operation-sinks"
   | "repository-map"
   | "stack-build-deps"
-  | "storage-integrations-infra"
+  | "storage-data-model"
   | "trust-boundaries";
 
 export class FakeDaytonaSandboxProvider implements SandboxProvider {
@@ -210,7 +215,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       sandboxId: this.id,
       source: input.repo,
     });
-    const artifactPath = path.join(this.artifactsDir, "repo-inventory.json");
+    const artifactPath = path.join(this.artifactsDir, "inventory.json");
     await writeFile(artifactPath, `${JSON.stringify(inventory, null, 2)}\n`, "utf8");
 
     return {
@@ -251,6 +256,14 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
   async prepareBaselineTools(
     input: PrepareBaselineToolsInput,
   ): Promise<PrepareBaselineToolsResult> {
+    if (this.options.failAt === "baseline-prepare") {
+      throw new ScanStageError({
+        message: "Fake Daytona baseline tool preparation failure: read ECONNRESET.",
+        stage: "deterministic-baseline",
+        userMessage: "VibeShield could not prepare deterministic baseline tools.",
+      });
+    }
+
     const toolDir = path.join(this.artifactsDir, "baseline");
     await mkdir(toolDir, { recursive: true });
     const unavailable = new Set(this.options.unavailableTools ?? []);
@@ -537,7 +550,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
 }
 
 interface FakeDaytonaSandboxSessionOptions {
-  failAt?: "baseline" | "clone" | "inventory" | "pi";
+  failAt?: "baseline" | "baseline-prepare" | "clone" | "inventory" | "pi";
   fixtureRepos: Map<string, string>;
   id: string;
   piOutputs: Partial<Record<string, FakePiOutput>>;
@@ -674,12 +687,22 @@ function fakePiOutputForStep(
       return defaultFakeRepoMapStackBuildDeps(input);
     case "entrypoints":
       return defaultFakeRepoMapEntrypoints(input);
-    case "auth-config-secrets":
-      return defaultFakeRepoMapAuthConfigSecrets(input);
-    case "storage-integrations-infra":
-      return defaultFakeRepoMapStorageIntegrationsInfra(input);
+    case "auth-access":
+      return defaultFakeRepoMapAuthAccess(input);
+    case "config-secrets":
+      return defaultFakeRepoMapConfigSecrets(input);
+    case "storage-data-model":
+      return defaultFakeRepoMapStorageDataModel(input);
+    case "external-integrations-egress":
+      return defaultFakeRepoMapExternalIntegrationsEgress(input);
+    case "infra-deploy":
+      return defaultFakeRepoMapInfraDeploy(input);
     case "operation-sinks":
       return defaultFakeRepoMapOperationSinks(input);
+    case "crypto":
+      return defaultFakeRepoMapCrypto(input);
+    case "logging-observability":
+      return defaultFakeRepoMapLoggingObservability(input);
     case "data-flows":
       return defaultFakeRepoMapDataFlows(input);
     case "trust-boundaries":
@@ -750,13 +773,27 @@ function normalizeRepoMapStep(value: string): RepoMapStep | undefined {
     case "entrypoints":
       return "entrypoints";
     case "auth":
-    case "auth-config-secrets":
-      return "auth-config-secrets";
+    case "auth-access":
+      return "auth-access";
+    case "config":
+    case "config-secrets":
+      return "config-secrets";
     case "storage":
-    case "storage-integrations-infra":
-      return "storage-integrations-infra";
+    case "storage-data-model":
+      return "storage-data-model";
+    case "external-integrations-egress":
+    case "integrations":
+      return "external-integrations-egress";
+    case "infra":
+    case "infra-deploy":
+      return "infra-deploy";
     case "operation-sinks":
       return "operation-sinks";
+    case "crypto":
+      return "crypto";
+    case "logging":
+    case "logging-observability":
+      return "logging-observability";
     case "data-flows":
       return "data-flows";
     case "trust-boundaries":
@@ -948,7 +985,7 @@ function defaultFakeRepoMapEntrypoints(input: RuntimeJobInput) {
   };
 }
 
-function defaultFakeRepoMapAuthConfigSecrets(input: RuntimeJobInput) {
+function defaultFakeRepoMapAuthAccess(input: RuntimeJobInput) {
   const now = new Date().toISOString();
 
   return {
@@ -963,6 +1000,30 @@ function defaultFakeRepoMapAuthConfigSecrets(input: RuntimeJobInput) {
         notes: "Used by entry-http-spam route.",
       },
     ],
+    coverage: fakeRepoMapCoverage("Auth and access control", ["src/auth.ts:2"]),
+    entrypoint_access: [
+      {
+        entrypoint_id: "entry-http-spam",
+        evidence: ["src/server.ts:6", "src/auth.ts:2"],
+        mechanism: "session",
+        status: "protected",
+      },
+    ],
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    kind: "auth-access",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo: fakeRepoFromInput(input),
+  };
+}
+
+function defaultFakeRepoMapConfigSecrets(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
     config: [
       {
         confidence: "high",
@@ -981,15 +1042,14 @@ function defaultFakeRepoMapAuthConfigSecrets(input: RuntimeJobInput) {
         name: "SESSION_SECRET",
       },
     ],
-    coverage: fakeRepoMapCoverage("Auth, configuration, and secret locations", [
-      "src/auth.ts:2",
+    coverage: fakeRepoMapCoverage("Configuration and secret references", [
       "src/config.ts:1",
       ".env.example:1",
     ]),
     fact_gaps: [],
     generated_at: now,
     generated_by: "pi",
-    kind: "auth-config-secrets",
+    kind: "config-secrets",
     metadata: {
       pi: fakePiMetadata(input),
     },
@@ -1008,61 +1068,15 @@ function defaultFakeRepoMapAuthConfigSecrets(input: RuntimeJobInput) {
   };
 }
 
-function defaultFakeRepoMapStorageIntegrationsInfra(input: RuntimeJobInput) {
+function defaultFakeRepoMapStorageDataModel(input: RuntimeJobInput) {
   const now = new Date().toISOString();
 
   return {
-    coverage: fakeRepoMapCoverage("Storage, integrations, and infrastructure", [
-      "src/db.ts:2",
-      "src/schema.sql:1",
-      "src/http.ts:3",
-      "Dockerfile:1",
-      "infra/main.tf:1",
-    ]),
+    coverage: fakeRepoMapCoverage("Storage and data model", ["src/db.ts:2", "src/schema.sql:1"]),
     fact_gaps: [],
     generated_at: now,
     generated_by: "pi",
-    infra: [
-      {
-        confidence: "high",
-        evidence: ["Dockerfile:1"],
-        id: "infra-dockerfile",
-        kind: "runtime",
-        location: "Dockerfile",
-        name: "Dockerfile",
-        role: "Node.js container runtime",
-      },
-      {
-        confidence: "high",
-        evidence: ["infra/main.tf:1"],
-        id: "infra-terraform",
-        kind: "iac",
-        location: "infra/main.tf",
-        name: "Terraform demo resource",
-        role: "Infrastructure definition",
-      },
-      {
-        confidence: "high",
-        evidence: [".github/workflows/ci.yml:1"],
-        id: "ci-github-actions",
-        kind: "workflow",
-        location: ".github/workflows/ci.yml",
-        name: "GitHub Actions CI",
-        role: "CI workflow",
-      },
-    ],
-    integrations: [
-      {
-        confidence: "high",
-        evidence: ["src/http.ts:3"],
-        id: "integration-webhook-client",
-        kind: "external_api",
-        location: "src/http.ts",
-        name: "configured webhook base URL",
-        role: "Outbound HTTP client",
-      },
-    ],
-    kind: "storage-integrations-infra",
+    kind: "storage-data-model",
     metadata: {
       pi: fakePiMetadata(input),
     },
@@ -1090,6 +1104,84 @@ function defaultFakeRepoMapStorageIntegrationsInfra(input: RuntimeJobInput) {
   };
 }
 
+function defaultFakeRepoMapExternalIntegrationsEgress(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    coverage: fakeRepoMapCoverage("External integrations and egress", ["src/http.ts:3"]),
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    integrations: [
+      {
+        confidence: "high",
+        evidence: ["src/http.ts:3"],
+        id: "integration-webhook-client",
+        kind: "external_api",
+        location: "src/http.ts",
+        name: "configured webhook base URL",
+        role: "Outbound HTTP client",
+      },
+    ],
+    kind: "external-integrations-egress",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo: fakeRepoFromInput(input),
+  };
+}
+
+function defaultFakeRepoMapInfraDeploy(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    coverage: fakeRepoMapCoverage("Infrastructure and deployment", [
+      "Dockerfile:1",
+      "infra/main.tf:1",
+      ".github/workflows/ci.yml:1",
+    ]),
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    infra: [
+      {
+        confidence: "high",
+        evidence: ["Dockerfile:1"],
+        id: "infra-dockerfile",
+        kind: "runtime",
+        location: "Dockerfile",
+        name: "Dockerfile",
+        role: "Node.js container runtime",
+      },
+      {
+        confidence: "high",
+        evidence: ["infra/main.tf:1"],
+        id: "infra-terraform",
+        kind: "iac",
+        location: "infra/main.tf",
+        name: "Terraform demo resource",
+        role: "Infrastructure definition",
+      },
+    ],
+    ci: [
+      {
+        confidence: "high",
+        evidence: [".github/workflows/ci.yml:1"],
+        id: "ci-github-actions",
+        kind: "workflow",
+        location: ".github/workflows/ci.yml",
+        name: "GitHub Actions CI",
+        role: "CI workflow",
+      },
+    ],
+    kind: "infra-deploy",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo: fakeRepoFromInput(input),
+  };
+}
+
 function defaultFakeRepoMapOperationSinks(input: RuntimeJobInput) {
   const now = new Date().toISOString();
 
@@ -1098,9 +1190,6 @@ function defaultFakeRepoMapOperationSinks(input: RuntimeJobInput) {
       "src/db.ts:2",
       "src/files.ts:4",
       "src/http.ts:3",
-      "src/logger.ts:2",
-      "src/crypto.ts:2",
-      "src/crypto.ts:3",
     ]),
     fact_gaps: [],
     generated_at: now,
@@ -1137,33 +1226,71 @@ function defaultFakeRepoMapOperationSinks(input: RuntimeJobInput) {
         location: "src/http.ts",
         operation: "fetch URL constructed from variables",
       },
-      {
-        confidence: "high",
-        evidence: ["src/logger.ts:2"],
-        id: "sink-audit-log",
-        input_variables: ["value"],
-        kind: "logging",
-        location: "src/logger.ts",
-        operation: "console.log audit value",
-      },
+    ],
+    repo: fakeRepoFromInput(input),
+  };
+}
+
+function defaultFakeRepoMapCrypto(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    coverage: fakeRepoMapCoverage("Crypto and randomness", ["src/crypto.ts:2", "src/crypto.ts:3"]),
+    crypto: [
       {
         confidence: "high",
         evidence: ["src/crypto.ts:2"],
-        id: "sink-crypto-hmac",
-        input_variables: ["body", "secret"],
+        id: "crypto-hmac",
         kind: "crypto_operation",
         location: "src/crypto.ts",
+        name: "HMAC signing",
         operation: "createHmac sha256",
       },
       {
         confidence: "high",
         evidence: ["src/crypto.ts:3"],
-        id: "sink-random-token",
+        id: "crypto-random-token",
         kind: "randomness",
         location: "src/crypto.ts",
+        name: "random token generation",
         operation: "randomBytes token generation",
       },
     ],
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    kind: "crypto",
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
+    repo: fakeRepoFromInput(input),
+  };
+}
+
+function defaultFakeRepoMapLoggingObservability(input: RuntimeJobInput) {
+  const now = new Date().toISOString();
+
+  return {
+    coverage: fakeRepoMapCoverage("Logging and observability", ["src/logger.ts:2"]),
+    fact_gaps: [],
+    generated_at: now,
+    generated_by: "pi",
+    kind: "logging-observability",
+    logging: [
+      {
+        confidence: "high",
+        evidence: ["src/logger.ts:2"],
+        id: "log-audit-value",
+        kind: "logging",
+        location: "src/logger.ts",
+        logged_fields: ["value"],
+        name: "audit log",
+        operation: "console.log audit value",
+      },
+    ],
+    metadata: {
+      pi: fakePiMetadata(input),
+    },
     repo: fakeRepoFromInput(input),
   };
 }
@@ -1220,7 +1347,7 @@ function defaultFakeRepoMapTrustBoundaries(input: RuntimeJobInput) {
         kind: "external_user_to_app",
         name: "External HTTP to app/database",
         sink_ids: ["sink-db-insert"],
-        source_artifact_ids: ["entrypoints", "auth-config-secrets", "data-flows"],
+        source_artifact_ids: ["entrypoints", "auth-access", "data-flows"],
         source_entrypoint_ids: ["entry-http-spam"],
         summary: "External HTTP request data crosses into the application and database layer.",
       },
@@ -1234,13 +1361,18 @@ function defaultFakeRepoMapTrustBoundaries(input: RuntimeJobInput) {
     generated_at: now,
     generated_by: "pi",
     inputs: {
-      auth_config_secrets_artifact: "outputs/repo-map/auth-config-secrets.json",
+      auth_access_artifact: "outputs/repo-map/auth-access.json",
+      config_secrets_artifact: "outputs/repo-map/config-secrets.json",
       coverage_structure_artifact: "outputs/repo-map/coverage-structure.json",
+      crypto_artifact: "outputs/repo-map/crypto.json",
       data_flows_artifact: "outputs/repo-map/data-flows.json",
       entrypoints_artifact: "outputs/repo-map/entrypoints.json",
+      external_integrations_egress_artifact: "outputs/repo-map/external-integrations-egress.json",
+      infra_deploy_artifact: "outputs/repo-map/infra-deploy.json",
+      logging_observability_artifact: "outputs/repo-map/logging-observability.json",
       operation_sinks_artifact: "outputs/repo-map/operation-sinks.json",
       stack_build_deps_artifact: "outputs/repo-map/stack-build-deps.json",
-      storage_integrations_infra_artifact: "outputs/repo-map/storage-integrations-infra.json",
+      storage_data_model_artifact: "outputs/repo-map/storage-data-model.json",
     },
     kind: "trust-boundaries",
     metadata: {
@@ -1259,13 +1391,18 @@ function defaultFakeRepositoryMap(input: RuntimeJobInput) {
     generated_at: now,
     generated_by: "pi",
     inputs: {
-      auth_config_secrets_artifact: "outputs/repo-map/auth-config-secrets.json",
+      auth_access_artifact: "outputs/repo-map/auth-access.json",
+      config_secrets_artifact: "outputs/repo-map/config-secrets.json",
       coverage_structure_artifact: "outputs/repo-map/coverage-structure.json",
+      crypto_artifact: "outputs/repo-map/crypto.json",
       data_flows_artifact: "outputs/repo-map/data-flows.json",
       entrypoints_artifact: "outputs/repo-map/entrypoints.json",
+      external_integrations_egress_artifact: "outputs/repo-map/external-integrations-egress.json",
+      infra_deploy_artifact: "outputs/repo-map/infra-deploy.json",
+      logging_observability_artifact: "outputs/repo-map/logging-observability.json",
       operation_sinks_artifact: "outputs/repo-map/operation-sinks.json",
       stack_build_deps_artifact: "outputs/repo-map/stack-build-deps.json",
-      storage_integrations_infra_artifact: "outputs/repo-map/storage-integrations-infra.json",
+      storage_data_model_artifact: "outputs/repo-map/storage-data-model.json",
       trust_boundaries_artifact: "outputs/repo-map/trust-boundaries.json",
     },
     kind: "repository-map",
@@ -1277,13 +1414,18 @@ function defaultFakeRepositoryMap(input: RuntimeJobInput) {
       fakeRepoMapSection("coverage-structure", "outputs/repo-map/coverage-structure.json", 3),
       fakeRepoMapSection("stack-build-deps", "outputs/repo-map/stack-build-deps.json", 4),
       fakeRepoMapSection("entrypoints", "outputs/repo-map/entrypoints.json", 4),
-      fakeRepoMapSection("auth-config-secrets", "outputs/repo-map/auth-config-secrets.json", 4),
+      fakeRepoMapSection("auth-access", "outputs/repo-map/auth-access.json", 4),
+      fakeRepoMapSection("config-secrets", "outputs/repo-map/config-secrets.json", 7),
+      fakeRepoMapSection("storage-data-model", "outputs/repo-map/storage-data-model.json", 2),
       fakeRepoMapSection(
-        "storage-integrations-infra",
-        "outputs/repo-map/storage-integrations-infra.json",
-        6,
+        "external-integrations-egress",
+        "outputs/repo-map/external-integrations-egress.json",
+        1,
       ),
+      fakeRepoMapSection("infra-deploy", "outputs/repo-map/infra-deploy.json", 3),
       fakeRepoMapSection("operation-sinks", "outputs/repo-map/operation-sinks.json", 6),
+      fakeRepoMapSection("crypto", "outputs/repo-map/crypto.json", 2),
+      fakeRepoMapSection("logging-observability", "outputs/repo-map/logging-observability.json", 1),
       fakeRepoMapSection("data-flows", "outputs/repo-map/data-flows.json", 1),
       fakeRepoMapSection("trust-boundaries", "outputs/repo-map/trust-boundaries.json", 1),
     ],
@@ -1327,12 +1469,22 @@ function piStepStartMessage(step: string): string {
       return "Collecting stack, build, and dependency facts.";
     case "entrypoints":
       return "Collecting externally reachable entrypoints.";
-    case "auth-config-secrets":
-      return "Mapping auth, config, and secret references.";
-    case "storage-integrations-infra":
-      return "Collecting storage, integration, and infrastructure facts.";
+    case "auth-access":
+      return "Mapping auth and access-control facts.";
+    case "config-secrets":
+      return "Mapping configuration and secret-reference facts.";
+    case "storage-data-model":
+      return "Collecting storage and data-model facts.";
+    case "external-integrations-egress":
+      return "Collecting external integration and egress facts.";
+    case "infra-deploy":
+      return "Collecting infrastructure and deployment facts.";
     case "operation-sinks":
       return "Collecting observable operation sinks.";
+    case "crypto":
+      return "Collecting crypto and randomness facts.";
+    case "logging-observability":
+      return "Collecting logging and observability facts.";
     case "data-flows":
       return "Tracing bounded entrypoint-to-sink flows.";
     case "trust-boundaries":
@@ -1352,12 +1504,22 @@ function piStepDoneMessage(step: string): string {
       return "Stack, build, and dependency facts completed.";
     case "entrypoints":
       return "Entrypoint collection completed.";
-    case "auth-config-secrets":
-      return "Auth, config, and secret-reference map completed.";
-    case "storage-integrations-infra":
-      return "Storage, integration, and infrastructure facts completed.";
+    case "auth-access":
+      return "Auth and access-control map completed.";
+    case "config-secrets":
+      return "Configuration and secret-reference map completed.";
+    case "storage-data-model":
+      return "Storage and data-model facts completed.";
+    case "external-integrations-egress":
+      return "External integration and egress facts completed.";
+    case "infra-deploy":
+      return "Infrastructure and deployment facts completed.";
     case "operation-sinks":
       return "Operation sink inventory completed.";
+    case "crypto":
+      return "Crypto and randomness facts completed.";
+    case "logging-observability":
+      return "Logging and observability facts completed.";
     case "data-flows":
       return "Bounded data-flow tracing completed.";
     case "trust-boundaries":
@@ -1382,7 +1544,7 @@ function fakeManifestPath(input: RuntimeJobInput): string {
   return context?.inventory?.manifest_files?.[0] ?? "package.json";
 }
 
-function fakePiMetadata(input: RuntimeJobInput): RepositoryMapArtifact["metadata"]["pi"] {
+function fakePiMetadata(input: RuntimeJobInput): PiArtifactMetadata["pi"] {
   const tools = input.pi?.tools ?? ["read", "grep", "find", "ls"];
   const toolArgs = tools.length > 0 ? ["--tools", tools.join(",")] : [];
   const outputFile = input.pi?.outputFile ?? ".vibeshield-pi-output/fake.json";

@@ -6,22 +6,14 @@ import type {
 import type { ArtifactStore } from "../artifacts/store.js";
 import { ScanStageError } from "../run/errors.js";
 
-type RepositoryMapPiContextPackArtifact = PiContextPackArtifact & {
-  inventory: PiContextPackArtifact["inventory"] & {
-    candidate_groups: {
-      auth_config_secret_files: string[];
-      operation_sink_files: string[];
-      source_files: string[];
-      storage_integration_infra_files: string[];
-      trust_boundary_files: string[];
-    };
-    package_and_lock_files: string[];
-    top_level_directories: string[];
-  };
-};
-
 const contextLimits = {
-  envAndConfigCandidates: 20,
+  configFiles: 80,
+  infraFiles: 80,
+  manifestFiles: 80,
+  packageAndLockFiles: 120,
+  sourceIndexDirectories: 80,
+  sourceIndexSampleFiles: 6,
+  topLevelDirectories: 120,
 } as const;
 
 const sourceFileExtensions = new Set([
@@ -61,70 +53,6 @@ const sourceFileExtensions = new Set([
   "tsx",
 ]);
 
-const sourceContainerDirectories = new Set([
-  "app",
-  "apps",
-  "cmd",
-  "packages",
-  "services",
-  "src",
-  "web",
-]);
-
-const entrypointRoleDirectories = new Set([
-  "api",
-  "apis",
-  "bin",
-  "cli",
-  "commands",
-  "consumers",
-  "controllers",
-  "cron",
-  "functions",
-  "graphql",
-  "grpc",
-  "handlers",
-  "jobs",
-  "lambda",
-  "lambdas",
-  "pages",
-  "parsers",
-  "queues",
-  "resolvers",
-  "routes",
-  "schedules",
-  "server",
-  "servers",
-  "webhooks",
-  "workers",
-]);
-
-const entrypointFileStems = new Set([
-  "app",
-  "application",
-  "bootstrap",
-  "cli",
-  "command",
-  "commands",
-  "consumer",
-  "cron",
-  "handler",
-  "index",
-  "job",
-  "lambda_function",
-  "main",
-  "manage",
-  "program",
-  "router",
-  "routes",
-  "schedule",
-  "server",
-  "startup",
-  "worker",
-]);
-
-const extensionlessEntrypointFiles = new Set(["artisan", "rakefile"]);
-
 export interface BuildPiContextPackInput {
   baseline: BaselineSummaryArtifact;
   inventory: InventoryArtifact;
@@ -132,7 +60,7 @@ export interface BuildPiContextPackInput {
 }
 
 export interface BuildPiContextPackResult {
-  contextPack: RepositoryMapPiContextPackArtifact;
+  contextPack: PiContextPackArtifact;
   contextPath: string;
 }
 
@@ -147,98 +75,25 @@ export async function buildPiContextPack(
     .filter((file) => file.startsWith(".github/workflows/"))
     .sort((left, right) => left.localeCompare(right));
   const iacCandidates = input.baseline.summary.iac_candidates.slice(0, 20);
-  const envAndConfigCandidates = input.inventory.files
-    .map((file) => file.path)
-    .filter(isEnvOrConfigCandidate)
-    .sort((left, right) => left.localeCompare(right))
-    .slice(0, contextLimits.envAndConfigCandidates);
-  const entrypointCandidates = candidateEntrypoints(input.inventory).slice(0, 30);
-  const authConfigSecretFiles = candidateFilesByKeywords(input.inventory, [
-    ".env",
-    "api-key",
-    "apikey",
-    "auth",
-    "authorization",
-    "credential",
-    "guard",
-    "jwt",
-    "middleware",
-    "oauth",
-    "permission",
-    "policy",
-    "role",
-    "secret",
-    "session",
-  ]);
-  const operationSinkFiles = candidateFilesByKeywords(input.inventory, [
-    "child_process",
-    "client",
-    "crypto",
-    "database",
-    "deserialize",
-    "exec",
-    "fetch",
-    "filesystem",
-    "http",
-    "logger",
-    "logging",
-    "parse",
-    "path",
-    "query",
-    "random",
-    "redirect",
-    "render",
-    "request",
-    "spawn",
-    "sql",
-    "template",
-    "url",
-  ]);
-  const storageIntegrationInfraFiles = candidateFilesByKeywords(input.inventory, [
-    "bucket",
-    "cache",
-    "compose",
-    "database",
-    "deploy",
-    "docker",
-    "helm",
-    "infra",
-    "integration",
-    "k8s",
-    "kubernetes",
-    "migration",
-    "model",
-    "orm",
-    "prisma",
-    "redis",
-    "schema",
-    "storage",
-    "terraform",
-  ]);
-  const trustBoundaryFiles = uniqueSorted([
-    ...entrypointCandidates,
-    ...authConfigSecretFiles,
-    ...operationSinkFiles.slice(0, 20),
-  ]).slice(0, 60);
 
-  const contextPack: RepositoryMapPiContextPackArtifact = {
+  const contextPack: PiContextPackArtifact = {
     inventory: {
-      candidate_entrypoints: entrypointCandidates,
-      candidate_groups: {
-        auth_config_secret_files: authConfigSecretFiles,
-        operation_sink_files: operationSinkFiles,
-        source_files: sourceFileCandidates(input.inventory).slice(0, 80),
-        storage_integration_infra_files: storageIntegrationInfraFiles,
-        trust_boundary_files: trustBoundaryFiles,
-      },
-      env_and_config_candidates: envAndConfigCandidates,
+      config_files: configFiles(input.inventory).slice(0, contextLimits.configFiles),
       github_actions_workflows: githubActionsWorkflows,
       iac_candidates: iacCandidates,
+      infra_files: infraFiles(input.inventory).slice(0, contextLimits.infraFiles),
       language_summary: languageSummary(input.inventory),
-      manifest_files: input.inventory.summary.manifest_files.slice(0, 40),
-      package_and_lock_files: packageAndLockFiles(input.inventory).slice(0, 60),
+      manifest_files: input.inventory.summary.manifest_files.slice(0, contextLimits.manifestFiles),
+      package_and_lock_files: packageAndLockFiles(input.inventory).slice(
+        0,
+        contextLimits.packageAndLockFiles,
+      ),
+      source_index: sourceIndex(input.inventory),
       summary: input.inventory.summary,
-      top_level_directories: topLevelDirectories(input.inventory).slice(0, 60),
+      top_level_directories: topLevelDirectories(input.inventory).slice(
+        0,
+        contextLimits.topLevelDirectories,
+      ),
     },
     repo: {
       commit_sha: input.inventory.source.commit_sha,
@@ -279,57 +134,100 @@ function validateBaseline(baseline: BaselineSummaryArtifact): void {
   }
 }
 
-function candidateEntrypoints(inventory: InventoryArtifact): string[] {
-  const candidates = inventory.files
-    .flatMap((file) => {
-      const score = entrypointCandidateScore(file.path);
-      return score > 0 ? [{ path: file.path, score }] : [];
-    })
-    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
-    .map((candidate) => candidate.path);
-
-  return candidates.length > 0 ? candidates : inventory.summary.manifest_files.slice(0, 5);
-}
-
-function candidateFilesByKeywords(inventory: InventoryArtifact, keywords: string[]): string[] {
-  return inventory.files
-    .flatMap((file) => {
-      const score = keywordPathScore(file.path, keywords);
-      return score > 0 ? [{ path: file.path, score }] : [];
-    })
-    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
-    .map((candidate) => candidate.path)
-    .slice(0, 60);
-}
-
-function keywordPathScore(filePath: string, keywords: string[]): number {
-  const normalized = filePath.toLowerCase();
-  if (isLikelyNonRuntimePath(normalized)) {
-    return 0;
-  }
-
-  const basename = normalized.split("/").at(-1) ?? normalized;
-  let score = isSourceLikeFile(basename) || isConfigLikeFile(basename) ? 1 : 0;
-
-  for (const keyword of keywords) {
-    const normalizedKeyword = keyword.toLowerCase();
-    if (normalized.includes(normalizedKeyword)) {
-      score += basename.includes(normalizedKeyword) ? 3 : 2;
-    }
-  }
-
-  return score;
-}
-
-function sourceFileCandidates(inventory: InventoryArtifact): string[] {
+function configFiles(inventory: InventoryArtifact): string[] {
   return inventory.files
     .map((file) => file.path)
     .filter((filePath) => {
       const normalized = filePath.toLowerCase();
       const basename = normalized.split("/").at(-1) ?? normalized;
-      return !isLikelyNonRuntimePath(normalized) && isSourceLikeFile(basename);
+      return !isLowSignalPath(normalized) && isConfigLikeFile(basename);
     })
     .sort((left, right) => left.localeCompare(right));
+}
+
+function infraFiles(inventory: InventoryArtifact): string[] {
+  return inventory.files
+    .map((file) => file.path)
+    .filter((filePath) => {
+      const normalized = filePath.toLowerCase();
+      return !isLowSignalPath(normalized) && isInfraLikePath(normalized);
+    })
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function sourceIndex(
+  inventory: InventoryArtifact,
+): PiContextPackArtifact["inventory"]["source_index"] {
+  const byDirectory = new Map<
+    string,
+    {
+      directory: string;
+      file_count: number;
+      languages: Set<string>;
+      sample_files: string[];
+      total_loc: number;
+    }
+  >();
+
+  for (const file of inventory.files) {
+    const normalized = file.path.toLowerCase();
+    const basename = normalized.split("/").at(-1) ?? normalized;
+    if (file.type !== "file" || isLowSignalPath(normalized) || !isSourceLikeFile(basename)) {
+      continue;
+    }
+
+    const directory = sourceIndexDirectory(file.path);
+    const language = languageForPath(file.path);
+    const current =
+      byDirectory.get(directory) ??
+      ({
+        directory,
+        file_count: 0,
+        languages: new Set<string>(),
+        sample_files: [],
+        total_loc: 0,
+      } satisfies {
+        directory: string;
+        file_count: number;
+        languages: Set<string>;
+        sample_files: string[];
+        total_loc: number;
+      });
+
+    current.file_count += 1;
+    if (language !== undefined) {
+      current.languages.add(language);
+    }
+    if (file.line_count !== undefined) {
+      current.total_loc += file.line_count;
+    }
+    if (current.sample_files.length < contextLimits.sourceIndexSampleFiles) {
+      current.sample_files.push(file.path);
+    }
+    byDirectory.set(directory, current);
+  }
+
+  return [...byDirectory.values()]
+    .sort(
+      (left, right) =>
+        right.file_count - left.file_count || left.directory.localeCompare(right.directory),
+    )
+    .slice(0, contextLimits.sourceIndexDirectories)
+    .map((record) => ({
+      directory: record.directory,
+      file_count: record.file_count,
+      languages: [...record.languages].sort((left, right) => left.localeCompare(right)),
+      sample_files: record.sample_files.sort((left, right) => left.localeCompare(right)),
+      ...(record.total_loc > 0 ? { total_loc: record.total_loc } : {}),
+    }));
+}
+
+function sourceIndexDirectory(filePath: string): string {
+  const segments = filePath.split("/").slice(0, -1);
+  if (segments.length === 0) {
+    return ".";
+  }
+  return segments.slice(0, 2).join("/");
 }
 
 function packageAndLockFiles(inventory: InventoryArtifact): string[] {
@@ -343,7 +241,7 @@ function topLevelDirectories(inventory: InventoryArtifact): string[] {
   return uniqueSorted(
     inventory.directories
       .map((directory) => directory.path.split("/").slice(0, 2).join("/"))
-      .filter((directory) => directory !== "" && !isLikelyNonRuntimePath(`${directory}/x`)),
+      .filter((directory) => directory !== "" && !isLowSignalPath(`${directory}/x`)),
   );
 }
 
@@ -426,39 +324,6 @@ function languageForPath(filePath: string): string | undefined {
   )[extension];
 }
 
-function entrypointCandidateScore(filePath: string): number {
-  const normalized = filePath.toLowerCase();
-  if (isLikelyNonRuntimePath(normalized)) {
-    return 0;
-  }
-
-  const segments = normalized.split("/");
-  const basename = segments.at(-1) ?? normalized;
-  const stem = fileStem(basename);
-  const isRuntimeFile = isSourceLikeFile(basename) || extensionlessEntrypointFiles.has(basename);
-
-  if (!isRuntimeFile) {
-    return 0;
-  }
-
-  const directorySegments = segments.slice(0, -1);
-  const sourceContainerScore = directorySegments.some((segment) =>
-    sourceContainerDirectories.has(segment),
-  )
-    ? 1
-    : 0;
-  const roleDirectoryScore = directorySegments.some((segment) =>
-    entrypointRoleDirectories.has(segment),
-  )
-    ? 3
-    : 0;
-  const stemScore = entrypointFileStems.has(stem) ? 4 : 0;
-
-  return roleDirectoryScore > 0 || stemScore > 0
-    ? roleDirectoryScore + stemScore + sourceContainerScore
-    : 0;
-}
-
 function isSourceLikeFile(basename: string): boolean {
   const extension = basename.split(".").at(-1);
   return extension !== undefined && sourceFileExtensions.has(extension);
@@ -478,30 +343,26 @@ function isConfigLikeFile(basename: string): boolean {
   );
 }
 
-function fileStem(basename: string): string {
-  const parts = basename.split(".");
-  const extension = parts.at(-1);
-  return extension !== undefined && sourceFileExtensions.has(extension)
-    ? parts.slice(0, -1).join(".")
-    : basename;
-}
-
-function isLikelyNonRuntimePath(normalizedPath: string): boolean {
-  return /(^|\/)(\.git|coverage|dist|build|node_modules|vendor|test|tests|__tests__|spec|specs|fixtures?|mocks?)\//.test(
-    normalizedPath,
-  );
-}
-
-function isEnvOrConfigCandidate(filePath: string): boolean {
-  const basename = filePath.split("/").at(-1)?.toLowerCase() ?? filePath.toLowerCase();
+function isInfraLikePath(normalizedPath: string): boolean {
+  const basename = normalizedPath.split("/").at(-1) ?? normalizedPath;
   return (
-    basename.startsWith(".env") ||
-    basename.includes("secret") ||
-    basename.includes("credential") ||
-    basename === "vercel.json" ||
-    basename === "netlify.toml" ||
-    basename === "wrangler.toml"
+    basename === "dockerfile" ||
+    basename.startsWith("docker-compose") ||
+    basename === ".gitlab-ci.yml" ||
+    normalizedPath.startsWith(".github/workflows/") ||
+    basename.endsWith(".tf") ||
+    basename.endsWith(".tfvars") ||
+    basename.endsWith(".hcl") ||
+    basename === "chart.yaml" ||
+    basename === "values.yaml" ||
+    normalizedPath.includes("/charts/") ||
+    normalizedPath.includes("/k8s/") ||
+    normalizedPath.includes("/kubernetes/")
   );
+}
+
+function isLowSignalPath(normalizedPath: string): boolean {
+  return /(^|\/)(\.git|coverage|dist|build|node_modules|vendor)\//.test(normalizedPath);
 }
 
 function isManifestOrLockCandidate(filePath: string): boolean {

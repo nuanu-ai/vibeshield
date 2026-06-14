@@ -124,7 +124,7 @@ describe("Daytona production adapter boundary", () => {
     expect(sandbox.codeRunCalls).toHaveLength(1);
     expect(sandbox.codeRunCalls[0]?.timeout).toBe(7);
     expect(sandbox.codeRunCalls[0]?.code).toContain("lstat");
-    expect(sandbox.codeRunCalls[0]?.code).toContain("repo-inventory.json");
+    expect(sandbox.codeRunCalls[0]?.code).toContain("inventory.json");
     expect(sandbox.codeRunCalls[0]?.code).toContain("inventory_location");
     expect(sandbox.codeRunCalls[0]?.code).not.toMatch(
       /\b(npm install|pnpm install|yarn install|bun install|npm run|pnpm run|yarn run|postinstall)\b/,
@@ -133,7 +133,7 @@ describe("Daytona production adapter boundary", () => {
     expect(sandbox.downloadFileCalls).toEqual([
       {
         localPath: localArtifactPath,
-        remotePath: "vibeshield/artifacts/repo-inventory.json",
+        remotePath: "vibeshield/artifacts/inventory.json",
         timeout: 17,
       },
     ]);

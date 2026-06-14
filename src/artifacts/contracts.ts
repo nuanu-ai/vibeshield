@@ -1,17 +1,22 @@
 import type { GitHubRepoReference } from "../run/github-url.js";
 
 export type ArtifactKind =
-  | "auth-config-secrets"
+  | "auth-access"
   | "baseline-summary"
+  | "config-secrets"
   | "coverage-structure"
+  | "crypto"
   | "data-flows"
   | "entrypoints"
+  | "external-integrations-egress"
+  | "infra-deploy"
   | "inventory"
+  | "logging-observability"
   | "operation-sinks"
   | "pi-context-pack"
   | "repository-map"
   | "stack-build-deps"
-  | "storage-integrations-infra"
+  | "storage-data-model"
   | "tool-availability"
   | "trust-boundaries";
 
@@ -126,10 +131,10 @@ export interface ToolAvailabilityArtifact {
 
 export interface PiContextPackArtifact {
   inventory: {
-    candidate_entrypoints: string[];
-    env_and_config_candidates: string[];
+    config_files: string[];
     github_actions_workflows: string[];
     iac_candidates: string[];
+    infra_files: string[];
     language_summary?: Array<{
       file_count: number;
       language: string;
@@ -137,7 +142,16 @@ export interface PiContextPackArtifact {
       source: "inventory";
     }>;
     manifest_files: string[];
+    package_and_lock_files: string[];
+    source_index: Array<{
+      directory: string;
+      file_count: number;
+      languages: string[];
+      sample_files: string[];
+      total_loc?: number;
+    }>;
     summary: InventoryArtifact["summary"];
+    top_level_directories: string[];
   };
   repo: {
     commit_sha: string | null;
@@ -186,23 +200,28 @@ export interface FactGap {
 }
 
 export type PiRepositoryMapArtifactKind =
-  | "auth-config-secrets"
+  | "auth-access"
+  | "config-secrets"
   | "coverage-structure"
+  | "crypto"
   | "data-flows"
   | "entrypoints"
+  | "external-integrations-egress"
+  | "infra-deploy"
+  | "logging-observability"
   | "operation-sinks"
   | "repository-map"
   | "stack-build-deps"
-  | "storage-integrations-infra"
+  | "storage-data-model"
   | "trust-boundaries";
 
 export interface PiRepositoryMapBaseArtifact<TKind extends PiRepositoryMapArtifactKind> {
   coverage?: PiCoverage;
   fact_gaps?: FactGap[];
   generated_at: string;
-  generated_by: "pi";
+  generated_by: "pi" | "vibeshield";
   kind: TKind;
-  metadata: PiArtifactMetadata;
+  metadata: PiArtifactMetadata | Record<string, unknown>;
   repo: {
     commit_sha: string | null;
     url: string;
@@ -368,10 +387,8 @@ export interface AuthConfigRecord {
   variables?: string[];
 }
 
-export interface AuthConfigSecretsArtifact
-  extends PiRepositoryMapBaseArtifact<"auth-config-secrets"> {
+export interface AuthAccessArtifact extends PiRepositoryMapBaseArtifact<"auth-access"> {
   auth: AuthConfigRecord[];
-  config: AuthConfigRecord[];
   entrypoint_access?: Array<{
     entrypoint_id: string;
     evidence: string[];
@@ -380,6 +397,10 @@ export interface AuthConfigSecretsArtifact
     session_storage?: string;
     status: "protected" | "public" | "unknown";
   }>;
+}
+
+export interface ConfigSecretsArtifact extends PiRepositoryMapBaseArtifact<"config-secrets"> {
+  config: AuthConfigRecord[];
   secret_locations?: AuthConfigRecord[];
   secret_references?: Array<
     AuthConfigRecord & {
@@ -388,62 +409,84 @@ export interface AuthConfigSecretsArtifact
   >;
 }
 
-export interface StorageIntegrationInfraRecord {
-  base_image?: string;
+export interface StorageDataModelRecord {
   confidence?: PiConfidence;
   data_categories?: string[];
   evidence: string[];
-  entrypoint?: string;
   fields?: string[];
+  id: string;
+  kind?: string;
+  location?: string;
+  name?: string;
+  role?: string;
+  schema_evidence?: string[];
+  type?: string;
+}
+
+export interface StorageDataModelArtifact
+  extends PiRepositoryMapBaseArtifact<"storage-data-model"> {
+  storage: StorageDataModelRecord[];
+}
+
+export interface ExternalIntegrationEgressRecord {
+  confidence?: PiConfidence;
+  evidence: string[];
   from?: string;
+  id: string;
+  kind?: string;
+  location?: string;
+  name?: string;
+  provider?: string;
+  role?: string;
+  target?: string;
+  type?: string;
+}
+
+export interface ExternalIntegrationsEgressArtifact
+  extends PiRepositoryMapBaseArtifact<"external-integrations-egress"> {
+  integrations: ExternalIntegrationEgressRecord[];
+}
+
+export interface InfraDeployRecord {
+  base_image?: string;
+  confidence?: PiConfidence;
+  entrypoint?: string;
+  evidence: string[];
   id: string;
   kind?: string;
   location?: string;
   mounts?: string[];
   name?: string;
   ports?: string[];
-  provider?: string;
   role?: string;
-  schema_evidence?: string[];
   secrets?: string[];
-  target?: string;
   type?: string;
   user?: string;
 }
 
-export interface StorageIntegrationsInfraArtifact
-  extends PiRepositoryMapBaseArtifact<"storage-integrations-infra"> {
-  ci?: StorageIntegrationInfraRecord[];
-  infra: StorageIntegrationInfraRecord[];
-  infrastructure?: StorageIntegrationInfraRecord[];
-  integrations: StorageIntegrationInfraRecord[];
-  storage: StorageIntegrationInfraRecord[];
+export interface InfraDeployArtifact extends PiRepositoryMapBaseArtifact<"infra-deploy"> {
+  ci?: InfraDeployRecord[];
+  infra: InfraDeployRecord[];
 }
 
 export interface OperationSinkRecord {
-  algorithm?: string;
   confidence: PiConfidence;
   destination?: string;
   evidence: string[];
   id: string;
   input_variables?: string[];
   kind:
-    | "crypto_operation"
     | "deserialization_or_parsing"
     | "filesystem_operation"
-    | "logging"
     | "nosql_query"
     | "other"
     | "outbound_http_or_sdk_url"
     | "path_construction"
     | "process_execution"
-    | "randomness"
     | "redirect"
     | "sql_or_orm_query"
     | "template_rendering";
   location: string;
-  logged_fields?: string[];
-  mode?: string;
   notes?: string;
   operation: string;
   parameters?: string[];
@@ -452,7 +495,40 @@ export interface OperationSinkRecord {
 
 export interface OperationSinksArtifact extends PiRepositoryMapBaseArtifact<"operation-sinks"> {
   operation_sinks: OperationSinkRecord[];
-  sinks?: OperationSinkRecord[];
+}
+
+export interface CryptoRecord {
+  algorithm?: string;
+  confidence?: PiConfidence;
+  evidence: string[];
+  id: string;
+  kind?: "crypto_operation" | "password_hashing" | "randomness" | "tls_configuration" | "other";
+  location?: string;
+  mode?: string;
+  name?: string;
+  operation?: string;
+  parameters?: string[];
+}
+
+export interface CryptoArtifact extends PiRepositoryMapBaseArtifact<"crypto"> {
+  crypto: CryptoRecord[];
+}
+
+export interface LoggingObservabilityRecord {
+  confidence?: PiConfidence;
+  destination?: string;
+  evidence: string[];
+  id: string;
+  kind?: "logging" | "metrics" | "tracing" | "telemetry" | "other";
+  location?: string;
+  logged_fields?: string[];
+  name?: string;
+  operation?: string;
+}
+
+export interface LoggingObservabilityArtifact
+  extends PiRepositoryMapBaseArtifact<"logging-observability"> {
+  logging: LoggingObservabilityRecord[];
 }
 
 export type DataFlowTraceStatus =
@@ -496,13 +572,18 @@ export interface DataFlowsArtifact extends PiRepositoryMapBaseArtifact<"data-flo
 }
 
 export interface PriorMapArtifactInputs {
-  auth_config_secrets_artifact?: string;
+  auth_access_artifact?: string;
+  config_secrets_artifact?: string;
   coverage_structure_artifact?: string;
+  crypto_artifact?: string;
   data_flows_artifact?: string;
   entrypoints_artifact?: string;
+  external_integrations_egress_artifact?: string;
+  infra_deploy_artifact?: string;
+  logging_observability_artifact?: string;
   operation_sinks_artifact?: string;
   stack_build_deps_artifact?: string;
-  storage_integrations_infra_artifact?: string;
+  storage_data_model_artifact?: string;
   trust_boundaries_artifact?: string;
 }
 

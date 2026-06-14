@@ -18,24 +18,24 @@ const repositoryMapReportSections: RepositoryMapReportSection[] = [
   { artifactKey: "stack_build_deps", index: 1, title: "Stack And Build" },
   { artifactKey: "coverage_structure", index: 2, title: "Repository Structure" },
   { artifactKey: "entrypoints", index: 3, title: "Attack Surface And Entry Points" },
-  { artifactKey: "auth_config_secrets", index: 4, title: "Authentication And Authorization" },
+  { artifactKey: "auth_access", index: 4, title: "Authentication And Authorization" },
   { artifactKey: "data_flows", index: 5, title: "Data Flows To Operation Sinks" },
   { artifactKey: "operation_sinks", index: 6, title: "Operation Sink Inventory" },
-  { artifactKey: "auth_config_secrets", index: 7, title: "Secrets And Configuration" },
-  { artifactKey: "operation_sinks", index: 8, title: "Cryptography" },
-  { artifactKey: "storage_integrations_infra", index: 9, title: "Storage And Data Model" },
+  { artifactKey: "config_secrets", index: 7, title: "Secrets And Configuration" },
+  { artifactKey: "crypto", index: 8, title: "Cryptography" },
+  { artifactKey: "storage_data_model", index: 9, title: "Storage And Data Model" },
   {
-    artifactKey: "storage_integrations_infra",
+    artifactKey: "external_integrations_egress",
     index: 10,
     title: "External Integrations And Network Egress",
   },
   { artifactKey: "stack_build_deps", index: 11, title: "Dependencies" },
   {
-    artifactKey: "storage_integrations_infra",
+    artifactKey: "infra_deploy",
     index: 12,
     title: "Infrastructure And Deployment",
   },
-  { artifactKey: "operation_sinks", index: 13, title: "Logging And Observability" },
+  { artifactKey: "logging_observability", index: 13, title: "Logging And Observability" },
   { artifactKey: "trust_boundaries", index: 14, title: "Trust Boundaries" },
 ];
 
@@ -468,17 +468,13 @@ function formatCryptographySection(artifact: JsonObject | undefined): string[] {
     return ["- Not available."];
   }
 
-  const cryptoSinks = operationSinkRecords(artifact).filter((item) =>
-    ["crypto_operation", "randomness"].includes(String(item.kind)),
-  );
-
   return compactLines([
     ...tableOrNotObserved(
       ["Operation", "Algorithm/Mode", "Inputs", "Evidence"],
-      cryptoSinks.map((item) => [
-        field(item, "operation"),
+      recordArray(artifact, "crypto").map((item) => [
+        firstField(item, ["operation", "name", "kind"]),
         compactJoin([field(item, "algorithm"), field(item, "mode")]),
-        listField(item, "input_variables"),
+        listField(item, "parameters"),
         recordEvidence(item),
       ]),
     ),
@@ -577,12 +573,11 @@ function formatInfrastructureSection(artifact: JsonObject | undefined): string[]
     return ["- Not available."];
   }
 
-  const infra = [...recordArray(artifact, "infra"), ...recordArray(artifact, "infrastructure")];
   return compactLines([
     ...optionalTable(
       "Runtime And Deployment",
       ["Kind", "Name", "Runtime Details", "Role", "Evidence"],
-      infra.map((item) => [
+      recordArray(artifact, "infra").map((item) => [
         field(item, "kind"),
         field(item, "name"),
         compactJoin([
@@ -615,20 +610,12 @@ function formatLoggingSection(artifact: JsonObject | undefined): string[] {
     return ["- Not available."];
   }
 
-  const loggingSinks = operationSinkRecords(artifact).filter(
-    (item) =>
-      String(item.kind) === "logging" ||
-      [item.operation, item.destination, item.location]
-        .filter((value): value is string => typeof value === "string")
-        .some((value) => value.toLowerCase().includes("log")),
-  );
-
   return compactLines([
     ...tableOrNotObserved(
       ["Operation", "Fields/Inputs", "Destination", "Evidence"],
-      loggingSinks.map((item) => [
-        field(item, "operation"),
-        compactJoin([listField(item, "logged_fields"), listField(item, "input_variables")]),
+      recordArray(artifact, "logging").map((item) => [
+        firstField(item, ["operation", "name", "kind"]),
+        listField(item, "logged_fields"),
         firstField(item, ["destination", "location"]),
         recordEvidence(item),
       ]),
@@ -704,8 +691,7 @@ function formatFactGaps(artifact: JsonObject): string[] {
 }
 
 function operationSinkRecords(artifact: JsonObject): JsonObject[] {
-  const operationSinks = recordArray(artifact, "operation_sinks");
-  return operationSinks.length > 0 ? operationSinks : recordArray(artifact, "sinks");
+  return recordArray(artifact, "operation_sinks");
 }
 
 function entrypointExternalInput(item: JsonObject): string {
@@ -867,9 +853,14 @@ function formatArtifactLinks(run: ScanRunState): string[] {
     run.artifacts.repo_map?.coverage_structure,
     run.artifacts.repo_map?.stack_build_deps,
     run.artifacts.repo_map?.entrypoints,
-    run.artifacts.repo_map?.auth_config_secrets,
-    run.artifacts.repo_map?.storage_integrations_infra,
+    run.artifacts.repo_map?.auth_access,
+    run.artifacts.repo_map?.config_secrets,
+    run.artifacts.repo_map?.storage_data_model,
+    run.artifacts.repo_map?.external_integrations_egress,
+    run.artifacts.repo_map?.infra_deploy,
     run.artifacts.repo_map?.operation_sinks,
+    run.artifacts.repo_map?.crypto,
+    run.artifacts.repo_map?.logging_observability,
     run.artifacts.repo_map?.data_flows,
     run.artifacts.repo_map?.trust_boundaries,
     run.artifacts.repository_map,

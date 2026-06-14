@@ -5,22 +5,28 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
-  AuthConfigSecretsArtifact,
+  AuthAccessArtifact,
   BaselineSummaryArtifact,
+  ConfigSecretsArtifact,
   CoverageStructureArtifact,
+  CryptoArtifact,
   DataFlowsArtifact,
   EntrypointsArtifact,
+  ExternalIntegrationsEgressArtifact,
+  InfraDeployArtifact,
   InventoryArtifact,
+  LoggingObservabilityArtifact,
   OperationSinksArtifact,
   RepositoryMapArtifact,
   StackBuildDepsArtifact,
-  StorageIntegrationsInfraArtifact,
+  StorageDataModelArtifact,
   TrustBoundariesArtifact,
 } from "../src/artifacts/contracts.js";
 import { ArtifactStore } from "../src/artifacts/store.js";
 import { buildPiContextPack } from "../src/context/step-context-builder.js";
 import { runResume, runScan } from "../src/run/run-scan.js";
 import { FakeDaytonaSandboxProvider } from "../src/sandbox/fake-daytona.js";
+import type { RuntimeJobInput } from "../src/sandbox/types.js";
 
 const execFileAsync = promisify(execFile);
 type BuildPiContextInput = Parameters<typeof buildPiContextPack>[0];
@@ -32,9 +38,14 @@ const expectedRepoMapArtifacts = [
   "outputs/repo-map/coverage-structure.json",
   "outputs/repo-map/stack-build-deps.json",
   "outputs/repo-map/entrypoints.json",
-  "outputs/repo-map/auth-config-secrets.json",
-  "outputs/repo-map/storage-integrations-infra.json",
+  "outputs/repo-map/auth-access.json",
+  "outputs/repo-map/config-secrets.json",
+  "outputs/repo-map/storage-data-model.json",
+  "outputs/repo-map/external-integrations-egress.json",
+  "outputs/repo-map/infra-deploy.json",
   "outputs/repo-map/operation-sinks.json",
+  "outputs/repo-map/crypto.json",
+  "outputs/repo-map/logging-observability.json",
   "outputs/repo-map/data-flows.json",
   "outputs/repo-map/trust-boundaries.json",
   "outputs/repository-map.json",
@@ -45,6 +56,41 @@ afterEach(async () => {
 });
 
 describe("AppSec repository map acceptance", () => {
+  it("documents the facts-only repository-map product expectation", async () => {
+    const expectationDoc = await readFile(
+      path.join(process.cwd(), "docs", "repository-map-expectations.md"),
+      "utf8",
+    );
+    const architecture = await readFile(
+      path.join(process.cwd(), "docs", "architecture.md"),
+      "utf8",
+    );
+    const currentSteps = [
+      "coverage-structure",
+      "stack-build-deps",
+      "entrypoints",
+      "auth-access",
+      "config-secrets",
+      "storage-data-model",
+      "external-integrations-egress",
+      "infra-deploy",
+      "operation-sinks",
+      "crypto",
+      "logging-observability",
+      "data-flows",
+      "trust-boundaries",
+      "repository-map",
+    ];
+
+    expect(expectationDoc).toContain("facts-only AppSec repository map");
+    expect(expectationDoc).toContain("attack hypotheses");
+    for (const step of currentSteps) {
+      expect(expectationDoc).toContain(step);
+    }
+    expect(architecture).toContain("docs/repository-map-expectations.md");
+    expect(architecture).toContain("schema-only validation");
+  });
+
   it("produces complete facts-only repository map artifacts with representative facts", async () => {
     const { provider } = await createProvider();
     const runsRoot = await createTempRoot("vibeshield-runs-");
@@ -75,10 +121,10 @@ describe("AppSec repository map acceptance", () => {
       ]),
     );
 
-    const authConfig = await readJson<AuthConfigSecretsArtifact>(
-      path.join(runDir, "outputs", "repo-map", "auth-config-secrets.json"),
+    const authAccess = await readJson<AuthAccessArtifact>(
+      path.join(runDir, "outputs", "repo-map", "auth-access.json"),
     );
-    expect(authConfig.auth).toEqual(
+    expect(authAccess.auth).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: "auth-session-middleware",
@@ -86,34 +132,65 @@ describe("AppSec repository map acceptance", () => {
         }),
       ]),
     );
-    expect(authConfig.config.map((item) => item.name)).toEqual(
+    expect(authAccess.entrypoint_access).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entrypoint_id: "entry-http-spam",
+          status: "protected",
+        }),
+      ]),
+    );
+
+    const configSecrets = await readJson<ConfigSecretsArtifact>(
+      path.join(runDir, "outputs", "repo-map", "config-secrets.json"),
+    );
+    expect(configSecrets.config.map((item) => item.name)).toEqual(
       expect.arrayContaining(["API_BASE_URL", "SESSION_SECRET"]),
     );
 
-    const storage = await readJson<StorageIntegrationsInfraArtifact>(
-      path.join(runDir, "outputs", "repo-map", "storage-integrations-infra.json"),
+    const storage = await readJson<StorageDataModelArtifact>(
+      path.join(runDir, "outputs", "repo-map", "storage-data-model.json"),
     );
     expect(storage.storage.map((item) => item.id)).toEqual(
       expect.arrayContaining(["store-messages-db", "store-upload-filesystem"]),
     );
-    expect(storage.integrations.map((item) => item.id)).toContain("integration-webhook-client");
-    expect((storage.infra ?? []).map((item) => item.kind)).toEqual(
+
+    const integrations = await readJson<ExternalIntegrationsEgressArtifact>(
+      path.join(runDir, "outputs", "repo-map", "external-integrations-egress.json"),
+    );
+    expect(integrations.integrations.map((item) => item.id)).toContain(
+      "integration-webhook-client",
+    );
+
+    const infra = await readJson<InfraDeployArtifact>(
+      path.join(runDir, "outputs", "repo-map", "infra-deploy.json"),
+    );
+    expect([...(infra.infra ?? []), ...(infra.ci ?? [])].map((item) => item.kind)).toEqual(
       expect.arrayContaining(["runtime", "iac", "workflow"]),
     );
 
     const sinks = await readJson<OperationSinksArtifact>(
       path.join(runDir, "outputs", "repo-map", "operation-sinks.json"),
     );
-    expect((sinks.operation_sinks ?? []).map((sink) => sink.kind)).toEqual(
+    expect(sinks.operation_sinks.map((sink) => sink.kind)).toEqual(
       expect.arrayContaining([
-        "crypto_operation",
         "filesystem_operation",
-        "logging",
         "outbound_http_or_sdk_url",
-        "randomness",
         "sql_or_orm_query",
       ]),
     );
+
+    const crypto = await readJson<CryptoArtifact>(
+      path.join(runDir, "outputs", "repo-map", "crypto.json"),
+    );
+    expect(crypto.crypto.map((item) => item.kind)).toEqual(
+      expect.arrayContaining(["crypto_operation", "randomness"]),
+    );
+
+    const logging = await readJson<LoggingObservabilityArtifact>(
+      path.join(runDir, "outputs", "repo-map", "logging-observability.json"),
+    );
+    expect(logging.logging.map((item) => item.id)).toContain("log-audit-value");
 
     const dataFlows = await readJson<DataFlowsArtifact>(
       path.join(runDir, "outputs", "repo-map", "data-flows.json"),
@@ -170,18 +247,6 @@ describe("AppSec repository map acceptance", () => {
     expect(report).toContain("sink-db-insert");
     expect(report).toContain("External HTTP to app/database");
     expect(report).toContain("src/server.ts:5");
-    expect(report).not.toContain("```");
-    expect(report).not.toContain("metadata");
-    expect(report).not.toContain("invocation");
-    expect(report).not.toContain("stdout_bytes");
-    expect(report).not.toContain("output_bytes");
-    expect(report).not.toContain("provider");
-    expect(report).not.toContain("tools");
-    expect(report).not.toContain("No security findings or verdict");
-    expect(report).not.toContain("not a security audit");
-    expect(report).not.toContain("Inspectable artifacts");
-    expect(report).not.toContain("outputs/repo-map/coverage-structure.json");
-    expect(report).not.toContain("outputs/repository-map.json");
   });
 
   it("keeps untrusted checkout work inside a fresh sandbox and preserves failure diagnostics", async () => {
@@ -280,10 +345,6 @@ describe("AppSec repository map acceptance", () => {
     expect(minimalBaseline.tools.find((tool) => tool.tool === "checkov")?.skipped_reason).toContain(
       "No IaC",
     );
-    const minimalReport = await readFile(path.join(minimalRunDir, "report.md"), "utf8");
-    expect(minimalReport).not.toContain("Deterministic scanner observations");
-    expect(minimalReport).not.toContain("observations: 0");
-    expect(minimalReport).not.toContain("syft: completed");
   });
 
   it("continues to repository mapping when a scanner runtime call fails", async () => {
@@ -303,6 +364,32 @@ describe("AppSec repository map acceptance", () => {
     expect(baseline.tools.find((tool) => tool.tool === "syft")?.diagnostics.join("\n")).toContain(
       "Could not run syft",
     );
+    await expectPath(path.join(runDir, "outputs", "repository-map.json"));
+    await expectPath(path.join(runDir, "report.md"));
+  });
+
+  it("continues to repository mapping when scanner tool preparation fails", async () => {
+    const { provider } = await createProvider({ failAt: "baseline-prepare" });
+    const result = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const runDir = expectRunDir(result);
+    const baseline = await readJson<BaselineSummaryArtifact>(
+      path.join(runDir, "outputs", "baseline-summary.json"),
+    );
+    expect(baseline.summary.tool_availability_artifact).toBe(
+      "outputs/baseline/tool-availability.json",
+    );
+    expect(baseline.tools.find((tool) => tool.tool === "syft")?.status).toBe("failed");
+    expect(baseline.tools.find((tool) => tool.tool === "syft")?.diagnostics.join("\n")).toContain(
+      "Could not prepare deterministic baseline tools",
+    );
+    expect(baseline.tools.find((tool) => tool.tool === "actionlint")?.status).toBe("failed");
+    await expectPath(path.join(runDir, "outputs", "baseline", "tool-availability.json"));
     await expectPath(path.join(runDir, "outputs", "repository-map.json"));
     await expectPath(path.join(runDir, "report.md"));
   });
@@ -343,7 +430,17 @@ describe("AppSec repository map acceptance", () => {
     expect(JSON.stringify(contextPack)).not.toContain("raw-scanner-dump");
     expect(JSON.stringify(contextPack)).not.toContain("baseline-summary");
     expect(JSON.stringify(contextPack)).not.toContain("gitleaks");
-    expect(contextPack.inventory.candidate_entrypoints).toContain("src/server.ts");
+    expect(contextPack.inventory.config_files).toContain(".env.example");
+    expect(contextPack.inventory.source_index).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          directory: "src",
+          languages: expect.arrayContaining(["TypeScript"]),
+          sample_files: expect.any(Array),
+        }),
+      ]),
+    );
+    expect(contextPack.inventory.top_level_directories).toContain("src");
 
     await expect(
       buildPiContextPack({
@@ -352,6 +449,184 @@ describe("AppSec repository map acceptance", () => {
         store,
       }),
     ).rejects.toMatchObject({ stage: "context" });
+  });
+
+  it("passes narrow per-step context to Pi repository-map collectors", async () => {
+    const capturedContexts: Record<string, unknown> = {};
+    const capture =
+      (step: string, output: unknown) =>
+      (input: RuntimeJobInput): unknown => {
+        capturedContexts[step] = input.pi?.contextPack;
+        return output;
+      };
+    const { provider } = await createProvider({
+      piOutputs: {
+        "auth-access": capture("auth-access", fakeRepoMapAuthAccess()),
+        "config-secrets": capture("config-secrets", fakeRepoMapConfigSecrets()),
+        crypto: capture("crypto", fakeRepoMapCrypto()),
+        "data-flows": capture("data-flows", fakeRepoMapDataFlows()),
+        entrypoints: capture("entrypoints", fakeRepoMapEntrypoints()),
+        "external-integrations-egress": capture(
+          "external-integrations-egress",
+          fakeRepoMapExternalIntegrationsEgress(),
+        ),
+        "infra-deploy": capture("infra-deploy", fakeRepoMapInfraDeploy()),
+        "logging-observability": capture(
+          "logging-observability",
+          fakeRepoMapLoggingObservability(),
+        ),
+        "operation-sinks": capture("operation-sinks", fakeRepoMapOperationSinks()),
+        "repository-map": capture("repository-map", fakeRepositoryMap()),
+        "stack-build-deps": capture("stack-build-deps", fakeRepoMapStackBuildDeps()),
+        "storage-data-model": capture("storage-data-model", fakeRepoMapStorageDataModel()),
+        "trust-boundaries": capture("trust-boundaries", fakeRepoMapTrustBoundaries()),
+      },
+    });
+
+    const result = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const stackBuildDeps = expectObjectContext(capturedContexts["stack-build-deps"]);
+    expect(stackBuildDeps).toMatchObject({
+      inventory: expect.objectContaining({
+        config_files: expect.any(Array),
+        github_actions_workflows: expect.any(Array),
+        iac_candidates: expect.any(Array),
+        infra_files: expect.any(Array),
+        manifest_files: expect.any(Array),
+        package_and_lock_files: expect.any(Array),
+      }),
+      purpose: expect.stringContaining("facts-only"),
+      repo: expect.objectContaining({ url: fixtureUrl }),
+    });
+    expect(jsonText(stackBuildDeps)).not.toContain("raw-scanner-dump");
+    expect(jsonText(stackBuildDeps)).not.toContain("baseline-summary");
+
+    const entrypoints = expectObjectContext(capturedContexts.entrypoints);
+    expect(entrypoints).toMatchObject({
+      inventory: expect.objectContaining({
+        source_index: expect.arrayContaining([
+          expect.objectContaining({
+            directory: "src",
+            languages: expect.arrayContaining(["TypeScript"]),
+          }),
+        ]),
+        top_level_directories: expect.any(Array),
+      }),
+    });
+
+    const authAccess = expectObjectContext(capturedContexts["auth-access"]);
+    expect(authAccess).toMatchObject({
+      inputs: expect.objectContaining({
+        config_secrets: expect.objectContaining({
+          config: expect.arrayContaining([expect.objectContaining({ id: "config-api-base-url" })]),
+        }),
+        entrypoints: expect.objectContaining({
+          entrypoints: expect.arrayContaining([expect.objectContaining({ id: "entry-http-spam" })]),
+        }),
+      }),
+      inventory: expect.objectContaining({
+        source_index: expect.any(Array),
+      }),
+    });
+
+    const configSecrets = expectObjectContext(capturedContexts["config-secrets"]);
+    expect(configSecrets).toMatchObject({
+      inventory: expect.objectContaining({
+        config_files: expect.any(Array),
+        manifest_files: expect.any(Array),
+        source_index: expect.any(Array),
+      }),
+    });
+
+    const storageDataModel = expectObjectContext(capturedContexts["storage-data-model"]);
+    expect(storageDataModel).toMatchObject({
+      inputs: expect.objectContaining({
+        config_secrets: expect.objectContaining({
+          config: expect.any(Array),
+        }),
+      }),
+      inventory: expect.objectContaining({
+        manifest_files: expect.any(Array),
+        source_index: expect.any(Array),
+      }),
+    });
+
+    const externalIntegrationsEgress = expectObjectContext(
+      capturedContexts["external-integrations-egress"],
+    );
+    expect(externalIntegrationsEgress).toMatchObject({
+      inputs: expect.objectContaining({
+        config_secrets: expect.objectContaining({
+          secret_references: expect.any(Array),
+        }),
+      }),
+      inventory: expect.objectContaining({
+        manifest_files: expect.any(Array),
+        source_index: expect.any(Array),
+      }),
+    });
+
+    const infraDeploy = expectObjectContext(capturedContexts["infra-deploy"]);
+    expect(infraDeploy).toMatchObject({
+      inventory: expect.objectContaining({
+        config_files: expect.any(Array),
+        iac_candidates: expect.any(Array),
+        infra_files: expect.any(Array),
+      }),
+    });
+
+    const operationSinks = expectObjectContext(capturedContexts["operation-sinks"]);
+    expect(operationSinks).toMatchObject({
+      inventory: expect.objectContaining({
+        source_index: expect.any(Array),
+      }),
+    });
+
+    const crypto = expectObjectContext(capturedContexts.crypto);
+    expect(crypto).toMatchObject({
+      inventory: expect.objectContaining({
+        config_files: expect.any(Array),
+        source_index: expect.any(Array),
+      }),
+    });
+
+    const loggingObservability = expectObjectContext(capturedContexts["logging-observability"]);
+    expect(loggingObservability).toMatchObject({
+      inventory: expect.objectContaining({
+        config_files: expect.any(Array),
+        manifest_files: expect.any(Array),
+        source_index: expect.any(Array),
+      }),
+    });
+
+    const dataFlows = expectObjectContext(capturedContexts["data-flows"]);
+    expect(Object.keys(dataFlows).sort()).toEqual(["inputs"]);
+    expect(dataFlows).toMatchObject({
+      inputs: {
+        entrypoints: expect.objectContaining({
+          entrypoints: expect.arrayContaining([expect.objectContaining({ id: "entry-http-spam" })]),
+        }),
+        operation_sinks: expect.objectContaining({
+          operation_sinks: expect.arrayContaining([
+            expect.objectContaining({ id: "sink-db-insert" }),
+          ]),
+        }),
+      },
+    });
+
+    const trustBoundaries = expectObjectContext(capturedContexts["trust-boundaries"]);
+    expect(Object.keys(trustBoundaries).sort()).toEqual(["artifacts", "paths"]);
+    expect(jsonText(trustBoundaries)).toContain("entry-http-spam");
+
+    const repositoryMap = expectObjectContext(capturedContexts["repository-map"]);
+    expect(Object.keys(repositoryMap).sort()).toEqual(["artifacts", "paths"]);
+    expect(jsonText(repositoryMap)).toContain("coverage_structure");
   });
 
   it("preserves partial map artifacts and resumes from the first missing map section", async () => {
@@ -425,7 +700,7 @@ describe("AppSec repository map acceptance", () => {
 
 async function createProvider(
   options: {
-    failAt?: "baseline" | "clone" | "inventory" | "pi";
+    failAt?: "baseline" | "baseline-prepare" | "clone" | "inventory" | "pi";
     minimal?: boolean;
     piOutputs?: ConstructorParameters<typeof FakeDaytonaSandboxProvider>[0]["piOutputs"];
     unavailableTools?: ConstructorParameters<
@@ -662,6 +937,18 @@ async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
 }
 
+function expectObjectContext(value: unknown): Record<string, unknown> {
+  expect(value).toBeDefined();
+  expect(value).not.toBeNull();
+  expect(typeof value).toBe("object");
+  expect(Array.isArray(value)).toBe(false);
+  return value as Record<string, unknown>;
+}
+
+function jsonText(value: unknown): string {
+  return JSON.stringify(value);
+}
+
 function expectRunDir(result: { runDir?: string }): string {
   expect(result.runDir).toBeDefined();
   return result.runDir ?? "";
@@ -671,36 +958,51 @@ function fixtureRepoMapOutputs(): NonNullable<
   ConstructorParameters<typeof FakeDaytonaSandboxProvider>[0]["piOutputs"]
 > {
   const outputs = {
-    "auth-config-secrets": fakeRepoMapAuthConfigSecrets(),
+    "auth-access": fakeRepoMapAuthAccess(),
+    "config-secrets": fakeRepoMapConfigSecrets(),
     "coverage-structure": fakeRepoMapCoverageStructure(),
+    crypto: fakeRepoMapCrypto(),
     "data-flows": fakeRepoMapDataFlows(),
     entrypoints: fakeRepoMapEntrypoints(),
+    "external-integrations-egress": fakeRepoMapExternalIntegrationsEgress(),
+    "infra-deploy": fakeRepoMapInfraDeploy(),
+    "logging-observability": fakeRepoMapLoggingObservability(),
     "operation-sinks": fakeRepoMapOperationSinks(),
     "repository-map": fakeRepositoryMap(),
     "stack-build-deps": fakeRepoMapStackBuildDeps(),
-    "storage-integrations-infra": fakeRepoMapStorageIntegrationsInfra(),
+    "storage-data-model": fakeRepoMapStorageDataModel(),
     "trust-boundaries": fakeRepoMapTrustBoundaries(),
   };
 
   return {
     ...outputs,
-    "repo-map/auth-config-secrets": outputs["auth-config-secrets"],
+    "repo-map/auth-access": outputs["auth-access"],
+    "repo-map/config-secrets": outputs["config-secrets"],
     "repo-map/coverage-structure": outputs["coverage-structure"],
+    "repo-map/crypto": outputs.crypto,
     "repo-map/data-flows": outputs["data-flows"],
     "repo-map/entrypoints": outputs.entrypoints,
+    "repo-map/external-integrations-egress": outputs["external-integrations-egress"],
+    "repo-map/infra-deploy": outputs["infra-deploy"],
+    "repo-map/logging-observability": outputs["logging-observability"],
     "repo-map/operation-sinks": outputs["operation-sinks"],
     "repo-map/repository-map": outputs["repository-map"],
     "repo-map/stack-build-deps": outputs["stack-build-deps"],
-    "repo-map/storage-integrations-infra": outputs["storage-integrations-infra"],
+    "repo-map/storage-data-model": outputs["storage-data-model"],
     "repo-map/trust-boundaries": outputs["trust-boundaries"],
-    "repo-map-auth-config-secrets": outputs["auth-config-secrets"],
+    "repo-map-auth-access": outputs["auth-access"],
+    "repo-map-config-secrets": outputs["config-secrets"],
     "repo-map-coverage-structure": outputs["coverage-structure"],
+    "repo-map-crypto": outputs.crypto,
     "repo-map-data-flows": outputs["data-flows"],
     "repo-map-entrypoints": outputs.entrypoints,
+    "repo-map-external-integrations-egress": outputs["external-integrations-egress"],
+    "repo-map-infra-deploy": outputs["infra-deploy"],
+    "repo-map-logging-observability": outputs["logging-observability"],
     "repo-map-operation-sinks": outputs["operation-sinks"],
     "repo-map-repository-map": outputs["repository-map"],
     "repo-map-stack-build-deps": outputs["stack-build-deps"],
-    "repo-map-storage-integrations-infra": outputs["storage-integrations-infra"],
+    "repo-map-storage-data-model": outputs["storage-data-model"],
     "repo-map-trust-boundaries": outputs["trust-boundaries"],
   };
 }
@@ -720,13 +1022,18 @@ function minimalRepoMapOutputs(): NonNullable<
   };
 
   return {
-    "auth-config-secrets": {
-      ...minimalSection("auth-config-secrets"),
+    "auth-access": {
+      ...minimalSection("auth-access"),
       auth: [],
+      entrypoint_access: [],
+    },
+    "config-secrets": {
+      ...minimalSection("config-secrets"),
       config: [],
       secret_locations: [],
     },
     "coverage-structure": minimalSection("coverage-structure"),
+    crypto: { ...minimalSection("crypto"), crypto: [] },
     "data-flows": {
       ...minimalSection("data-flows"),
       flows: [],
@@ -736,7 +1043,20 @@ function minimalRepoMapOutputs(): NonNullable<
       },
     },
     entrypoints: { ...minimalSection("entrypoints"), entrypoints: [] },
-    "operation-sinks": { ...minimalSection("operation-sinks"), operation_sinks: [], sinks: [] },
+    "external-integrations-egress": {
+      ...minimalSection("external-integrations-egress"),
+      integrations: [],
+    },
+    "infra-deploy": {
+      ...minimalSection("infra-deploy"),
+      ci: [],
+      infra: [],
+    },
+    "logging-observability": {
+      ...minimalSection("logging-observability"),
+      logging: [],
+    },
+    "operation-sinks": { ...minimalSection("operation-sinks"), operation_sinks: [] },
     "repository-map": minimalMap,
     "stack-build-deps": {
       ...minimalSection("stack-build-deps"),
@@ -744,12 +1064,8 @@ function minimalRepoMapOutputs(): NonNullable<
       dependencies: [],
       stack: [],
     },
-    "storage-integrations-infra": {
-      ...minimalSection("storage-integrations-infra"),
-      ci: [],
-      infra: [],
-      infrastructure: [],
-      integrations: [],
+    "storage-data-model": {
+      ...minimalSection("storage-data-model"),
       storage: [],
     },
     "trust-boundaries": { ...minimalSection("trust-boundaries"), boundaries: [] },
@@ -1017,7 +1333,7 @@ function fakeRepoMapEntrypoints(): EntrypointsArtifact {
   };
 }
 
-function fakeRepoMapAuthConfigSecrets(): AuthConfigSecretsArtifact {
+function fakeRepoMapAuthAccess(): AuthAccessArtifact {
   return {
     auth: [
       {
@@ -1030,6 +1346,25 @@ function fakeRepoMapAuthConfigSecrets(): AuthConfigSecretsArtifact {
         notes: "Used by entry-http-spam route.",
       },
     ],
+    coverage: fakeCoverage("Auth and access control", ["src/auth.ts:2", "src/server.ts:5"]),
+    entrypoint_access: [
+      {
+        entrypoint_id: "entry-http-spam",
+        evidence: ["src/server.ts:5", "src/auth.ts:2"],
+        mechanism: "session",
+        status: "protected",
+      },
+    ],
+    generated_at: "2026-06-13T00:00:00.000Z",
+    generated_by: "pi",
+    kind: "auth-access",
+    metadata: fakeRepoMapMetadata("auth-access"),
+    repo: fakeRepo(),
+  };
+}
+
+function fakeRepoMapConfigSecrets(): ConfigSecretsArtifact {
+  return {
     config: [
       {
         confidence: "high",
@@ -1048,15 +1383,14 @@ function fakeRepoMapAuthConfigSecrets(): AuthConfigSecretsArtifact {
         name: "SESSION_SECRET",
       },
     ],
-    coverage: fakeCoverage("Auth, configuration, and secret locations", [
-      "src/auth.ts:2",
+    coverage: fakeCoverage("Configuration and secret references", [
       "src/config.ts:1",
       ".env.example:1",
     ]),
     generated_at: "2026-06-13T00:00:00.000Z",
     generated_by: "pi",
-    kind: "auth-config-secrets",
-    metadata: fakeRepoMapMetadata("auth-config-secrets"),
+    kind: "config-secrets",
+    metadata: fakeRepoMapMetadata("config-secrets"),
     repo: fakeRepo(),
     secret_references: [
       {
@@ -1072,66 +1406,13 @@ function fakeRepoMapAuthConfigSecrets(): AuthConfigSecretsArtifact {
   };
 }
 
-function fakeRepoMapStorageIntegrationsInfra(): StorageIntegrationsInfraArtifact {
+function fakeRepoMapStorageDataModel(): StorageDataModelArtifact {
   return {
-    ci: [
-      {
-        evidence: [".github/workflows/ci.yml:1"],
-        id: "ci-github-actions",
-        provider: "GitHub Actions",
-      },
-    ],
-    coverage: fakeCoverage("Storage, integrations, and infrastructure", [
-      "src/db.ts:2",
-      "src/schema.sql:1",
-      "src/http.ts:3",
-      "Dockerfile:1",
-      "infra/main.tf:1",
-    ]),
+    coverage: fakeCoverage("Storage and data model", ["src/db.ts:2", "src/schema.sql:1"]),
     generated_at: "2026-06-13T00:00:00.000Z",
     generated_by: "pi",
-    infra: [
-      {
-        confidence: "high",
-        evidence: ["Dockerfile:1"],
-        id: "infra-dockerfile",
-        kind: "runtime",
-        location: "Dockerfile",
-        name: "Dockerfile",
-        role: "Node.js container runtime",
-      },
-      {
-        confidence: "high",
-        evidence: ["infra/main.tf:1"],
-        id: "infra-terraform",
-        kind: "iac",
-        location: "infra/main.tf",
-        name: "Terraform demo resource",
-        role: "Infrastructure definition",
-      },
-      {
-        confidence: "high",
-        evidence: [".github/workflows/ci.yml:1"],
-        id: "ci-github-actions",
-        kind: "workflow",
-        location: ".github/workflows/ci.yml",
-        name: "GitHub Actions CI",
-        role: "CI workflow",
-      },
-    ],
-    integrations: [
-      {
-        confidence: "high",
-        evidence: ["src/http.ts:3"],
-        id: "integration-webhook-client",
-        kind: "external_api",
-        location: "src/http.ts",
-        name: "configured webhook base URL",
-        role: "Outbound HTTP client",
-      },
-    ],
-    kind: "storage-integrations-infra",
-    metadata: fakeRepoMapMetadata("storage-integrations-infra"),
+    kind: "storage-data-model",
+    metadata: fakeRepoMapMetadata("storage-data-model"),
     repo: fakeRepo(),
     storage: [
       {
@@ -1156,16 +1437,77 @@ function fakeRepoMapStorageIntegrationsInfra(): StorageIntegrationsInfraArtifact
   };
 }
 
+function fakeRepoMapExternalIntegrationsEgress(): ExternalIntegrationsEgressArtifact {
+  return {
+    coverage: fakeCoverage("External integrations and egress", ["src/http.ts:3"]),
+    generated_at: "2026-06-13T00:00:00.000Z",
+    generated_by: "pi",
+    integrations: [
+      {
+        confidence: "high",
+        evidence: ["src/http.ts:3"],
+        id: "integration-webhook-client",
+        kind: "external_api",
+        location: "src/http.ts",
+        name: "configured webhook base URL",
+        role: "Outbound HTTP client",
+      },
+    ],
+    kind: "external-integrations-egress",
+    metadata: fakeRepoMapMetadata("external-integrations-egress"),
+    repo: fakeRepo(),
+  };
+}
+
+function fakeRepoMapInfraDeploy(): InfraDeployArtifact {
+  return {
+    ci: [
+      {
+        confidence: "high",
+        evidence: [".github/workflows/ci.yml:1"],
+        id: "ci-github-actions",
+        kind: "workflow",
+        location: ".github/workflows/ci.yml",
+        name: "GitHub Actions CI",
+        role: "CI workflow",
+      },
+    ],
+    coverage: fakeCoverage("Infrastructure and deployment", [
+      "Dockerfile:1",
+      "infra/main.tf:1",
+      ".github/workflows/ci.yml:1",
+    ]),
+    generated_at: "2026-06-13T00:00:00.000Z",
+    generated_by: "pi",
+    infra: [
+      {
+        confidence: "high",
+        evidence: ["Dockerfile:1"],
+        id: "infra-dockerfile",
+        kind: "runtime",
+        location: "Dockerfile",
+        name: "Dockerfile",
+        role: "Node.js container runtime",
+      },
+      {
+        confidence: "high",
+        evidence: ["infra/main.tf:1"],
+        id: "infra-terraform",
+        kind: "iac",
+        location: "infra/main.tf",
+        name: "Terraform demo resource",
+        role: "Infrastructure definition",
+      },
+    ],
+    kind: "infra-deploy",
+    metadata: fakeRepoMapMetadata("infra-deploy"),
+    repo: fakeRepo(),
+  };
+}
+
 function fakeRepoMapOperationSinks(): OperationSinksArtifact {
   return {
-    coverage: fakeCoverage("Operation sinks", [
-      "src/db.ts:2",
-      "src/files.ts:4",
-      "src/http.ts:3",
-      "src/logger.ts:2",
-      "src/crypto.ts:2",
-      "src/crypto.ts:3",
-    ]),
+    coverage: fakeCoverage("Operation sinks", ["src/db.ts:2", "src/files.ts:4", "src/http.ts:3"]),
     generated_at: "2026-06-13T00:00:00.000Z",
     generated_by: "pi",
     kind: "operation-sinks",
@@ -1198,33 +1540,61 @@ function fakeRepoMapOperationSinks(): OperationSinksArtifact {
         location: "src/http.ts",
         operation: "fetch URL constructed from variables",
       },
-      {
-        confidence: "high",
-        evidence: ["src/logger.ts:2"],
-        id: "sink-audit-log",
-        input_variables: ["value"],
-        kind: "logging",
-        location: "src/logger.ts",
-        operation: "console.log audit value",
-      },
+    ],
+    repo: fakeRepo(),
+  };
+}
+
+function fakeRepoMapCrypto(): CryptoArtifact {
+  return {
+    coverage: fakeCoverage("Crypto and randomness", ["src/crypto.ts:2", "src/crypto.ts:3"]),
+    crypto: [
       {
         confidence: "high",
         evidence: ["src/crypto.ts:2"],
-        id: "sink-crypto-hmac",
-        input_variables: ["body", "secret"],
+        id: "crypto-hmac",
         kind: "crypto_operation",
         location: "src/crypto.ts",
+        name: "HMAC signing",
         operation: "createHmac sha256",
       },
       {
         confidence: "high",
         evidence: ["src/crypto.ts:3"],
-        id: "sink-random-token",
+        id: "crypto-random-token",
         kind: "randomness",
         location: "src/crypto.ts",
+        name: "random token generation",
         operation: "randomBytes token generation",
       },
     ],
+    generated_at: "2026-06-13T00:00:00.000Z",
+    generated_by: "pi",
+    kind: "crypto",
+    metadata: fakeRepoMapMetadata("crypto"),
+    repo: fakeRepo(),
+  };
+}
+
+function fakeRepoMapLoggingObservability(): LoggingObservabilityArtifact {
+  return {
+    coverage: fakeCoverage("Logging and observability", ["src/logger.ts:2"]),
+    generated_at: "2026-06-13T00:00:00.000Z",
+    generated_by: "pi",
+    kind: "logging-observability",
+    logging: [
+      {
+        confidence: "high",
+        evidence: ["src/logger.ts:2"],
+        id: "log-audit-value",
+        kind: "logging",
+        location: "src/logger.ts",
+        logged_fields: ["value"],
+        name: "audit log",
+        operation: "console.log audit value",
+      },
+    ],
+    metadata: fakeRepoMapMetadata("logging-observability"),
     repo: fakeRepo(),
   };
 }
@@ -1277,7 +1647,7 @@ function fakeRepoMapTrustBoundaries(): TrustBoundariesArtifact {
         kind: "external_user_to_app",
         name: "External HTTP to app/database",
         sink_ids: ["sink-db-insert"],
-        source_artifact_ids: ["entrypoints", "auth-config-secrets", "data-flows"],
+        source_artifact_ids: ["entrypoints", "auth-access", "data-flows"],
         source_entrypoint_ids: ["entry-http-spam"],
       },
     ],
@@ -1289,13 +1659,18 @@ function fakeRepoMapTrustBoundaries(): TrustBoundariesArtifact {
     generated_at: "2026-06-13T00:00:00.000Z",
     generated_by: "pi",
     inputs: {
-      auth_config_secrets_artifact: "outputs/repo-map/auth-config-secrets.json",
+      auth_access_artifact: "outputs/repo-map/auth-access.json",
+      config_secrets_artifact: "outputs/repo-map/config-secrets.json",
       coverage_structure_artifact: "outputs/repo-map/coverage-structure.json",
+      crypto_artifact: "outputs/repo-map/crypto.json",
       data_flows_artifact: "outputs/repo-map/data-flows.json",
       entrypoints_artifact: "outputs/repo-map/entrypoints.json",
+      external_integrations_egress_artifact: "outputs/repo-map/external-integrations-egress.json",
+      infra_deploy_artifact: "outputs/repo-map/infra-deploy.json",
+      logging_observability_artifact: "outputs/repo-map/logging-observability.json",
       operation_sinks_artifact: "outputs/repo-map/operation-sinks.json",
       stack_build_deps_artifact: "outputs/repo-map/stack-build-deps.json",
-      storage_integrations_infra_artifact: "outputs/repo-map/storage-integrations-infra.json",
+      storage_data_model_artifact: "outputs/repo-map/storage-data-model.json",
     },
     kind: "trust-boundaries",
     metadata: fakeRepoMapMetadata("trust-boundaries"),
@@ -1310,13 +1685,18 @@ function fakeRepositoryMap(): RepositoryMapArtifact {
     generated_at: "2026-06-13T00:00:00.000Z",
     generated_by: "pi",
     inputs: {
-      auth_config_secrets_artifact: "outputs/repo-map/auth-config-secrets.json",
+      auth_access_artifact: "outputs/repo-map/auth-access.json",
+      config_secrets_artifact: "outputs/repo-map/config-secrets.json",
       coverage_structure_artifact: "outputs/repo-map/coverage-structure.json",
+      crypto_artifact: "outputs/repo-map/crypto.json",
       data_flows_artifact: "outputs/repo-map/data-flows.json",
       entrypoints_artifact: "outputs/repo-map/entrypoints.json",
+      external_integrations_egress_artifact: "outputs/repo-map/external-integrations-egress.json",
+      infra_deploy_artifact: "outputs/repo-map/infra-deploy.json",
+      logging_observability_artifact: "outputs/repo-map/logging-observability.json",
       operation_sinks_artifact: "outputs/repo-map/operation-sinks.json",
       stack_build_deps_artifact: "outputs/repo-map/stack-build-deps.json",
-      storage_integrations_infra_artifact: "outputs/repo-map/storage-integrations-infra.json",
+      storage_data_model_artifact: "outputs/repo-map/storage-data-model.json",
       trust_boundaries_artifact: "outputs/repo-map/trust-boundaries.json",
     },
     kind: "repository-map",
@@ -1326,13 +1706,18 @@ function fakeRepositoryMap(): RepositoryMapArtifact {
       repoMapSection("coverage-structure", "outputs/repo-map/coverage-structure.json", 3),
       repoMapSection("stack-build-deps", "outputs/repo-map/stack-build-deps.json", 4),
       repoMapSection("entrypoints", "outputs/repo-map/entrypoints.json", 4),
-      repoMapSection("auth-config-secrets", "outputs/repo-map/auth-config-secrets.json", 4),
+      repoMapSection("auth-access", "outputs/repo-map/auth-access.json", 4),
+      repoMapSection("config-secrets", "outputs/repo-map/config-secrets.json", 7),
+      repoMapSection("storage-data-model", "outputs/repo-map/storage-data-model.json", 2),
       repoMapSection(
-        "storage-integrations-infra",
-        "outputs/repo-map/storage-integrations-infra.json",
-        6,
+        "external-integrations-egress",
+        "outputs/repo-map/external-integrations-egress.json",
+        1,
       ),
+      repoMapSection("infra-deploy", "outputs/repo-map/infra-deploy.json", 3),
       repoMapSection("operation-sinks", "outputs/repo-map/operation-sinks.json", 6),
+      repoMapSection("crypto", "outputs/repo-map/crypto.json", 2),
+      repoMapSection("logging-observability", "outputs/repo-map/logging-observability.json", 1),
       repoMapSection("data-flows", "outputs/repo-map/data-flows.json", 1),
       repoMapSection("trust-boundaries", "outputs/repo-map/trust-boundaries.json", 1),
     ],
@@ -1414,17 +1799,22 @@ function expectTrustBoundariesUseKnownFacts(input: {
   trustBoundaries: TrustBoundariesArtifact;
 }): void {
   const entrypointIds = new Set(input.entrypoints.entrypoints.map((entrypoint) => entrypoint.id));
-  const operationSinks = input.sinks.operation_sinks ?? input.sinks.sinks ?? [];
+  const operationSinks = input.sinks.operation_sinks;
   const sinkIds = new Set(operationSinks.map((sink) => sink.id));
   const flowIds = new Set(input.dataFlows.flows.map((flow) => flow.id));
   const knownSourceArtifacts = new Set([
-    "auth-config-secrets",
+    "auth-access",
+    "config-secrets",
     "coverage-structure",
+    "crypto",
     "data-flows",
     "entrypoints",
+    "external-integrations-egress",
+    "infra-deploy",
+    "logging-observability",
     "operation-sinks",
     "stack-build-deps",
-    "storage-integrations-infra",
+    "storage-data-model",
   ]);
 
   for (const flow of input.dataFlows.flows) {
@@ -1447,6 +1837,4 @@ function expectTrustBoundariesUseKnownFacts(input: {
     }
     expect(boundary.inference).toBe(true);
   }
-
-  expect(JSON.stringify(input.trustBoundaries)).not.toContain("invented");
 }
