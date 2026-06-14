@@ -92,7 +92,7 @@ export interface RuntimeJobInput {
     prompt: string;
     provider: "openrouter";
     step: string;
-    thinking?: "high" | "low" | "medium";
+    thinking?: "high" | "low" | "medium" | "xhigh";
     tools: string[];
   };
   onProgress?: (event: RuntimeJobProgressEvent) => unknown | Promise<unknown>;

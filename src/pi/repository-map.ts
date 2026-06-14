@@ -1,7 +1,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { jsonrepair } from "jsonrepair";
 import type {
   AuthAccessArtifact,
+  AuthConfigRecord,
   ConfigSecretsArtifact,
   CoverageStructureArtifact,
   CryptoArtifact,
@@ -29,8 +31,10 @@ import type {
   SandboxSession,
 } from "../sandbox/types.js";
 
-const defaultPiModel = "moonshotai/kimi-k2.7-code";
+const defaultPiModel = "deepseek/deepseek-v4-pro";
 const defaultPiProvider = "openrouter";
+const defaultPiThinking = "high";
+const trustBoundariesPiModel = "openai/gpt-5.3-codex";
 const collectorTools = ["read", "grep", "find", "ls"];
 
 const repoMapPaths = {
@@ -157,10 +161,11 @@ interface PiStageInput<TArtifact extends PiStructuredArtifact> {
   input: RunPiRepositoryMappingInput;
   jobName: string;
   kind: TArtifact["kind"];
+  model?: string;
   outputBaseName: TArtifact["kind"];
   prompt: string;
   step: TArtifact["kind"];
-  thinking?: "high" | "low" | "medium";
+  thinking?: "high" | "low" | "medium" | "xhigh";
   tools?: string[];
   validateSchema: (artifact: TArtifact) => void;
   validationStage: PiStageValidationStage;
@@ -170,6 +175,12 @@ interface PiStageResult<TArtifact extends PiStructuredArtifact> {
   artifact: TArtifact;
   artifactPath: string;
   jobState: RunJobState;
+}
+
+interface ParsedPiJsonObject {
+  jsonDelivery: "fenced" | "repaired" | "strict";
+  parsed: unknown;
+  repairApplied: boolean;
 }
 
 const repositoryMapProductIntent =
@@ -211,7 +222,7 @@ export async function runPiRepositoryMapping(
       validationStage: "stack-build-deps-validation",
     }));
 
-  const entrypointsContext = buildEntrypointsContext(input.contextPack);
+  const entrypointsContext = buildEntrypointsContext(input.contextPack, stackBuildDeps.artifact);
   const entrypoints =
     input.existing?.entrypoints ??
     (await runPiStage<EntrypointsArtifact>({
@@ -226,7 +237,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "entrypoints",
       prompt: buildEntrypointsPrompt(entrypointsContext),
       step: "entrypoints",
-      thinking: "high",
+      thinking: "xhigh",
       validateSchema: (artifact) => validateEntrypointsArtifact({ artifact }),
       validationStage: "entrypoints-validation",
     }));
@@ -336,7 +347,10 @@ export async function runPiRepositoryMapping(
       validationStage: "infra-deploy-validation",
     }));
 
-  const operationSinksContext = buildOperationSinksContext(input.contextPack);
+  const operationSinksContext = buildOperationSinksContext(
+    input.contextPack,
+    stackBuildDeps.artifact,
+  );
   const operationSinks =
     input.existing?.operationSinks ??
     (await runPiStage<OperationSinksArtifact>({
@@ -351,7 +365,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "operation-sinks",
       prompt: buildOperationSinksPrompt(operationSinksContext),
       step: "operation-sinks",
-      thinking: "high",
+      thinking: "xhigh",
       validateSchema: (artifact) => validateOperationSinksArtifact({ artifact }),
       validationStage: "operation-sinks-validation",
     }));
@@ -375,7 +389,11 @@ export async function runPiRepositoryMapping(
       validationStage: "crypto-validation",
     }));
 
-  const loggingObservabilityContext = buildLoggingObservabilityContext(input.contextPack);
+  const loggingObservabilityContext = buildLoggingObservabilityContext(
+    input.contextPack,
+    entrypoints.artifact,
+    storageDataModel.artifact,
+  );
   const loggingObservability =
     input.existing?.loggingObservability ??
     (await runPiStage<LoggingObservabilityArtifact>({
@@ -414,26 +432,20 @@ export async function runPiRepositoryMapping(
       outputBaseName: "data-flows",
       prompt: buildDataFlowsPrompt(dataFlowContext),
       step: "data-flows",
-      thinking: "high",
+      thinking: "xhigh",
       validateSchema: (artifact) => validateDataFlowsArtifact({ artifact }),
       validationStage: "data-flows-validation",
     }));
 
-  const priorMapArtifacts = {
-    artifacts: {
-      auth_access: piHandoffArtifact(authAccess.artifact),
-      config_secrets: piHandoffArtifact(configSecrets.artifact),
-      crypto: piHandoffArtifact(crypto.artifact),
-      data_flows: piHandoffArtifact(dataFlows.artifact),
-      entrypoints: piHandoffArtifact(entrypoints.artifact),
-      external_integrations_egress: piHandoffArtifact(externalIntegrationsEgress.artifact),
-      infra_deploy: piHandoffArtifact(infraDeploy.artifact),
-      logging_observability: piHandoffArtifact(loggingObservability.artifact),
-      operation_sinks: piHandoffArtifact(operationSinks.artifact),
-      storage_data_model: piHandoffArtifact(storageDataModel.artifact),
-    },
-    paths: priorMapArtifactPaths(),
-  };
+  const trustBoundariesContext = buildTrustBoundariesContextMarkdown({
+    authAccess: authAccess.artifact,
+    dataFlows: dataFlows.artifact,
+    entrypoints: entrypoints.artifact,
+    externalIntegrationsEgress: externalIntegrationsEgress.artifact,
+    infraDeploy: infraDeploy.artifact,
+    operationSinks: operationSinks.artifact,
+    storageDataModel: storageDataModel.artifact,
+  });
   const trustBoundaries =
     input.existing?.trustBoundaries ??
     (await runPiStage<TrustBoundariesArtifact>({
@@ -453,36 +465,36 @@ export async function runPiRepositoryMapping(
         loggingObservability.artifactPath,
         dataFlows.artifactPath,
       ].join(", "),
-      contextPack: priorMapArtifacts,
+      contextPack: trustBoundariesContext,
       generatedAt: input.generatedAt,
       input: stageInput,
       jobName: "pi-trust-boundaries",
       kind: "trust-boundaries",
+      model: trustBoundariesPiModel,
       outputBaseName: "trust-boundaries",
-      prompt: buildTrustBoundariesPrompt(priorMapArtifacts),
+      prompt: buildTrustBoundariesPrompt(trustBoundariesContext),
       step: "trust-boundaries",
+      thinking: "xhigh",
+      tools: [],
       validateSchema: (artifact) => validateTrustBoundariesArtifact({ artifact }),
       validationStage: "trust-boundaries-validation",
     }));
 
-  const repositoryMapContext = {
-    artifacts: {
-      auth_access: piHandoffArtifact(authAccess.artifact),
-      config_secrets: piHandoffArtifact(configSecrets.artifact),
-      coverage_structure: piHandoffArtifact(coverageStructure.artifact),
-      crypto: piHandoffArtifact(crypto.artifact),
-      data_flows: piHandoffArtifact(dataFlows.artifact),
-      entrypoints: piHandoffArtifact(entrypoints.artifact),
-      external_integrations_egress: piHandoffArtifact(externalIntegrationsEgress.artifact),
-      infra_deploy: piHandoffArtifact(infraDeploy.artifact),
-      logging_observability: piHandoffArtifact(loggingObservability.artifact),
-      operation_sinks: piHandoffArtifact(operationSinks.artifact),
-      stack_build_deps: piHandoffArtifact(stackBuildDeps.artifact),
-      storage_data_model: piHandoffArtifact(storageDataModel.artifact),
-      trust_boundaries: piHandoffArtifact(trustBoundaries.artifact),
-    },
-    paths: allMapArtifactPaths(),
-  };
+  const repositoryMapContext = buildRepositoryMapContextMarkdown({
+    authAccess: authAccess.artifact,
+    configSecrets: configSecrets.artifact,
+    coverageStructure: coverageStructure.artifact,
+    crypto: crypto.artifact,
+    dataFlows: dataFlows.artifact,
+    entrypoints: entrypoints.artifact,
+    externalIntegrationsEgress: externalIntegrationsEgress.artifact,
+    infraDeploy: infraDeploy.artifact,
+    loggingObservability: loggingObservability.artifact,
+    operationSinks: operationSinks.artifact,
+    stackBuildDeps: stackBuildDeps.artifact,
+    storageDataModel: storageDataModel.artifact,
+    trustBoundaries: trustBoundaries.artifact,
+  });
   const repositoryMap =
     input.existing?.repositoryMap ??
     (await runPiStage<RepositoryMapArtifact>({
@@ -508,9 +520,12 @@ export async function runPiRepositoryMapping(
       input: stageInput,
       jobName: "pi-repository-map",
       kind: "repository-map",
+      model: trustBoundariesPiModel,
       outputBaseName: "repository-map",
       prompt: buildRepositoryMapPrompt(repositoryMapContext),
       step: "repository-map",
+      thinking: "xhigh",
+      tools: [],
       validateSchema: (artifact) => validateRepositoryMapArtifact({ artifact }),
       validationStage: "repository-map-validation",
     }));
@@ -566,18 +581,36 @@ function buildStackBuildDepsContext(contextPack: PiContextPackArtifact): unknown
   };
 }
 
-function buildEntrypointsContext(contextPack: PiContextPackArtifact): unknown {
+function buildEntrypointsContext(
+  contextPack: PiContextPackArtifact,
+  stackBuildDeps: StackBuildDepsArtifact,
+): unknown {
   const inventory = contextPack.inventory;
   return {
+    inputs: {
+      stack_build_deps: compactStackBuildDepsForCollectors(stackBuildDeps),
+    },
     inventory: {
+      config_files: inventory.config_files,
+      github_actions_workflows: inventory.github_actions_workflows,
       language_summary: inventory.language_summary,
       manifest_files: inventory.manifest_files,
-      source_index: inventory.source_index,
       summary: inventory.summary,
       top_level_directories: inventory.top_level_directories,
     },
     purpose: repositoryMapProductIntent,
     repo: contextPack.repo,
+  };
+}
+
+function compactStackBuildDepsForCollectors(artifact: StackBuildDepsArtifact): unknown {
+  return {
+    build: artifact.build,
+    ci: artifact.ci,
+    dependency_notes: artifact.dependency_notes,
+    kind: artifact.kind,
+    repo: artifact.repo,
+    stack: artifact.stack,
   };
 }
 
@@ -607,7 +640,6 @@ function buildConfigSecretsContext(contextPack: PiContextPackArtifact): unknown 
     inventory: {
       config_files: inventory.config_files,
       manifest_files: inventory.manifest_files,
-      source_index: inventory.source_index,
       summary: inventory.summary,
       top_level_directories: inventory.top_level_directories,
     },
@@ -645,6 +677,7 @@ function buildExternalIntegrationsEgressContext(
       config_secrets: piHandoffArtifact(configSecrets),
     },
     inventory: {
+      config_files: inventory.config_files,
       manifest_files: inventory.manifest_files,
       source_index: inventory.source_index,
       summary: inventory.summary,
@@ -658,7 +691,6 @@ function buildInfraDeployContext(contextPack: PiContextPackArtifact): unknown {
   const inventory = contextPack.inventory;
   return {
     inventory: {
-      config_files: inventory.config_files,
       github_actions_workflows: inventory.github_actions_workflows,
       iac_candidates: inventory.iac_candidates,
       infra_files: inventory.infra_files,
@@ -670,9 +702,15 @@ function buildInfraDeployContext(contextPack: PiContextPackArtifact): unknown {
   };
 }
 
-function buildOperationSinksContext(contextPack: PiContextPackArtifact): unknown {
+function buildOperationSinksContext(
+  contextPack: PiContextPackArtifact,
+  stackBuildDeps: StackBuildDepsArtifact,
+): unknown {
   const inventory = contextPack.inventory;
   return {
+    inputs: {
+      stack_build_deps: compactStackBuildDepsForCollectors(stackBuildDeps),
+    },
     inventory: {
       source_index: inventory.source_index,
       summary: inventory.summary,
@@ -695,9 +733,17 @@ function buildCryptoContext(contextPack: PiContextPackArtifact): unknown {
   };
 }
 
-function buildLoggingObservabilityContext(contextPack: PiContextPackArtifact): unknown {
+function buildLoggingObservabilityContext(
+  contextPack: PiContextPackArtifact,
+  entrypoints: EntrypointsArtifact,
+  storageDataModel: StorageDataModelArtifact,
+): unknown {
   const inventory = contextPack.inventory;
   return {
+    inputs: {
+      entrypoints: piHandoffArtifact(entrypoints),
+      storage_data_model: piHandoffArtifact(storageDataModel),
+    },
     inventory: {
       config_files: inventory.config_files,
       manifest_files: inventory.manifest_files,
@@ -707,6 +753,596 @@ function buildLoggingObservabilityContext(contextPack: PiContextPackArtifact): u
     purpose: repositoryMapProductIntent,
     repo: contextPack.repo,
   };
+}
+
+export function buildTrustBoundariesContextMarkdown(input: {
+  authAccess: AuthAccessArtifact;
+  dataFlows: DataFlowsArtifact;
+  entrypoints: EntrypointsArtifact;
+  externalIntegrationsEgress: ExternalIntegrationsEgressArtifact;
+  infraDeploy: InfraDeployArtifact;
+  operationSinks: OperationSinksArtifact;
+  storageDataModel: StorageDataModelArtifact;
+}): string {
+  const repo = input.entrypoints.repo;
+  const lines: string[] = [
+    "# Trust Boundaries Context",
+    "",
+    `Repo: ${repo.url}`,
+    `Commit: ${repo.commit_sha ?? "unknown"}`,
+    "",
+    "This context is a compact projection of accepted repository-map facts.",
+    "Use IDs and evidence paths below; do not invent new entrypoints, sinks, or flows.",
+    "",
+    "## Counts",
+    `- entrypoints: ${input.entrypoints.entrypoints.length}`,
+    `- entrypoint_access: ${input.authAccess.entrypoint_access?.length ?? 0}`,
+    `- operation_sinks: ${input.operationSinks.operation_sinks.length}`,
+    `- flows: ${input.dataFlows.flows.length}`,
+    `- storage: ${input.storageDataModel.storage.length}`,
+    `- external_integrations: ${input.externalIntegrationsEgress.integrations.length}`,
+    `- ci_records: ${input.infraDeploy.ci?.length ?? 0}`,
+    `- infra_records: ${input.infraDeploy.infra.length}`,
+    "",
+    "## Entry Points",
+  ];
+
+  for (const entrypoint of input.entrypoints.entrypoints) {
+    const label = markdownField(
+      [
+        entrypoint.method,
+        entrypoint.route ?? entrypoint.path ?? entrypoint.command ?? entrypoint.schedule,
+        entrypoint.name,
+        entrypoint.handler,
+        entrypoint.location,
+        entrypoint.count === undefined ? undefined : `count=${entrypoint.count}`,
+      ]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    );
+    lines.push(
+      `- ${entrypoint.id} | ${entrypoint.kind} | ${label} | evidence: ${formatMarkdownEvidence(
+        entrypoint.evidence,
+      )}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.entrypoints.entrypoints);
+
+  lines.push("", "## Entrypoint Access");
+  for (const access of input.authAccess.entrypoint_access ?? []) {
+    const label = markdownField(
+      [
+        `status=${access.status}`,
+        access.mechanism,
+        access.session_storage === undefined ? undefined : `session=${access.session_storage}`,
+        access.roles_scopes?.length ? `roles=${access.roles_scopes.join(",")}` : undefined,
+      ]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    );
+    lines.push(
+      `- ${access.entrypoint_id} | ${label} | evidence: ${formatMarkdownEvidence(access.evidence)}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.authAccess.entrypoint_access ?? []);
+
+  lines.push("", "## Auth Labels");
+  for (const auth of input.authAccess.auth) {
+    const label = markdownField(
+      [
+        auth.kind,
+        auth.name,
+        auth.mechanism,
+        auth.location,
+        auth.protects_entrypoint_ids?.length
+          ? `protects=${auth.protects_entrypoint_ids.join(",")}`
+          : undefined,
+      ]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    );
+    lines.push(`- ${auth.id} | ${label} | evidence: ${formatMarkdownEvidence(auth.evidence)}`);
+  }
+  pushNoneIfEmpty(lines, input.authAccess.auth);
+
+  lines.push("", "## Operation Sinks");
+  for (const sink of input.operationSinks.operation_sinks) {
+    const label = markdownField(
+      [sink.operation, sink.location, sink.destination, sink.query_construction]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    );
+    lines.push(
+      `- ${sink.id} | ${sink.kind} | ${label} | evidence: ${formatMarkdownEvidence(sink.evidence)}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.operationSinks.operation_sinks);
+
+  lines.push("", "## Data Flows");
+  for (const flow of input.dataFlows.flows) {
+    const source = flow.source_entrypoint ?? flow.source_entrypoint_id ?? "unknown-source";
+    const sink = flow.operation_sink ?? flow.sink_id ?? "unknown-sink";
+    const evidence = [
+      ...(flow.evidence ?? []),
+      ...flow.source_evidence,
+      ...(flow.operation_sink_evidence ?? []),
+      ...(flow.sink_evidence ?? []),
+      ...(flow.steps ?? []).flatMap((step) => step.evidence),
+      ...(flow.intermediate_functions ?? []).flatMap((step) => step.evidence),
+      ...(flow.breakpoint?.evidence ?? []),
+    ];
+    const breakpoint =
+      flow.breakpoint?.reason === undefined
+        ? ""
+        : ` | breakpoint: ${markdownField(flow.breakpoint.reason)}`;
+    lines.push(
+      `- ${flow.id} | ${source} -> ${sink} | ${flow.trace_status}${breakpoint} | evidence: ${formatMarkdownEvidence(
+        evidence,
+      )}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.dataFlows.flows);
+
+  lines.push("", "## Storage And Data Model");
+  for (const storage of input.storageDataModel.storage) {
+    const label = markdownField(
+      [storage.kind, storage.type, storage.role, storage.name, storage.location]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    );
+    lines.push(
+      `- ${storage.id} | ${label} | evidence: ${formatMarkdownEvidence([
+        ...storage.evidence,
+        ...(storage.schema_evidence ?? []),
+      ])}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.storageDataModel.storage);
+
+  lines.push("", "## External Integrations And Egress");
+  for (const integration of input.externalIntegrationsEgress.integrations) {
+    const label = markdownField(
+      [
+        integration.kind,
+        integration.type,
+        integration.provider,
+        integration.target,
+        integration.from,
+        integration.name,
+        integration.location,
+      ]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    );
+    lines.push(
+      `- ${integration.id} | ${label} | evidence: ${formatMarkdownEvidence(integration.evidence)}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.externalIntegrationsEgress.integrations);
+
+  lines.push("", "## CI And Deploy");
+  for (const ci of input.infraDeploy.ci ?? []) {
+    const label = markdownField(
+      [ci.kind, ci.type, ci.name, ci.location, ci.entrypoint]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    );
+    lines.push(`- ci:${ci.id} | ${label} | evidence: ${formatMarkdownEvidence(ci.evidence)}`);
+  }
+  for (const infra of input.infraDeploy.infra) {
+    const label = markdownField(
+      [
+        infra.kind,
+        infra.type,
+        infra.name,
+        infra.location,
+        infra.ports?.length ? `ports=${infra.ports.join(",")}` : undefined,
+        infra.user === undefined ? undefined : `user=${infra.user}`,
+      ]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    );
+    lines.push(
+      `- infra:${infra.id} | ${label} | evidence: ${formatMarkdownEvidence(infra.evidence)}`,
+    );
+  }
+  if ((input.infraDeploy.ci?.length ?? 0) === 0 && input.infraDeploy.infra.length === 0) {
+    lines.push("- none");
+  }
+
+  lines.push(
+    "",
+    "## Omitted From This Context",
+    "- Per-artifact provenance, repeated repo blocks, full coverage detail, and unrelated logging/crypto/config detail.",
+  );
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function buildRepositoryMapContextMarkdown(input: {
+  authAccess: AuthAccessArtifact;
+  configSecrets: ConfigSecretsArtifact;
+  coverageStructure: CoverageStructureArtifact;
+  crypto: CryptoArtifact;
+  dataFlows: DataFlowsArtifact;
+  entrypoints: EntrypointsArtifact;
+  externalIntegrationsEgress: ExternalIntegrationsEgressArtifact;
+  infraDeploy: InfraDeployArtifact;
+  loggingObservability: LoggingObservabilityArtifact;
+  operationSinks: OperationSinksArtifact;
+  stackBuildDeps: StackBuildDepsArtifact;
+  storageDataModel: StorageDataModelArtifact;
+  trustBoundaries: TrustBoundariesArtifact;
+}): string {
+  const repo = input.coverageStructure.repo;
+  const lines: string[] = [
+    "# Repository Map Context",
+    "",
+    `Repo: ${repo.url}`,
+    `Commit: ${repo.commit_sha ?? "unknown"}`,
+    "",
+    "This context is a compact Markdown projection of accepted repository-map section artifacts.",
+    "Use supplied IDs, counts, paths, and evidence only; do not invent new facts.",
+    "",
+    "## Section Artifacts",
+  ];
+
+  const paths = allMapArtifactPaths();
+  pushSectionArtifactLine(lines, "coverage-structure", paths.coverage_structure_artifact, [
+    input.coverageStructure.repository_structure.length,
+  ]);
+  pushSectionArtifactLine(lines, "stack-build-deps", paths.stack_build_deps_artifact, [
+    input.stackBuildDeps.stack.length,
+    input.stackBuildDeps.dependencies.length,
+    input.stackBuildDeps.build.commands.length,
+    input.stackBuildDeps.ci?.length ?? 0,
+  ]);
+  pushSectionArtifactLine(lines, "entrypoints", paths.entrypoints_artifact, [
+    input.entrypoints.entrypoints.length,
+  ]);
+  pushSectionArtifactLine(lines, "auth-access", paths.auth_access_artifact, [
+    input.authAccess.auth.length,
+    input.authAccess.entrypoint_access?.length ?? 0,
+  ]);
+  pushSectionArtifactLine(lines, "config-secrets", paths.config_secrets_artifact, [
+    input.configSecrets.config.length,
+    input.configSecrets.secret_locations?.length ?? 0,
+    input.configSecrets.secret_references?.length ?? 0,
+  ]);
+  pushSectionArtifactLine(lines, "storage-data-model", paths.storage_data_model_artifact, [
+    input.storageDataModel.storage.length,
+  ]);
+  pushSectionArtifactLine(
+    lines,
+    "external-integrations-egress",
+    paths.external_integrations_egress_artifact,
+    [input.externalIntegrationsEgress.integrations.length],
+  );
+  pushSectionArtifactLine(lines, "infra-deploy", paths.infra_deploy_artifact, [
+    input.infraDeploy.infra.length,
+    input.infraDeploy.ci?.length ?? 0,
+  ]);
+  pushSectionArtifactLine(lines, "operation-sinks", paths.operation_sinks_artifact, [
+    input.operationSinks.operation_sinks.length,
+  ]);
+  pushSectionArtifactLine(lines, "crypto", paths.crypto_artifact, [input.crypto.crypto.length]);
+  pushSectionArtifactLine(lines, "logging-observability", paths.logging_observability_artifact, [
+    input.loggingObservability.logging.length,
+  ]);
+  pushSectionArtifactLine(lines, "data-flows", paths.data_flows_artifact, [
+    input.dataFlows.flows.length,
+  ]);
+  pushSectionArtifactLine(lines, "trust-boundaries", paths.trust_boundaries_artifact, [
+    input.trustBoundaries.boundaries.length,
+  ]);
+
+  lines.push("", "## Project Shape");
+  if (input.coverageStructure.repo_size !== undefined) {
+    lines.push(
+      `- repo_size | files=${input.coverageStructure.repo_size.file_count} | loc=${
+        input.coverageStructure.repo_size.total_loc ?? "unknown"
+      } | source=${input.coverageStructure.repo_size.source}`,
+    );
+  }
+  for (const language of input.coverageStructure.language_summary ?? []) {
+    lines.push(
+      `- language | ${language.language} | files=${language.file_count} | loc=${language.loc} | source=${language.source}`,
+    );
+  }
+  const structureCounts = countBy(
+    input.coverageStructure.repository_structure,
+    (item) => item.kind,
+  );
+  lines.push(`- repository_structure_kinds | ${formatCounts(structureCounts)}`);
+  for (const item of input.coverageStructure.repository_structure) {
+    lines.push(
+      `- structure | ${item.kind} | ${item.path} | ${markdownField(
+        item.role,
+      )} | evidence: ${formatMarkdownEvidence(item.evidence)}`,
+    );
+  }
+
+  lines.push("", "## Stack, Build, And Dependencies");
+  for (const stack of input.stackBuildDeps.stack) {
+    lines.push(
+      `- stack | ${stack.id} | ${stack.kind} | ${stack.name} | ${markdownField(
+        stack.role,
+      )} | version=${stack.version ?? stack.required_version ?? "unknown"} | evidence: ${formatMarkdownEvidence(
+        stack.evidence,
+      )}`,
+    );
+  }
+  for (const dependency of input.stackBuildDeps.dependencies) {
+    lines.push(
+      `- dependency | ${dependency.id} | ${dependency.kind} | ${dependency.name} | ${markdownField(
+        dependency.role,
+      )} | version=${dependency.version ?? dependency.required_version ?? "unknown"} | evidence: ${formatMarkdownEvidence(
+        dependency.evidence,
+      )}`,
+    );
+  }
+  for (const command of input.stackBuildDeps.build.commands) {
+    lines.push(
+      `- build_command | ${command.id} | ${command.name} | ${command.command} | source=${command.source} | evidence: ${formatMarkdownEvidence(
+        command.evidence,
+      )}`,
+    );
+  }
+  for (const note of input.stackBuildDeps.dependency_notes ?? []) {
+    lines.push(
+      `- dependency_note | ${note.kind} | ${markdownField(note.summary)} | evidence: ${formatMarkdownEvidence(
+        note.evidence ?? [],
+      )}`,
+    );
+  }
+
+  lines.push("", "## Config And Secret References");
+  for (const config of input.configSecrets.config) {
+    pushAuthConfigMarkdownLine(lines, "config", config);
+  }
+  for (const location of input.configSecrets.secret_locations ?? []) {
+    pushAuthConfigMarkdownLine(lines, "secret_location", location);
+  }
+  for (const reference of input.configSecrets.secret_references ?? []) {
+    pushAuthConfigMarkdownLine(lines, "secret_reference", reference);
+  }
+  if (
+    input.configSecrets.config.length === 0 &&
+    (input.configSecrets.secret_locations?.length ?? 0) === 0 &&
+    (input.configSecrets.secret_references?.length ?? 0) === 0
+  ) {
+    lines.push("- none");
+  }
+
+  lines.push("", "## Core IDs And Links");
+  for (const entrypoint of input.entrypoints.entrypoints) {
+    lines.push(
+      `- entrypoint | ${entrypoint.id} | ${entrypoint.kind} | evidence: ${formatMarkdownEvidence(
+        entrypoint.evidence,
+      )}`,
+    );
+  }
+  for (const access of input.authAccess.entrypoint_access ?? []) {
+    lines.push(
+      `- entrypoint_access | ${access.entrypoint_id} | status=${access.status} | evidence: ${formatMarkdownEvidence(
+        access.evidence,
+      )}`,
+    );
+  }
+  for (const auth of input.authAccess.auth) {
+    lines.push(
+      `- auth | ${auth.id} | ${auth.kind ?? "auth"} | evidence: ${formatMarkdownEvidence(
+        auth.evidence,
+      )}`,
+    );
+  }
+  for (const sink of input.operationSinks.operation_sinks) {
+    lines.push(
+      `- operation_sink | ${sink.id} | ${sink.kind} | evidence: ${formatMarkdownEvidence(
+        sink.evidence,
+      )}`,
+    );
+  }
+  for (const flow of input.dataFlows.flows) {
+    const source = flow.source_entrypoint ?? flow.source_entrypoint_id ?? "unknown-source";
+    const sink = flow.operation_sink ?? flow.sink_id ?? "unknown-sink";
+    lines.push(
+      `- flow | ${flow.id} | ${source} -> ${sink} | ${flow.trace_status} | evidence: ${formatMarkdownEvidence(
+        [
+          ...(flow.evidence ?? []),
+          ...flow.source_evidence,
+          ...(flow.operation_sink_evidence ?? []),
+          ...(flow.sink_evidence ?? []),
+        ],
+      )}`,
+    );
+  }
+  for (const storage of input.storageDataModel.storage) {
+    lines.push(
+      `- storage | ${storage.id} | ${storage.kind ?? storage.type ?? "storage"} | evidence: ${formatMarkdownEvidence(
+        [...storage.evidence, ...(storage.schema_evidence ?? [])],
+      )}`,
+    );
+  }
+  for (const integration of input.externalIntegrationsEgress.integrations) {
+    lines.push(
+      `- integration | ${integration.id} | ${integration.kind ?? integration.type ?? "integration"} | evidence: ${formatMarkdownEvidence(
+        integration.evidence,
+      )}`,
+    );
+  }
+  for (const ci of input.infraDeploy.ci ?? []) {
+    lines.push(
+      `- ci | ${ci.id} | ${ci.kind ?? ci.type ?? "ci"} | evidence: ${formatMarkdownEvidence(ci.evidence)}`,
+    );
+  }
+  for (const infra of input.infraDeploy.infra) {
+    lines.push(
+      `- infra | ${infra.id} | ${infra.kind ?? infra.type ?? "infra"} | evidence: ${formatMarkdownEvidence(
+        infra.evidence,
+      )}`,
+    );
+  }
+
+  lines.push("", "## Crypto And Randomness");
+  for (const crypto of input.crypto.crypto) {
+    lines.push(
+      `- ${crypto.id} | ${crypto.kind ?? "crypto"} | ${markdownField(
+        [crypto.name, crypto.operation, crypto.algorithm, crypto.mode, crypto.location]
+          .filter((part): part is string => part !== undefined && part !== "")
+          .join(" "),
+      )} | evidence: ${formatMarkdownEvidence(crypto.evidence)}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.crypto.crypto);
+
+  lines.push("", "## Logging And Observability");
+  for (const logging of input.loggingObservability.logging) {
+    lines.push(
+      `- ${logging.id} | ${logging.kind ?? "logging"} | ${markdownField(
+        [logging.name, logging.operation, logging.destination, logging.location]
+          .filter((part): part is string => part !== undefined && part !== "")
+          .join(" "),
+      )} | evidence: ${formatMarkdownEvidence(logging.evidence)}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.loggingObservability.logging);
+
+  lines.push("", "## Trust Boundaries");
+  for (const boundary of input.trustBoundaries.boundaries) {
+    lines.push(
+      `- ${boundary.id} | ${boundary.kind ?? "other"} | ${markdownField(
+        [boundary.name, boundary.description ?? boundary.summary]
+          .filter((part): part is string => part !== undefined && part !== "")
+          .join(" "),
+      )} | confidence=${boundary.confidence ?? "unknown"} | entrypoints=${(
+        boundary.source_entrypoint_ids ?? []
+      ).join(",")} | sinks=${(boundary.sink_ids ?? []).join(",")} | flows=${(
+        boundary.flow_ids ?? []
+      ).join(",")} | evidence: ${formatMarkdownEvidence(boundary.evidence)}`,
+    );
+  }
+  pushNoneIfEmpty(lines, input.trustBoundaries.boundaries);
+
+  lines.push("", "## Coverage And Fact Gaps");
+  for (const artifact of [
+    input.coverageStructure,
+    input.stackBuildDeps,
+    input.entrypoints,
+    input.authAccess,
+    input.configSecrets,
+    input.storageDataModel,
+    input.externalIntegrationsEgress,
+    input.infraDeploy,
+    input.operationSinks,
+    input.crypto,
+    input.loggingObservability,
+    input.dataFlows,
+    input.trustBoundaries,
+  ] satisfies PiStructuredArtifact[]) {
+    pushArtifactCoverageAndGaps(lines, artifact);
+  }
+
+  lines.push(
+    "",
+    "## Omitted From This Context",
+    "- Per-artifact provenance, repeated repo blocks, and runtime metadata.",
+  );
+
+  return `${lines.join("\n")}\n`;
+}
+
+function pushNoneIfEmpty(lines: string[], values: readonly unknown[]): void {
+  if (values.length === 0) {
+    lines.push("- none");
+  }
+}
+
+function pushSectionArtifactLine(
+  lines: string[],
+  artifact: string,
+  path: string | undefined,
+  counts: number[],
+): void {
+  lines.push(`- ${artifact} | ${path ?? "unknown"} | item_count=${sum(counts)}`);
+}
+
+function pushAuthConfigMarkdownLine(
+  lines: string[],
+  label: string,
+  record: AuthConfigRecord,
+): void {
+  lines.push(
+    `- ${label} | ${record.id} | ${record.kind ?? "config"} | ${markdownField(
+      [
+        record.name,
+        record.mechanism,
+        record.source,
+        record.location,
+        record.value_status,
+        record.variables?.length ? `variables=${record.variables.join(",")}` : undefined,
+      ]
+        .filter((part): part is string => part !== undefined && part !== "")
+        .join(" "),
+    )} | evidence: ${formatMarkdownEvidence(record.evidence)}`,
+  );
+}
+
+function pushArtifactCoverageAndGaps(lines: string[], artifact: PiStructuredArtifact): void {
+  const label = artifact.kind;
+  for (const reviewed of artifact.coverage?.reviewed ?? []) {
+    lines.push(
+      `- reviewed | ${label} | ${markdownField(reviewed.area)} | evidence: ${formatMarkdownEvidence(
+        reviewed.evidence,
+      )}`,
+    );
+  }
+  for (const notCovered of artifact.coverage?.not_covered ?? []) {
+    lines.push(
+      `- not_covered | ${label} | ${markdownField(notCovered.area)} | reason: ${markdownField(
+        notCovered.reason,
+      )}`,
+    );
+  }
+  for (const gap of artifact.fact_gaps ?? []) {
+    lines.push(
+      `- fact_gap | ${label} | ${markdownField(gap.area)} | ${markdownField(
+        gap.missing_fact,
+      )} | evidence: ${formatMarkdownEvidence(gap.evidence ?? [])}`,
+    );
+  }
+}
+
+function countBy<T>(values: readonly T[], keyFor: (value: T) => string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    const key = keyFor(value);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function formatCounts(counts: Map<string, number>): string {
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, count]) => `${key}=${count}`)
+    .join(", ");
+}
+
+function sum(values: readonly number[]): number {
+  return values.reduce((total, value) => total + value, 0);
+}
+
+function markdownField(value: string): string {
+  const compacted = value.replace(/\s+/g, " ").replace(/\|/g, "/").trim();
+  return compacted.length === 0 ? "n/a" : compacted;
+}
+
+function formatMarkdownEvidence(evidence: readonly string[] | undefined): string {
+  const unique = [...new Set((evidence ?? []).filter((item) => item.trim() !== ""))].sort(
+    (left, right) => left.localeCompare(right),
+  );
+  return unique.length > 0 ? unique.join(", ") : "none";
 }
 
 async function buildDeterministicCoverageStructure(input: {
@@ -1301,12 +1937,12 @@ async function runPiStage<TArtifact extends PiStructuredArtifact>(
         attempt: 1,
         contextPack: stage.contextPack,
         inputContextArtifact: stage.contextArtifactLabel,
-        model: defaultPiModel,
+        model: stage.model ?? defaultPiModel,
         outputBaseName: stage.outputBaseName,
         prompt: withPiFinalResponseInstruction(stage.prompt),
         provider: defaultPiProvider,
         step: stage.step,
-        ...(stage.thinking === undefined ? {} : { thinking: stage.thinking }),
+        thinking: stage.thinking ?? defaultPiThinking,
         tools: stage.tools ?? collectorTools,
       },
       stage: "pi",
@@ -1350,16 +1986,189 @@ async function runPiStage<TArtifact extends PiStructuredArtifact>(
       jobState,
     };
   } catch (error) {
+    const diagnostics = diagnosticsFromError(error);
+    const rawArtifactPath = artifactPaths.find((artifact) =>
+      artifact.endsWith(`pi/${stage.outputBaseName}/${stage.outputBaseName}.raw.redacted.txt`),
+    );
+    const degradedArtifact = createDegradedPiArtifact<TArtifact>({
+      contextPath: stage.contextArtifactLabel,
+      diagnostics,
+      generatedAt: stage.generatedAt,
+      kind: stage.kind,
+      ...(rawArtifactPath === undefined ? {} : { rawArtifactPath }),
+      repo: stage.input.contextPack.repo,
+      result,
+      step: stage.step,
+    });
+    stage.validateSchema(degradedArtifact);
+    const artifactPath = await stage.input.store.writeJson({
+      data: degradedArtifact,
+      id: stage.artifactId,
+      kind: stage.kind,
+      relativePath: stage.artifactRelativePath,
+    });
     jobState.status = "failed";
     jobState.finished_at = new Date().toISOString();
-    jobState.diagnostics =
-      error instanceof ScanStageError
-        ? error.diagnostics.length > 0
-          ? error.diagnostics
-          : [error.message]
-        : [errorMessage(error)];
+    jobState.diagnostics = diagnostics;
+    jobState.artifacts.push(artifactPath);
+    await stage.input.onProgress?.({
+      details: { raw_artifact: rawArtifactPath, step: stage.step },
+      job: stage.jobName,
+      message: `${stage.step}: collection degraded; the report will show this section as a fact gap.`,
+      type: "pi.degraded",
+    });
     await stage.input.onJobFinished?.(jobState);
-    throw error;
+
+    return {
+      artifact: degradedArtifact,
+      artifactPath,
+      jobState,
+    };
+  }
+}
+
+function diagnosticsFromError(error: unknown): string[] {
+  if (error instanceof ScanStageError) {
+    return error.diagnostics.length > 0 ? error.diagnostics : [error.message];
+  }
+  return [errorMessage(error)];
+}
+
+function createDegradedPiArtifact<TArtifact extends PiStructuredArtifact>(input: {
+  contextPath: string;
+  diagnostics: string[];
+  generatedAt: string;
+  kind: TArtifact["kind"];
+  rawArtifactPath?: string;
+  repo: PiContextPackArtifact["repo"];
+  result: RuntimeJobResult;
+  step: TArtifact["kind"];
+}): TArtifact {
+  const diagnostics = input.diagnostics.filter((diagnostic) => diagnostic.trim() !== "");
+  const reason = diagnostics[0] ?? `Pi ${input.step} did not produce an accepted artifact.`;
+  const degraded: { diagnostics: string[]; raw_artifact?: string; reason: string } = {
+    diagnostics,
+    reason,
+  };
+  if (input.rawArtifactPath !== undefined) {
+    degraded.raw_artifact = input.rawArtifactPath;
+  }
+
+  const runtimeMetadata = isRecord(input.result.metadata) ? input.result.metadata : {};
+  const base = {
+    coverage: {
+      not_covered: [
+        {
+          area: input.step,
+          reason,
+        },
+      ],
+      reviewed: [],
+    },
+    fact_gaps: [
+      {
+        area: input.step,
+        missing_fact: `Pi collector did not produce an accepted ${input.step} artifact.`,
+        ...(input.rawArtifactPath === undefined ? {} : { evidence: [input.rawArtifactPath] }),
+      },
+    ],
+    generated_at: input.generatedAt,
+    generated_by: "pi" as const,
+    kind: input.kind,
+    metadata: {
+      degraded,
+      pi: {
+        input_context_artifact: input.contextPath,
+        invocation: input.result.invocation,
+        ...(typeof runtimeMetadata.final_response_bytes === "number"
+          ? { final_response_bytes: runtimeMetadata.final_response_bytes }
+          : {}),
+        json_delivery: "strict" as const,
+        model: typeof runtimeMetadata.model === "string" ? runtimeMetadata.model : defaultPiModel,
+        provider:
+          typeof runtimeMetadata.provider === "string"
+            ? runtimeMetadata.provider
+            : defaultPiProvider,
+        repair_applied: false,
+        ...(typeof runtimeMetadata.stderr_bytes === "number"
+          ? { stderr_bytes: runtimeMetadata.stderr_bytes }
+          : {}),
+        step: input.step,
+        ...(typeof runtimeMetadata.version === "string" && runtimeMetadata.version !== ""
+          ? { version: runtimeMetadata.version }
+          : input.result.version === undefined
+            ? {}
+            : { version: input.result.version }),
+      },
+    },
+    repo: input.repo,
+  };
+
+  switch (input.kind) {
+    case "auth-access":
+      return { ...base, auth: [], entrypoint_access: [] } as unknown as TArtifact;
+    case "config-secrets":
+      return {
+        ...base,
+        config: [],
+        secret_locations: [],
+        secret_references: [],
+      } as unknown as TArtifact;
+    case "coverage-structure":
+      return { ...base, repository_structure: [] } as unknown as TArtifact;
+    case "crypto":
+      return { ...base, crypto: [] } as unknown as TArtifact;
+    case "data-flows":
+      return {
+        ...base,
+        flows: [],
+        inputs: {
+          entrypoints_artifact: repoMapPaths.entrypoints,
+          operation_sinks_artifact: repoMapPaths.operationSinks,
+        },
+      } as unknown as TArtifact;
+    case "entrypoints":
+      return { ...base, entrypoints: [] } as unknown as TArtifact;
+    case "external-integrations-egress":
+      return { ...base, integrations: [] } as unknown as TArtifact;
+    case "infra-deploy":
+      return { ...base, ci: [], infra: [] } as unknown as TArtifact;
+    case "logging-observability":
+      return { ...base, logging: [] } as unknown as TArtifact;
+    case "operation-sinks":
+      return { ...base, operation_sinks: [] } as unknown as TArtifact;
+    case "repository-map":
+      return {
+        ...base,
+        inputs: allMapArtifactPaths(),
+        sections: [
+          {
+            artifact: "repository-map",
+            evidence: [],
+            item_count: 0,
+            path: repoMapPaths.repositoryMap,
+            summary: "Final repository-map synthesis was not accepted.",
+          },
+        ],
+        summary: {
+          evidence: [],
+          inference: true,
+          text: "Repository-map synthesis did not produce an accepted artifact.",
+        },
+      } as unknown as TArtifact;
+    case "stack-build-deps":
+      return {
+        ...base,
+        build: { commands: [], lockfiles: [], manifests: [] },
+        ci: [],
+        dependencies: [],
+        dependency_notes: [],
+        stack: [],
+      } as unknown as TArtifact;
+    case "storage-data-model":
+      return { ...base, storage: [] } as unknown as TArtifact;
+    case "trust-boundaries":
+      return { ...base, boundaries: [], inputs: priorMapArtifactPaths() } as unknown as TArtifact;
   }
 }
 
@@ -1394,7 +2203,7 @@ function startPiStageHeartbeat<TArtifact extends PiStructuredArtifact>(
 }
 
 function piHandoffArtifact(artifact: PiStructuredArtifact): unknown {
-  return stripHandoffMetadata(artifact);
+  return stripPiContextNoise(artifact);
 }
 
 function withPiFinalResponseInstruction(prompt: string): string {
@@ -1412,9 +2221,11 @@ Final response contract (read carefully — this is how the result is collected)
   you can rather than prose; partial-but-valid is better than commentary.`;
 }
 
-function stripHandoffMetadata(value: unknown): unknown {
+const contextNoiseKeys = new Set(["generated_at", "generated_by", "metadata", "repo"]);
+
+function stripPiContextNoise(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => stripHandoffMetadata(item));
+    return value.map((item) => stripPiContextNoise(item));
   }
   if (value === null || typeof value !== "object") {
     return value;
@@ -1422,10 +2233,10 @@ function stripHandoffMetadata(value: unknown): unknown {
 
   const output: Record<string, unknown> = {};
   for (const [key, childValue] of Object.entries(value)) {
-    if (key === "metadata") {
+    if (contextNoiseKeys.has(key)) {
       continue;
     }
-    output[key] = stripHandoffMetadata(childValue);
+    output[key] = stripPiContextNoise(childValue);
   }
   return output;
 }
@@ -1676,9 +2487,11 @@ function buildStackBuildDepsPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the stack-build-deps section artifact. This artifact answers assignment sections 1 and 11:
-- stack and build;
-- dependency inventory.
+Create the stack-build-deps repository-map artifact.
+
+Goal:
+Map the declared technology stack, build surface, CI/CD declarations, manifests,
+lockfiles, direct dependency signals, and dependency coverage notes.
 
 Collect only observable facts from manifests and config files:
 - languages and their declared or inventory-derived share;
@@ -1694,27 +2507,23 @@ Collect only observable facts from manifests and config files:
 
 Depth bounds:
 - The supplied repository navigation index already lists the manifest, package,
-  lock, CI, IaC, config, and infra files. That list IS your starting map; you do
-  not need to rediscover these files.
+  lock, CI, IaC, config, and infra files. Use that list as the starting map.
 - Read each manifest, lock, and CI file at most once. Reading package.json once
-  gives you every dependency it declares; the dependency NAME and declared
-  VERSION are the fact. Never grep for dependencies one-by-one to find a line —
-  that is forbidden and pointless, since the file path alone is the evidence.
-- Do not install dependencies.
-- Do not run package scripts, builds, tests, migrations, or generators.
-- Do not inspect source files unless a manifest/config points to a declared
-  framework, runtime, command, or CI/deploy fact that needs minimal naming
+  gives you every dependency it declares; the dependency name and declared
+  version are the fact.
+- Inspect source files only when a manifest/config points to a declared
+  framework, runtime, command, or CI/deploy fact that needs a minimal naming
   confirmation.
-- Do not infer runtime behavior from dependency names alone.
-- Do not expand transitive dependencies manually. If a lockfile exists, record that transitive dependencies are available through it.
+- Record declared behavior, not runtime behavior inferred from package names.
+- For transitive dependencies, record whether a lockfile makes them available;
+  keep manual dependency inventory to direct dependencies only.
 - Commands are declarations found in manifests/config, not commands you ran.
 
 Dependency output:
-- Do NOT dump every dependency. List only security-relevant direct dependencies,
-  grouped by family (web framework, auth/session, crypto, database/ORM, HTTP
-  client, serialization/parsing, file upload, templating, payment), each with
-  its name and declared version. The name is the fact; evidence is the manifest
-  file, e.g. ["package.json"].
+- List security-relevant direct dependencies grouped by family: web framework,
+  auth/session, crypto, database/ORM, HTTP client, serialization/parsing, file
+  upload, templating, payment. Each dependency record needs name, declared
+  version, role, and manifest evidence.
 - Record totals with a dependency_notes entry of kind "dependency_count", e.g.
   summary "package.json declares 142 direct deps (47 runtime, 95 dev)",
   evidence ["package.json"]. This replaces enumerating the long tail.
@@ -1757,9 +2566,13 @@ function buildEntrypointsPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the entrypoints section artifact. This artifact answers assignment section 3.
+Create the entrypoints repository-map artifact.
 
-Collect externally reachable or externally triggered boundaries only:
+Goal:
+Map externally reachable or externally triggered boundaries where outside input
+can enter the project.
+
+Collect boundary facts:
 - HTTP routes;
 - GraphQL resolvers;
 - gRPC services/methods;
@@ -1771,14 +2584,17 @@ Collect externally reachable or externally triggered boundaries only:
 - parsers of external formats when they are the invoked boundary.
 
 Depth bounds:
-- Use the supplied repository navigation index as the starting map, not as proof
-  and not as an exhaustive truth source.
-- Use find/grep/read to discover boundary declarations and registrations from
-  the repository when the index is not enough.
-- Stay at boundary level.
-- Do not perform line-by-line handler analysis.
-- Do not analyze handler bodies beyond what is needed to classify the boundary.
-- Do not list internal helper functions, serializers, SDK calls, or transformations as entrypoints.
+- Use the supplied context only as neutral orientation. It does not tell you
+  where entrypoints are and is not proof.
+- Discover the entrypoints yourself from the repository with read/grep/find/ls.
+- Work registration-first: identify server/bootstrap/router/API-spec/manifest/
+  CLI/workflow/event registration mechanisms before reading handler files.
+- Stay at boundary level and produce an attack-surface map, not a complete
+  route inventory.
+- Read handler files selectively only to classify a boundary family or confirm
+  high-signal boundary types.
+- Keep internal helper functions, serializers, SDK calls, and transformations
+  out of the entrypoint list.
 - Prefer declaration and registration evidence when both are visible.
 - Include handler or callback name/path when observable.
 
@@ -1790,13 +2606,17 @@ losing security signal):
   boundaries it covers, and handler/notes to the generator or router. Examples:
   ORM/REST CRUD scaffolding, auto-registered resource routers, static file
   serving, bulk identical webhooks.
-- Keep a boundary as its OWN entry whenever it is security-distinctive: custom
-  handler logic, file upload, authentication/login/OAuth/callback, admin-only,
-  webhook or payment, raw-body or external-format parser, redirect, or a
-  different framework/runtime. Never collapse these into a family.
-- Do not emit near-duplicate entries that differ only by id or path. Prefer
-  fewer, higher-signal entries; record each collapsed family in
-  coverage.not_covered with its pattern and count so coverage stays honest.
+- Keep a boundary as its OWN entry only when its boundary class is materially
+  different for later AppSec hypothesis building: auth/login/session/OAuth/
+  callback, file upload, webhook, raw-body or external-format parser, redirect,
+  payment/order/admin-like, public debug/metrics, or a different
+  framework/runtime.
+- Ordinary CRUD/resource/action handlers registered through the same mechanism
+  should be grouped as one family unless the registration itself shows a
+  distinct boundary class.
+- Prefer fewer, higher-signal entries over near-duplicates that differ only by
+  id or path. Record each collapsed family in coverage.not_covered with its
+  pattern and count so coverage stays honest.
 
 Return your result as your final response: exactly one JSON object matching the entrypoints schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
@@ -1835,9 +2655,11 @@ function buildAuthAccessPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the auth-access section artifact. This artifact answers assignment section 4:
-- authentication and authorization;
-- observable access status for accepted entrypoints.
+Create the auth-access repository-map artifact.
+
+Goal:
+Map authentication and authorization mechanisms, plus observable access status
+for accepted entrypoints.
 
 Collect only:
 - auth mechanisms: session, JWT, OAuth, API key, mTLS, provider config;
@@ -1852,11 +2674,9 @@ Depth bounds:
 - Inspect route registration, middleware declarations, guards/decorators, and
   minimal nearby handler code when needed to classify access status.
 - If access status is not obvious from those facts, record "unknown".
-- Do not verify auth correctness.
-- Do not infer missing authorization.
-- Do not rediscover entrypoints. Use inputs.entrypoints for endpoint IDs and status mapping.
-- Do not map general config, env, or secret references unless they directly
-  identify an auth mechanism or session/token storage/check.
+- Use inputs.entrypoints for endpoint IDs and status mapping.
+- Include config/env/secret references only when they directly identify an auth
+  mechanism or session/token storage/check.
 - Group repeated auth patterns by family with representative evidence.
 
 Return your result as your final response: exactly one JSON object matching the auth-access schema below — no markdown fences, no prose, and nothing before or after it. Schema:
@@ -1886,26 +2706,32 @@ function buildConfigSecretsPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the config-secrets section artifact. This artifact answers assignment section 7:
-- secrets and configuration.
+Create the config-secrets repository-map artifact.
+
+Goal:
+Map runtime configuration sources and secret references as facts, using names
+and redacted references only.
 
 Collect only:
 - config files and configuration modules;
-- environment variable names and config loaders;
+- where configuration lives: files, environment variables, and secret managers;
+- how environment variables are read;
 - default/example config values by name or status only;
 - .env files and examples;
 - secret-manager or credential-store references;
 - hardcoded secret-like string locations as facts only, never values.
 
 Depth bounds:
-- Use the supplied repository navigation index and config/manifest file lists as
-  the starting map.
+- Use the supplied config file list, manifest file list, and top-level directory
+  names as the starting map.
 - Stay at configuration-source level.
-- Do not classify entrypoint access or auth protection.
-- Do not perform broad repo-wide secret hunting; deterministic scanners provide
-  concrete secret observations separately.
-- Do not output secret values, connection strings, cookies, tokens, private keys, or passwords. Use only names and set value_redacted true for secret_references.
-- Do not root-cause configuration behavior.
+- For source-code facts, use targeted grep/find for config/env/secret names and
+  then read only the files that produced relevant hits.
+- Include CI/deploy files only for secret/config references observed there.
+- Leave entrypoint access and auth protection to auth-access.
+- Treat deterministic scanners as the source for broad secret hunting; this step
+  maps config/secret sources and named references.
+- Use secret names only and set value_redacted true for secret_references.
 - Group repeated config/env/secret references by family when exact values or all
   occurrences are not needed for the map.
 
@@ -1936,22 +2762,30 @@ function buildStorageDataModelPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the storage-data-model section artifact. This artifact answers assignment section 9:
-- storage and data model.
+Create the storage-data-model repository-map artifact.
+
+Goal:
+Map persistence, storage declarations, schemas, models, migrations, and
+observable data-field names.
 
 Collect only map facts:
 - databases and their types;
 - ORM models, schemas, migrations;
-- caches, queues, object/file storage and buckets;
+- caches, object/file storage and buckets;
 - entities or fields that appear personal/sensitive by schema or field name only.
 
 Depth bounds:
-- Use manifests, accepted config-secrets, and the source index as the starting map.
-- Use find/grep/read to discover storage, model, schema, migration, cache, queue,
+- Use manifests, accepted config-secrets, and the source index as candidate
+  navigation only.
+- Read files or directories that look storage/model/schema/migration/cache/file-storage
+  related by observed names, manifest/config signals, or targeted search hits.
+- Use find/grep/read to discover storage, model, schema, migration, cache,
   bucket, and file-storage declarations.
-- Do not trace storage call chains.
-- Do not infer data sensitivity beyond field/schema names.
-- Do not include external API, egress, infra, deploy, crypto, logging, or operation-sink facts.
+- Trace storage declarations and schema/model facts, not storage call chains.
+- Data categories come only from field/schema names.
+- Queue/message-broker facts belong to entrypoints or external-integrations-egress.
+- External API, egress, infra, deploy, crypto, logging, and operation-sink facts
+  are collected by separate artifacts.
 - Group repeated storage/model/schema declarations by family when exhaustive
   enumeration would make the map noisy.
 
@@ -1962,7 +2796,7 @@ Return your result as your final response: exactly one JSON object matching the 
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "storage": [
-    { "id": "stable short id", "kind": "database|cache|message_queue|object_storage|file_storage|other", "name": "string", "type": "optional string", "location": "relative/path", "role": "string", "fields": ["optional observed field names"], "data_categories": ["optional observed categories by field name"], "confidence": "low|medium|high", "evidence": ["relative/path"] }
+    { "id": "stable short id", "kind": "database|cache|object_storage|file_storage|other", "name": "string", "type": "optional string", "location": "relative/path", "role": "string", "fields": ["optional observed field names"], "data_categories": ["optional observed categories by field name"], "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "coverage": {
     "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
@@ -1979,8 +2813,11 @@ function buildExternalIntegrationsEgressPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the external-integrations-egress section artifact. This artifact answers assignment section 10:
-- external integrations and network egress.
+Create the external-integrations-egress repository-map artifact.
+
+Goal:
+Map external services, SDK integrations, brokers, configured hosts, service
+URLs, and outbound network/integration surface.
 
 Collect only map facts:
 - third-party APIs and services;
@@ -1990,12 +2827,15 @@ Collect only map facts:
 - direct client setup and destination construction.
 
 Depth bounds:
-- Use accepted config-secrets, manifests, and source index as the starting map.
+- Use accepted config-secrets, config files, manifests, and source index as
+  candidate navigation only.
+- Read source files only after targeted integration/egress search or a
+  manifest/config signal points there.
 - Use find/grep/read to discover client setup, SDK usage, hosts, service URLs,
   brokers, and outbound destination declarations.
-- Do not trace business call chains.
-- Do not call external services.
-- Do not include infra/deploy, storage model, crypto, logging, or data-flow facts.
+- Capture direct setup and destination construction, not business call chains.
+- Infra/deploy, storage model, crypto, logging, and data-flow facts are collected
+  by separate artifacts.
 - Group repeated integrations by family with representative evidence.
 
 Return your result as your final response: exactly one JSON object matching the external-integrations-egress schema below — no markdown fences, no prose, and nothing before or after it. Schema:
@@ -2022,8 +2862,10 @@ function buildInfraDeployPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the infra-deploy section artifact. This artifact answers assignment section 12:
-- infrastructure and deployment.
+Create the infra-deploy repository-map artifact.
+
+Goal:
+Map deployment, runtime, CI/deploy, proxy, IaC, and infrastructure declarations.
 
 Collect only map facts:
 - Dockerfile facts: base image, user, exposed ports, entrypoint;
@@ -2031,12 +2873,13 @@ Collect only map facts:
 - IaC, proxy, hosting, runtime, CI/deploy infrastructure declarations.
 
 Depth bounds:
-- Use infra files, IaC candidates, workflow paths, config files, and top-level
-  structure as the starting map.
+- Use infra files, IaC candidates, workflow paths, and top-level structure as
+  the starting map.
 - Use find/grep/read to discover deployment and runtime declarations.
-- Do not run Docker, Terraform, workflows, package scripts, or deploy commands.
-- Do not assess exposure, permissions, risk, or misconfiguration.
-- Do not include storage model, external integration, operation-sink, crypto, or logging facts.
+- Record declared infrastructure shape only: images, users, ports, mounts,
+  secrets by name, services, deploy/runtime commands, and workflow/deploy steps.
+- Storage model, external integration, operation-sink, crypto, and logging facts
+  are collected by separate artifacts.
 - Group repeated infra declarations by family with representative evidence.
 
 Return your result as your final response: exactly one JSON object matching the infra-deploy schema below — no markdown fences, no prose, and nothing before or after it. Schema:
@@ -2066,10 +2909,11 @@ function buildOperationSinksPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the operation-sinks section artifact. This artifact answers assignment section 6:
-- operation sink inventory.
+Create the operation-sinks repository-map artifact.
 
-Collect observable operation families only. Do not make security claims.
+Goal:
+Map observable operation calls that later AppSec review may connect to
+entrypoints or data flows.
 
 Operation families:
 - SQL/ORM/raw query/query builder, including observed query construction style;
@@ -2083,14 +2927,18 @@ Operation families:
 - outbound HTTP/client SDK URL construction.
 
 Depth bounds:
-- Use the supplied repository navigation index as the starting map.
+- Use accepted stack-build-deps to identify likely DB/ORM, HTTP client,
+  template, serialization/parsing, filesystem, and process-execution libraries.
+- Use the supplied repository navigation index as candidate navigation.
 - Use find/grep/read to discover operation families instead of relying on file
   names.
 - Stay at operation-family level.
-- Do not trace callers, taint, exploitability, severity, impact, or fixes.
-- Do not create one item per repeated helper call or log line.
-- Do not perform root-cause or full business-logic analysis.
-- Do not include crypto, randomness, password hashing, TLS, logging, or observability facts.
+- Record operation name, location, destination or query-construction style when
+  visible, and input/variable names that are directly adjacent to the operation.
+- Crypto/randomness/password hashing/TLS and logging/observability facts are
+  collected by separate artifacts.
+- For outbound work, this step records the operation call or URL construction;
+  external-integrations-egress records the service/host/SDK inventory.
 - Name the operation call (and any input/variable names that flow into it) in the
   operation/input_variables fields; cite the file in evidence, without line numbers.
 - Group repeated operation calls by family with representative evidence.
@@ -2130,8 +2978,11 @@ function buildCryptoPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the crypto section artifact. This artifact answers assignment section 8:
-- cryptography.
+Create the crypto repository-map artifact.
+
+Goal:
+Map observable cryptography, randomness, password hashing, and TLS
+configuration facts.
 
 Collect only observable crypto and randomness facts:
 - crypto operations, algorithms, modes, key/IV/salt parameters when directly visible;
@@ -2142,8 +2993,10 @@ Collect only observable crypto and randomness facts:
 Depth bounds:
 - Use source index and config files as the starting map.
 - Use find/grep/read to discover crypto, password hashing, randomness, and TLS config facts.
-- Do not assess algorithm strength, correctness, exploitability, severity, impact, or fixes.
-- Do not include generic operation sinks, storage, integration, or logging facts.
+- Record calls, algorithms, modes, parameter names, and configured TLS settings
+  when directly visible.
+- Generic operation sinks, storage, integration, and logging facts are collected
+  by separate artifacts.
 - Group repeated crypto/randomness calls by family with representative evidence.
 
 Return your result as your final response: exactly one JSON object matching the crypto schema below — no markdown fences, no prose, and nothing before or after it. Schema:
@@ -2170,8 +3023,11 @@ function buildLoggingObservabilityPrompt(contextPack: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the logging-observability section artifact. This artifact answers assignment section 13:
-- logging and observability.
+Create the logging-observability repository-map artifact.
+
+Goal:
+Map logging, metrics, tracing, telemetry call sites, logged field names, and
+configured observability destinations.
 
 Collect only observable logging and telemetry facts:
 - logging/observability calls;
@@ -2180,11 +3036,15 @@ Collect only observable logging and telemetry facts:
 - logging, metrics, tracing, or telemetry destinations when configured.
 
 Depth bounds:
-- Use source index, manifests, and config files as the starting map.
+- Use accepted entrypoints and storage-data-model artifacts to recognize
+  external-input and storage-field names; keep those artifacts as the source for
+  those names.
+- Use source index, manifests, and config files as candidate navigation only.
+- Read source files only after targeted logging/telemetry search points there.
 - Use find/grep/read to discover logging, metrics, tracing, telemetry, and destination facts.
-- Do not infer runtime log contents.
-- Do not judge sensitivity, exposure, risk, severity, impact, or fixes.
-- Do not include operation sinks, crypto, storage, or integration facts unless they are directly logging/telemetry destinations.
+- Record only directly visible logged names and configured destinations.
+- Operation sinks, crypto, storage, and integration facts are collected by
+  separate artifacts unless they are directly logging/telemetry destinations.
 - Group repeated logging calls by family with representative evidence.
 
 Return your result as your final response: exactly one JSON object matching the logging-observability schema below — no markdown fences, no prose, and nothing before or after it. Schema:
@@ -2211,17 +3071,19 @@ function buildDataFlowsPrompt(context: unknown): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the data-flows section artifact. This artifact answers assignment section 5.
-Use only inputs.entrypoints and inputs.operation_sinks from the stage input.
+Create the data-flows repository-map artifact.
+
+Goal:
+Map bounded, observable source-to-sink paths from accepted entrypoints to
+accepted operation sinks.
 
 Rules:
-- Do not use coverage-structure, stack-build-deps, auth-access, config-secrets, storage-data-model, external-integrations-egress, infra-deploy, crypto, logging-observability, trust-boundaries, or repository-map as data-flow inputs.
 - Start from externally controlled entrypoints and operation-sink evidence only.
 - Use the supplied entrypoints and operation_sinks artifacts as the complete
   navigation plan for this step.
 - Read repository files only to confirm a direct or shallow named connection.
-- Prefer key externally controlled inputs; do not enumerate every possible variable flow.
-- Do not perform exhaustive tracing, line-by-line handler review, callback resolution, framework internals analysis, or root-cause analysis.
+- Prefer key externally controlled inputs over every possible variable flow.
+- Stay with direct or shallow named connections; deeper tracing becomes a gap.
 - Use "multi-step inferred" only for one or two named function hops with evidence.
 - Use "not traced further" or "not established" when deeper analysis would be required, and name where you stopped in breakpoint.
 - Every row with a connection across functions or files must set inference true.
@@ -2262,19 +3124,19 @@ Stage input:
 ${JSON.stringify(context, null, 2)}`;
 }
 
-function buildTrustBoundariesPrompt(context: unknown): string {
+function buildTrustBoundariesPrompt(contextMarkdown: string): string {
   return `${factsOnlyPreamble()}
 
 Task:
-Create the trust-boundaries section artifact. This artifact answers assignment section 14.
-Use prior map artifacts only. This is synthesis-only.
+Create the trust-boundaries repository-map artifact.
+
+Goal:
+Synthesize inference-only trust boundaries from accepted map artifacts.
 
 Rules:
-- Do not call read, grep, find, ls, or any other tool.
-- Do not inspect repository files.
-- Do not add repository facts that are absent from the supplied prior artifacts.
+- Use prior map artifacts only. This stage has no repository inspection tools.
 - Every boundary must set inference true.
-- Boundaries are map-level inferences, not vulnerabilities, risks, findings, or audit questions.
+- Boundaries are map-level inferences for reviewer orientation.
 - Base boundaries primarily on entrypoints, operation sinks, and data flows. Use storage/integration facts only to name the internal side when already present.
 - Use evidence already present in prior artifacts.
 
@@ -2318,21 +3180,21 @@ Return your result as your final response: exactly one JSON object matching the 
 }
 
 Stage input:
-${JSON.stringify(context, null, 2)}`;
+${contextMarkdown}`;
 }
 
-function buildRepositoryMapPrompt(context: unknown): string {
+function buildRepositoryMapPrompt(contextMarkdown: string): string {
   return `${factsOnlyPreamble()}
 
 Task:
 Create the final repository-map artifact from the supplied section artifacts only.
 
 Rules:
-- Do not call read, grep, find, ls, or any other tool.
-- Do not inspect repository files.
-- Do not add new facts, entrypoints, operation sinks, data flows, trust boundaries, or security conclusions.
+- Use supplied section artifacts only. This stage has no repository inspection tools.
+- Preserve existing facts, entrypoints, operation sinks, data flows, and trust
+  boundaries without adding new ones.
 - Summary is a compact map-level inference and must set inference true.
-- Keep this as an index and orientation artifact, not a report and not an audit.
+- Keep this as an index and orientation artifact for the final report.
 
 Return your result as your final response: exactly one JSON object matching the repository-map schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
@@ -2373,7 +3235,7 @@ Return your result as your final response: exactly one JSON object matching the 
 }
 
 Stage input:
-${JSON.stringify(context, null, 2)}`;
+${contextMarkdown}`;
 }
 
 function factsOnlyPreamble(): string {
@@ -2382,10 +3244,11 @@ function factsOnlyPreamble(): string {
 Goal:
 Create a compact, evidence-backed JSON map artifact for later AppSec
 attack-hypothesis building and manual review.
-The final report is read by a security reviewer who has NO access to the
-codebase. Everything they need to reason about an attack vector must be carried
-by NAMED facts: routes, handlers, functions, variables, env/config keys, table
-and field names, libraries, commands, images, and hosts.
+The artifact is an index for a later reviewer, not a substitute for review.
+It must carry enough named facts to choose where to look next, not enough to
+reason about exploitability. Every fact must be NAMED: routes, handlers,
+functions, variables, env/config keys, table and field names, libraries,
+commands, images, and hosts.
 Stay at map level: identify observable repository structure, declared stack,
 entrypoints, config references, integrations, operation families, shallow data
 connections, and explicit inference boundaries.
@@ -2393,23 +3256,27 @@ Prefer declarations, registrations, manifests, configs, schemas, and the
 minimum nearby code needed to classify and NAME a fact.
 
 Working method:
-- This is a navigation map, not an exhaustive inventory. Capture enough for a
-  reviewer to know WHERE and WHAT to look at, then move on.
+- This is a navigation map. Capture enough for a reviewer to know WHERE and
+  WHAT to look at, then move on.
 - Read each file at most once. You already hold its contents after reading it;
-  never re-read or re-grep a file you have already opened.
+  reuse that understanding when you need the same file again.
 - When a pattern repeats, record one representative example per family plus a
-  count of the rest. Do not enumerate every occurrence.
+  count of the rest.
 - Spend effort on breadth across the section surface, not depth into any single
   file.
 
-Forbidden:
-- Do not look for vulnerabilities.
-- Do not assess severity, risk, impact, exploitability, likelihood, CWE, CVE, or fixes.
-- Do not write findings, recommendations, root causes, remediation, audit questions, or risk hints.
-- Do not perform exhaustive code review, line-by-line handler analysis, full control-flow tracing, framework internals tracing, or root-cause analysis.
-- Do not trust README, docs, examples, comments, or marketing text as truth about actual code behavior. Use them only as evidence that documentation exists or claims something.
-- Do not run the application, tests, builds, package scripts, migrations, Docker build/run, dependency installation, generators, or network calls.
-- Do not modify or create any repository file. You have no write/edit tool.
+Scope boundaries:
+- Produce observed repository facts only. Vulnerability analysis, severity/risk,
+  impact, exploitability, CWE/CVE, fixes, findings, recommendations, root causes,
+  remediation, audit questions, and risk hints belong to later review.
+- Keep exploration at map level. Exhaustive code review, line-by-line handler
+  analysis, full control-flow tracing, framework internals tracing, and
+  root-cause analysis are outside this artifact.
+- Treat README, docs, examples, comments, and marketing text as orientation or
+  documentation evidence, not as truth about code behavior.
+- Use read-only exploration only: no application/test/build/package-script/
+  migration/Docker/dependency-install/generator/network execution.
+- Repository files are immutable in this task. You have no write/edit tool.
 
 Allowed tools (read-only exploration):
 - read
@@ -2418,30 +3285,30 @@ Allowed tools (read-only exploration):
 - ls
 
 Evidence rules (provenance, not navigation):
-- Evidence proves a fact is REAL and was actually observed. It is not a link the
-  reviewer will click — they have no code. So evidence is the repository file
-  where you saw the fact, and the concrete named symbol you saw there carries
-  the meaning.
+- Evidence is provenance, not navigation: it proves a fact is REAL and was
+  actually observed. It is not a clickable link. So evidence is the repository
+  file where you saw the fact, and the concrete named symbol you saw there
+  carries the meaning.
 - Put the named symbol in the record's dedicated fields (name, handler, route,
   method, variables, fields, operation, mechanism, algorithm, destination, and
   similar). Put the file in "evidence" as "relative/path". One representative
   path is enough.
-- Do NOT include line numbers. "relative/path" is correct; "relative/path:line"
-  is wrong. Never grep or search just to obtain a line number.
-- You must have actually opened a file before citing it. Do not cite a path you
-  only saw in the supplied index/inventory as evidence of a code-level fact.
+- Evidence paths use "relative/path" without line numbers.
+- Cite files you actually opened for code-level facts. Index/inventory paths are
+  orientation until opened.
 - Naming a symbol you did not actually read in that file is a hallucination. If
-  you cannot name the concrete symbol, do not assert the fact — record it in
+  you cannot name the concrete symbol, record it in
   fact_gaps or coverage.not_covered instead.
-- Evidence must point to repository files, not tool calls. Never output evidence
-  like "ls: .", "grep: pattern", "read: file", or any other tool invocation.
+- Evidence points to repository files, not tool calls such as "ls: .",
+  "grep: pattern", or "read: file".
 - Inventory-derived metrics such as repo_size and language_summary use
-  source "inventory" and do not need file evidence.
+  source "inventory" and need no file evidence.
 - fact_gaps may use "evidence": [] when the missing fact is absence, unknown
-  state, or an intentionally uncovered area. Do not invent evidence for gaps.
+  state, or an intentionally uncovered area.
 - If a fact is inferred from multiple artifacts, set inference true where the schema allows it and include the supporting named evidence.
-- Do not quote large code blocks.
-- Do not output full secret, token, private key, cookie, password, or connection string values; use names only or redacted previews.
+- Avoid large code quotes.
+- For secrets, tokens, private keys, cookies, passwords, and connection strings,
+  use names only or redacted previews.
 
 Output rules:
 - Return exactly one JSON object as your final response. VibeShield reads your
@@ -2451,11 +3318,12 @@ Output rules:
 - Keep output compact. Use short factual phrases, not paragraphs.
 - The whole object must fit in a single final message. If a section would be
   large, collapse uniform/repeated items into families with a representative and
-  a count; never grow the output by listing near-duplicates.
-- Do not enumerate repeated files, routes, helpers, dependencies, or operation calls exhaustively.
+  a count.
+- Group repeated files, routes, helpers, dependencies, and operation calls
+  instead of enumerating them exhaustively.
 - Group repeated patterns by family and cite representative evidence. Keep
   security-distinctive items individual; only collapse genuinely uniform ones.
-- Do not include raw file inventories, full dependency lists, tool output, or progress logs.
+- Omit raw file inventories, full dependency lists, tool output, and progress logs.
 - Include coverage.reviewed, coverage.not_covered, and fact_gaps.`;
 }
 
@@ -2505,10 +3373,10 @@ function parseJsonObjectFromText(
   text: string,
   validationStage: PiStageValidationStage,
   step: string,
-): unknown {
-  const fail = (reason: string): never => {
+): ParsedPiJsonObject {
+  const fail = (reason: string, diagnostics: string[] = [`Pi ${step} ${reason}`]): never => {
     throw new ScanStageError({
-      diagnostics: [`Pi ${step} ${reason}`],
+      diagnostics,
       message: `Pi ${step} ${reason}`,
       stage: asRunStage(validationStage),
       userMessage: `VibeShield rejected Pi ${step} output because its final response was not a single JSON object.`,
@@ -2520,16 +3388,65 @@ function parseJsonObjectFromText(
     return fail("returned an empty final response.");
   }
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(body);
-  } catch {
-    return fail("final response was not valid JSON.");
+    return assertParsedJsonObject(JSON.parse(body), "strict", false, validationStage, step);
+  } catch (strictError) {
+    const fencedBodies = markdownFenceBodies(body);
+    for (const fenced of fencedBodies) {
+      try {
+        return assertParsedJsonObject(JSON.parse(fenced), "fenced", false, validationStage, step);
+      } catch {
+        // Repair below gets the fenced body as a smaller input surface.
+      }
+    }
+
+    const repairInputs = fencedBodies.length > 0 ? [...fencedBodies, body] : [body];
+    const repairErrors: string[] = [];
+    for (const repairInput of repairInputs) {
+      try {
+        const repaired = jsonrepair(repairInput);
+        return assertParsedJsonObject(
+          JSON.parse(repaired),
+          "repaired",
+          true,
+          validationStage,
+          step,
+        );
+      } catch (repairError) {
+        repairErrors.push(errorMessage(repairError));
+      }
+    }
+
+    return fail("final response was not valid JSON and could not be repaired.", [
+      `Pi ${step} final response was not valid JSON: ${errorMessage(strictError)}`,
+      `Pi ${step} JSON repair failed: ${repairErrors[0] ?? "unknown repair error"}`,
+    ]);
   }
+}
+
+function markdownFenceBodies(body: string): string[] {
+  const matches = body.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```/gi);
+  return [...matches]
+    .map((match) => match[1]?.trim())
+    .filter((match): match is string => match !== undefined && match !== "");
+}
+
+function assertParsedJsonObject(
+  parsed: unknown,
+  jsonDelivery: ParsedPiJsonObject["jsonDelivery"],
+  repairApplied: boolean,
+  validationStage: PiStageValidationStage,
+  step: string,
+): ParsedPiJsonObject {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return fail("final response was not a JSON object.");
+    throw new ScanStageError({
+      diagnostics: [`Pi ${step} final response was JSON, but not a JSON object.`],
+      message: `Pi ${step} final response was not a JSON object.`,
+      stage: asRunStage(validationStage),
+      userMessage: `VibeShield rejected Pi ${step} output because its final response was not a single JSON object.`,
+    });
   }
-  return parsed;
+  return { jsonDelivery, parsed, repairApplied };
 }
 
 async function readJsonIfPresent<T>(filePath: string, step: string): Promise<T> {
@@ -2550,12 +3467,16 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
   generatedAt: string;
   kind: TArtifact["kind"];
   metadata: Record<string, unknown>;
-  parsed: unknown;
+  parsed: ParsedPiJsonObject;
   repo: PiContextPackArtifact["repo"];
   result: RuntimeJobResult;
   step: TArtifact["kind"];
 }): TArtifact {
-  if (input.parsed === null || typeof input.parsed !== "object" || Array.isArray(input.parsed)) {
+  if (
+    input.parsed.parsed === null ||
+    typeof input.parsed.parsed !== "object" ||
+    Array.isArray(input.parsed.parsed)
+  ) {
     throw new ScanStageError({
       message: `Pi ${input.step} output JSON was not an object.`,
       stage: asRunStage(validationStageForKind(input.kind)),
@@ -2563,7 +3484,7 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
     });
   }
 
-  const parsed = redactDeep(input.parsed) as Record<string, unknown>;
+  const parsed = redactDeep(input.parsed.parsed) as Record<string, unknown>;
   if (!isCoverageShape(parsed.coverage)) {
     parsed.coverage = { not_covered: [], reviewed: [] };
   }
@@ -2593,8 +3514,10 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
         ...(typeof metadata.final_response_bytes === "number"
           ? { final_response_bytes: metadata.final_response_bytes }
           : {}),
+        json_delivery: input.parsed.jsonDelivery,
         model: typeof metadata.model === "string" ? metadata.model : defaultPiModel,
         provider: typeof metadata.provider === "string" ? metadata.provider : defaultPiProvider,
+        repair_applied: input.parsed.repairApplied,
         ...(typeof metadata.stderr_bytes === "number"
           ? { stderr_bytes: metadata.stderr_bytes }
           : {}),

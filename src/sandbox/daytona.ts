@@ -513,7 +513,6 @@ export class DaytonaSandboxSession implements SandboxSession {
       artifactSubdir: input.pi.artifactSubdir,
       artifactDir: this.options.sandboxArtifactDir,
       ...(input.pi.attempt === undefined ? {} : { attempt: input.pi.attempt }),
-      contextPack: input.pi.contextPack,
       inputContextArtifact: input.pi.inputContextArtifact,
       jobName: input.name,
       model: input.pi.model,
@@ -522,7 +521,7 @@ export class DaytonaSandboxSession implements SandboxSession {
       provider: input.pi.provider,
       repoPath: this.options.repoPath,
       step: input.pi.step,
-      thinking: input.pi.thinking ?? "low",
+      thinking: input.pi.thinking ?? "high",
       tools: input.pi.tools,
     });
     const exitCode = await this.runLongRunningPiCommand(command, apiKey, input.onProgress);
@@ -553,7 +552,7 @@ export class DaytonaSandboxSession implements SandboxSession {
           "--model",
           input.pi.model,
           "--thinking",
-          input.pi.thinking ?? "low",
+          input.pi.thinking ?? "high",
           "--mode",
           "json",
           "<prompt>",
@@ -775,9 +774,9 @@ function buildToolAvailabilityScript(input: {
   const config = JSON.stringify(input);
 
   return `
-const fs = require("node:fs");
-const path = require("node:path");
-const { spawn, spawnSync } = require("node:child_process");
+		const fs = require("node:fs");
+		const path = require("node:path");
+		const { spawn, spawnSync } = require("node:child_process");
 
 const config = ${config};
 fs.mkdirSync(config.toolBinDir, { recursive: true });
@@ -1429,7 +1428,6 @@ function buildPiRunnerCommand(input: {
   artifactSubdir: string;
   artifactDir: string;
   attempt?: number;
-  contextPack: unknown;
   inputContextArtifact: string;
   jobName: string;
   model: string;
@@ -1443,6 +1441,7 @@ function buildPiRunnerCommand(input: {
 }): string {
   const runnerSource = String.raw`
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 
@@ -1464,8 +1463,12 @@ const redact = (value) => {
 
 const rawPath = path.join(piDir, config.outputBaseName + ".raw.redacted.txt");
 const stderrPath = path.join(piDir, "stderr.redacted.log");
-const progressPath = path.join(piDir, "progress.jsonl");
-const metadataPath = path.join(piDir, "metadata.json");
+	const progressPath = path.join(piDir, "progress.jsonl");
+	const metadataPath = path.join(piDir, "metadata.json");
+	const promptDir = path.join(os.tmpdir(), "vibeshield-pi-prompts");
+	fs.mkdirSync(promptDir, { recursive: true });
+	const promptPath = path.join(promptDir, config.artifactSubdir + "-" + config.outputBaseName + ".prompt.md");
+	fs.writeFileSync(promptPath, config.prompt);
 
 const progressEvents = [];
 const progressPrefix = "__VIBESHIELD_PROGRESS__";
@@ -1835,12 +1838,12 @@ const piArgs = [
   config.provider,
   "--model",
   config.model,
-  "--thinking",
-  config.thinking,
-  "--mode",
-  "json",
-  config.prompt,
-];
+	  "--thinking",
+	  config.thinking,
+	  "--mode",
+	  "json",
+	  "@" + promptPath,
+	];
 
 emitProgress("runner.started", piStepStartMessage(config.step), { step: config.step });
 const usePnpm = commandExists("pnpm");
@@ -1875,41 +1878,25 @@ runPiJsonStream(command, args)
     // The result is the agent's final assistant message.
     // VibeShield parses, validates, and persists it on the host.
     const finalResponse = String(result.finalText || "").trim();
-    let finalResponseParseError = "";
-    if (finalResponse === "") {
-      finalResponseParseError = "Pi returned an empty final response (no JSON object delivered).";
-    } else {
-      try {
-        const parsed = JSON.parse(finalResponse);
-        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-          finalResponseParseError = "Pi final response was JSON, but not a JSON object.";
-        }
-      } catch (error) {
-        finalResponseParseError =
-          "Pi final response was not valid JSON: " +
-          String(error && error.message ? error.message : error);
-      }
-    }
     const output = redact(finalResponse);
     const stderr = redact(result.stderr || (result.error ? result.error.message : ""));
     fs.writeFileSync(rawPath, output);
     fs.writeFileSync(stderrPath, stderr);
-    const completed = result.status === 0 && finalResponseParseError === "";
+    const completed = result.status === 0;
     emitProgress(completed ? "pi.completed" : "pi.failed", completed ? piStepDoneMessage(config.step) : piStepFailedMessage(config.step), { signal: result.signal, step: config.step });
     fs.writeFileSync(progressPath, progressEvents.map((event) => JSON.stringify(event)).join("\n") + "\n");
 
     const metadata = {
       input_context_artifact: config.inputContextArtifact,
       invocation: {
-        args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", ...toolArgs, "--provider", config.provider, "--model", config.model, "--thinking", config.thinking, "--mode", "json", "<prompt>"],
-        command,
-        cwd: config.repoPath,
-        metadata: { delivery: "final-response", tools: config.tools },
+	        args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", ...toolArgs, "--provider", config.provider, "--model", config.model, "--thinking", config.thinking, "--mode", "json", "<prompt-file>"],
+	        command,
+	        cwd: config.repoPath,
+	        metadata: { delivery: "final-response", prompt_delivery: "file", tools: config.tools },
         provider: config.provider,
       },
       model: config.model,
       final_response_bytes: Buffer.byteLength(output, "utf8"),
-      final_response_parse_error: finalResponseParseError,
       pi_exit_code: result.status,
       prompt_bytes: Buffer.byteLength(config.prompt, "utf8"),
       provider: config.provider,
@@ -1929,11 +1916,8 @@ runPiJsonStream(command, args)
       ],
       diagnostics: completed
         ? []
-        : [
-            ...(result.status === 0 ? [] : ["Pi exited with code " + result.status + "."]),
-            ...(finalResponseParseError === "" ? [] : [finalResponseParseError]),
-          ],
-      exitCode: completed ? result.status : result.status === 0 ? 1 : result.status,
+        : ["Pi exited with code " + result.status + "."],
+      exitCode: result.status,
       finishedAt: new Date().toISOString(),
       invocation: metadata.invocation,
       kind: "pi-repository-mapping",
@@ -1945,7 +1929,7 @@ runPiJsonStream(command, args)
     };
 
     if (!completed) {
-      process.exitCode = result.status === 0 ? 1 : result.status ?? 1;
+      process.exitCode = result.status ?? 1;
     }
 
     process.stdout.write(JSON.stringify(runtimeResult));
@@ -1966,7 +1950,6 @@ runPiJsonStream(command, args)
       artifactSubdir: input.artifactSubdir,
       artifactDir: input.artifactDir,
       attempt: input.attempt,
-      contextPack: input.contextPack,
       inputContextArtifact: input.inputContextArtifact,
       jobName: input.jobName,
       model: input.model,

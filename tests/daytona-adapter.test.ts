@@ -11,6 +11,7 @@ import {
   readDaytonaConfigFromEnv,
 } from "../src/sandbox/daytona.js";
 import { createDefaultSandboxProvider } from "../src/sandbox/default-provider.js";
+import type { RuntimeJobInput } from "../src/sandbox/types.js";
 
 const repo = {
   owner: "octocat",
@@ -170,6 +171,50 @@ describe("Daytona production adapter boundary", () => {
         timeout: 17,
       },
     ]);
+  });
+
+  it("builds a self-contained Pi runner command without embedding the context pack", async () => {
+    const previousApiKey = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+
+    try {
+      const sandbox = new MockDaytonaSandbox();
+      const provider = new DaytonaSandboxProvider({
+        client: new MockDaytonaClient(sandbox),
+        commandTimeoutSeconds: 7,
+      });
+      const session = await provider.createSandbox({ repo, runId: "run_test_123" });
+      const input = {
+        generatedAt: "2026-06-14T00:00:00.000Z",
+        kind: "pi-repository-mapping",
+        name: "pi-repository-map",
+        pi: {
+          artifactSubdir: "repository-map",
+          contextPack: { should_not_be_embedded: "dead-weight" },
+          inputContextArtifact: "outputs/pi/repository-map/context.md",
+          model: "openai/gpt-5.3-codex",
+          outputBaseName: "repository-map",
+          prompt: "# Repository Map Context\n\nstable prompt",
+          provider: "openrouter",
+          step: "repository-map",
+          thinking: "xhigh",
+          tools: [],
+        },
+        stage: "pi",
+      } satisfies RuntimeJobInput;
+
+      await session.runJob(input);
+
+      const runnerCall = sandbox.executeCommandCalls[sandbox.executeCommandCalls.length - 1];
+      const command = runnerCall?.command ?? "";
+      expect(command).toContain('const os = require("node:os");');
+      expect(command).toContain("os.tmpdir()");
+      expect(command).toContain('"prompt":"# Repository Map Context\\n\\nstable prompt"');
+      expect(command).not.toContain("contextPack");
+      expect(command).not.toContain("should_not_be_embedded");
+    } finally {
+      restoreEnv("OPENROUTER_API_KEY", previousApiKey);
+    }
   });
 });
 

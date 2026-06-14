@@ -172,11 +172,18 @@ export interface PiArtifactMetadata {
       provider?: string;
     };
     final_response_bytes?: number;
+    json_delivery?: "fenced" | "repaired" | "strict";
     model: string;
     provider: string;
+    repair_applied?: boolean;
     stderr_bytes?: number;
     step: string;
     version?: string;
+  };
+  degraded?: {
+    diagnostics: string[];
+    raw_artifact?: string;
+    reason: string;
   };
 }
 

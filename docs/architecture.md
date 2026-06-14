@@ -112,29 +112,32 @@ Each Pi collector receives a smaller per-step projection of this source context:
 
 - `stack-build-deps`: repo identity, language summary, manifest/package/lock
   files, CI/IaC, generic config, and infra paths;
-- `entrypoints`: repo identity, compact structure signal, and grouped source
-  index;
-- `config-secrets`: repo identity, generic config files, manifests, top-level
-  directories, and grouped source index needed to identify config/secret
-  reference facts;
+- `entrypoints`: repo identity, neutral navigation context, and the accepted
+  stack/build/dependency artifact so the collector can discover registration
+  mechanisms itself instead of being told where entrypoints are;
+- `config-secrets`: repo identity, generic config files, manifests, and
+  top-level directories. The collector may use targeted search for
+  config/env/secret symbols, but it does not receive the broad source index;
 - `auth-access`: repo identity, accepted entrypoints, accepted config-secrets,
   and grouped source index needed to identify auth/access-control facts;
 - `storage-data-model`: repo identity, manifests, accepted config-secrets, and
-  grouped source index focused on schemas, models, migrations, and storage
-  declarations;
+  grouped source index used only as candidate navigation for schemas, models,
+  migrations, and storage declarations;
 - `external-integrations-egress`: repo identity, accepted config-secrets,
-  manifests, and grouped source index focused on clients, SDKs, hosts, and
-  brokers;
+  config files, manifests, and grouped source index used as candidate
+  navigation for clients, SDKs, hosts, and brokers;
 - `infra-deploy`: repo identity, infra files, IaC candidates, CI workflow paths,
-  generic config files, and top-level directories;
-- `operation-sinks`: repo identity and grouped source index focused on
-  operation families;
+  and top-level directories;
+- `operation-sinks`: repo identity, accepted stack/build/dependency facts, and
+  grouped source index focused on operation families;
 - `crypto`: repo identity, grouped source index, and config files where
   TLS/crypto settings may be declared;
-- `logging-observability`: repo identity, grouped source index, manifests, and
-  config files for logger/telemetry destinations;
+- `logging-observability`: repo identity, accepted entrypoints, accepted
+  storage-data-model, grouped source index, manifests, and config files for
+  logger/telemetry destinations;
 - `data-flows`: accepted entrypoints and accepted operation sinks;
-- `trust-boundaries`: accepted prior map artifacts only.
+- `trust-boundaries`: accepted prior map artifacts only, with no repository
+  inspection tools.
 
 ## Repository Map Pipeline
 
@@ -157,17 +160,19 @@ deterministic coverage job plus thirteen Pi jobs:
   sections 1 and 11.
 - `entrypoints`: collect externally reachable or externally triggered
   boundaries such as HTTP routes, CLI commands, events, webhooks, scheduled
-  jobs, uploads, and parsers. This covers original map section 3.
+  jobs, uploads, and parsers. The collector works registration-first and groups
+  uniformly registered handlers as boundary families, keeping materially
+  different boundary classes separate. This covers original map section 3.
 - `config-secrets`: collect config loading, env variables, config files,
   defaults/examples, secret-manager references, and redacted secret-like
-  reference locations at configuration-source level. This covers original map
-  section 7.
+  reference locations at configuration-source level without broad source-tree
+  browsing. This covers original map section 7.
 - `auth-access`: collect authentication/authorization mechanisms, middleware,
   guards, role/scope checks, session/token storage or checks, and observable
   protected/public/unknown status for accepted entrypoints without
   rediscovering entrypoints. This covers original map section 4.
-- `storage-data-model`: collect DB/storage/schema/cache/queue facts and data
-  model field names. This covers original map section 9.
+- `storage-data-model`: collect DB/storage/schema/cache/file-storage facts and
+  data model field names. This covers original map section 9.
 - `external-integrations-egress`: collect third-party APIs, SDKs, outbound
   hosts, configured service URLs, and brokers. This covers original map section
   10.
@@ -180,7 +185,8 @@ deterministic coverage job plus thirteen Pi jobs:
 - `crypto`: collect observable crypto, randomness, password hashing, and TLS
   configuration facts. This covers original map section 8.
 - `logging-observability`: collect logging/telemetry call sites, logged field
-  names, and configured destinations. This covers original map section 13.
+  names, configured destinations, and observable references to accepted
+  entrypoint/storage-field names. This covers original map section 13.
 - `data-flows`: use only the accepted `entrypoints` and `operation-sinks`
   artifacts to record bounded shallow paths from
   external input to operation sinks. This covers original map section 5.
@@ -188,7 +194,8 @@ deterministic coverage job plus thirteen Pi jobs:
   artifacts; it must reference existing IDs/evidence instead of rediscovering
   repository facts. This covers original map section 14.
 - `repository-map`: synthesize the final human-oriented repository map from all
-  section artifacts; it must not add new facts.
+  section artifacts with no repository inspection tools; it must not add new
+  facts.
 
 Each Pi job writes a structured JSON artifact. Dependent jobs receive the
 minimal context or prior artifacts they need, so Pi does not carry one large
@@ -200,17 +207,23 @@ The current pipeline uses a single Pi collector pass per map section:
 
 ```text
 collector Pi
-  -> section JSON
+  -> raw final response artifact
+  -> host-side JSON parse / deterministic repair
   -> schema-only validation
-  -> write final artifact
+  -> write accepted artifact or degraded section artifact
 ```
 
 The deterministic validator only checks JSON/schema/shape. It does not enforce
 semantic correctness, evidence correctness, output budgets, or reviewer-quality
 judgment.
 
-There is no semantic evaluator loop in the current implementation. A Pi job is:
-collector run -> deterministic validation -> accepted artifact or failed run.
+There is no semantic evaluator loop in the current implementation. A Pi job is
+collector run -> host-side JSON parse/repair -> schema validation -> accepted
+artifact. If a collector returns unusable output for one section, VibeShield
+writes a schema-valid degraded artifact for that section with a `fact_gaps`
+entry and keeps building the final report. This is current MVP error tolerance
+so one bad agent section does not prevent the auditor-facing `report.md` from
+being produced.
 
 The collector is the exploration role. It runs with read/search/list tools and
 must do the section-specific discovery work before returning section JSON. It
@@ -224,9 +237,14 @@ inferences and may only reference facts and IDs from earlier artifacts.
 
 ## Pi Runtime Observability
 
-Live Pi jobs run through the Daytona runtime in Pi `--mode json`. VibeShield
-does not print raw Pi output, thinking, tool arguments, or tool results to the
-CLI. The sandbox runner filters Pi JSONL events into compact lifecycle messages
+Live Pi jobs run through the Daytona runtime in Pi `--mode json`. The sandbox
+runner does not parse or validate the final assistant response. It saves the
+redacted raw final response, stderr, progress, and metadata artifacts; the host
+parser is the only source of truth for JSON parsing, deterministic repair,
+schema validation, and degraded section handling.
+
+VibeShield does not print raw Pi output, thinking, tool arguments, or tool
+results to the CLI. The sandbox runner filters Pi JSONL events into compact lifecycle messages
 and streams only those sanitized events back to the host:
 
 - runner start;
@@ -236,9 +254,10 @@ and streams only those sanitized events back to the host:
 - periodic heartbeat while Pi is still running;
 - output start and completion/failure.
 
-The final structured artifact is reconstructed from the final assistant text
-and written to `outputs/pi/<stage>/<stage>.raw.redacted.txt`. The raw Pi JSONL
-event stream is not stored as a user artifact.
+The final assistant text is written to
+`outputs/pi/<stage>/<stage>.raw.redacted.txt`. Accepted or degraded structured
+section artifacts are written separately under `outputs/repo-map/`. The raw Pi
+JSONL event stream is not stored as a user artifact.
 
 Progress messages label the running Pi mapping job as the stage `collector`.
 

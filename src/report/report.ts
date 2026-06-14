@@ -167,40 +167,62 @@ function formatRepositoryMapSection(
   const artifact =
     section.artifactKey === undefined ? undefined : sectionArtifacts[section.artifactKey];
 
-  switch (section.index) {
-    case 0:
-      return formatCoverageSection(artifact);
-    case 1:
-      return formatStackAndBuildSection(artifact);
-    case 2:
-      return formatRepositoryStructureSection(artifact);
-    case 3:
-      return formatEntrypointsSection(artifact);
-    case 4:
-      return formatAuthSection(artifact);
-    case 5:
-      return formatDataFlowsSection(artifact);
-    case 6:
-      return formatOperationSinksSection(artifact);
-    case 7:
-      return formatSecretsConfigSection(artifact);
-    case 8:
-      return formatCryptographySection(artifact);
-    case 9:
-      return formatStorageSection(artifact);
-    case 10:
-      return formatIntegrationsSection(artifact);
-    case 11:
-      return formatDependenciesSection(artifact);
-    case 12:
-      return formatInfrastructureSection(artifact);
-    case 13:
-      return formatLoggingSection(artifact);
-    case 14:
-      return formatTrustBoundariesSection(artifact);
-    default:
-      return ["- Not available."];
+  const lines = (() => {
+    switch (section.index) {
+      case 0:
+        return formatCoverageSection(artifact);
+      case 1:
+        return formatStackAndBuildSection(artifact);
+      case 2:
+        return formatRepositoryStructureSection(artifact);
+      case 3:
+        return formatEntrypointsSection(artifact);
+      case 4:
+        return formatAuthSection(artifact);
+      case 5:
+        return formatDataFlowsSection(artifact);
+      case 6:
+        return formatOperationSinksSection(artifact);
+      case 7:
+        return formatSecretsConfigSection(artifact);
+      case 8:
+        return formatCryptographySection(artifact);
+      case 9:
+        return formatStorageSection(artifact);
+      case 10:
+        return formatIntegrationsSection(artifact);
+      case 11:
+        return formatDependenciesSection(artifact);
+      case 12:
+        return formatInfrastructureSection(artifact);
+      case 13:
+        return formatLoggingSection(artifact);
+      case 14:
+        return formatTrustBoundariesSection(artifact);
+      default:
+        return ["- Not available."];
+    }
+  })();
+
+  return artifact === undefined
+    ? lines
+    : compactLines([...formatDegradedNotice(artifact), ...lines]);
+}
+
+function formatDegradedNotice(artifact: JsonObject): string[] {
+  const degraded = objectField(objectField(artifact, "metadata"), "degraded");
+  if (degraded === undefined) {
+    return [];
   }
+
+  const reason = firstField(degraded, ["reason"]);
+  const rawArtifact = firstField(degraded, ["raw_artifact"]);
+  return [
+    `- Collection degraded${reason === "" ? "." : `: ${reason}`}${
+      rawArtifact === "" ? "" : ` Raw response: ${rawArtifact}.`
+    }`,
+    "",
+  ];
 }
 
 function formatCoverageSection(artifact: JsonObject | undefined): string[] {

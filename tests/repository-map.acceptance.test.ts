@@ -453,10 +453,12 @@ describe("AppSec repository map acceptance", () => {
 
   it("passes narrow per-step context to Pi repository-map collectors", async () => {
     const capturedContexts: Record<string, unknown> = {};
+    const capturedPi: Record<string, RuntimeJobInput["pi"]> = {};
     const capture =
       (step: string, output: unknown) =>
       (input: RuntimeJobInput): unknown => {
         capturedContexts[step] = input.pi?.contextPack;
+        capturedPi[step] = input.pi;
         return output;
       };
     const { provider } = await createProvider({
@@ -509,13 +511,16 @@ describe("AppSec repository map acceptance", () => {
 
     const entrypoints = expectObjectContext(capturedContexts.entrypoints);
     expect(entrypoints).toMatchObject({
+      inputs: expect.objectContaining({
+        stack_build_deps: expect.objectContaining({
+          build: expect.any(Object),
+          kind: "stack-build-deps",
+          stack: expect.any(Array),
+        }),
+      }),
       inventory: expect.objectContaining({
-        source_index: expect.arrayContaining([
-          expect.objectContaining({
-            directory: "src",
-            languages: expect.arrayContaining(["TypeScript"]),
-          }),
-        ]),
+        language_summary: expect.any(Array),
+        manifest_files: expect.any(Array),
         top_level_directories: expect.any(Array),
       }),
     });
@@ -540,7 +545,7 @@ describe("AppSec repository map acceptance", () => {
       inventory: expect.objectContaining({
         config_files: expect.any(Array),
         manifest_files: expect.any(Array),
-        source_index: expect.any(Array),
+        top_level_directories: expect.any(Array),
       }),
     });
 
@@ -575,14 +580,22 @@ describe("AppSec repository map acceptance", () => {
     const infraDeploy = expectObjectContext(capturedContexts["infra-deploy"]);
     expect(infraDeploy).toMatchObject({
       inventory: expect.objectContaining({
-        config_files: expect.any(Array),
+        github_actions_workflows: expect.any(Array),
         iac_candidates: expect.any(Array),
         infra_files: expect.any(Array),
+        top_level_directories: expect.any(Array),
       }),
     });
 
     const operationSinks = expectObjectContext(capturedContexts["operation-sinks"]);
     expect(operationSinks).toMatchObject({
+      inputs: expect.objectContaining({
+        stack_build_deps: expect.objectContaining({
+          build: expect.any(Object),
+          kind: "stack-build-deps",
+          stack: expect.any(Array),
+        }),
+      }),
       inventory: expect.objectContaining({
         source_index: expect.any(Array),
       }),
@@ -598,6 +611,14 @@ describe("AppSec repository map acceptance", () => {
 
     const loggingObservability = expectObjectContext(capturedContexts["logging-observability"]);
     expect(loggingObservability).toMatchObject({
+      inputs: expect.objectContaining({
+        entrypoints: expect.objectContaining({
+          entrypoints: expect.arrayContaining([expect.objectContaining({ id: "entry-http-spam" })]),
+        }),
+        storage_data_model: expect.objectContaining({
+          storage: expect.arrayContaining([expect.objectContaining({ id: "store-messages-db" })]),
+        }),
+      }),
       inventory: expect.objectContaining({
         config_files: expect.any(Array),
         manifest_files: expect.any(Array),
@@ -619,34 +640,55 @@ describe("AppSec repository map acceptance", () => {
         }),
       },
     });
+    expect(jsonText(dataFlows)).not.toContain('"generated_at"');
+    expect(jsonText(dataFlows)).not.toContain('"generated_by"');
+    expect(jsonText(dataFlows)).not.toContain('"metadata"');
+    expect(jsonText(dataFlows)).not.toContain('"repo"');
 
-    const trustBoundaries = expectObjectContext(capturedContexts["trust-boundaries"]);
-    expect(Object.keys(trustBoundaries).sort()).toEqual(["artifacts", "paths"]);
-    expect(jsonText(trustBoundaries)).toContain("entry-http-spam");
+    const trustBoundaries = capturedContexts["trust-boundaries"];
+    expect(typeof trustBoundaries).toBe("string");
+    expect(trustBoundaries).toContain("# Trust Boundaries Context");
+    expect(trustBoundaries).toContain("entry-http-spam");
+    expect(trustBoundaries).toContain("flow-http-spam-db");
+    expect(trustBoundaries).not.toContain("generated_at");
+    expect(trustBoundaries).not.toContain("generated_by");
+    expect(trustBoundaries).not.toContain('"metadata"');
+    expect(trustBoundaries).not.toContain('"coverage"');
+    expect(capturedPi["trust-boundaries"]).toMatchObject({
+      model: "openai/gpt-5.3-codex",
+      thinking: "xhigh",
+      tools: [],
+    });
+    expect(capturedPi.entrypoints).toMatchObject({
+      model: "deepseek/deepseek-v4-pro",
+    });
 
-    const repositoryMap = expectObjectContext(capturedContexts["repository-map"]);
-    expect(Object.keys(repositoryMap).sort()).toEqual(["artifacts", "paths"]);
-    expect(jsonText(repositoryMap)).toContain("coverage_structure");
+    const repositoryMap = capturedContexts["repository-map"];
+    expect(typeof repositoryMap).toBe("string");
+    expect(repositoryMap).toContain("# Repository Map Context");
+    expect(repositoryMap).toContain("coverage-structure");
+    expect(repositoryMap).toContain("entry-http-spam");
+    expect(repositoryMap).toContain("flow-http-spam-db");
+    expect(repositoryMap).toContain("boundary-external-http-to-app-db");
+    expect(repositoryMap).not.toContain("generated_at");
+    expect(repositoryMap).not.toContain("generated_by");
+    expect(repositoryMap).not.toContain('"metadata"');
+    expect(repositoryMap).not.toContain('"repo"');
+    expect(capturedPi["repository-map"]).toMatchObject({
+      model: "openai/gpt-5.3-codex",
+      thinking: "xhigh",
+      tools: [],
+    });
   });
 
-  it("preserves partial map artifacts and resumes from the first missing map section", async () => {
-    let dataFlowsAreValid = false;
-    const { provider } = await createProvider({
-      piOutputs: {
-        "data-flows": () =>
-          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithInvalidSchema(),
-        "repo-map-data-flows": () =>
-          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithInvalidSchema(),
-        "repo-map/data-flows": () =>
-          dataFlowsAreValid ? fakeRepoMapDataFlows() : fakeRepoMapDataFlowsWithInvalidSchema(),
-      },
-    });
+  it("preserves partial map artifacts and resumes from a fatal Pi runtime failure", async () => {
+    const failedProvider = (await createProvider({ failAt: "pi" })).provider;
     const runsRoot = await createTempRoot("vibeshield-runs-");
 
     const failed = await runScan({
       repoUrlInput: fixtureUrl,
       runsRoot,
-      sandboxProvider: provider,
+      sandboxProvider: failedProvider,
     });
 
     expect(failed.exitCode).toBe(1);
@@ -664,13 +706,11 @@ describe("AppSec repository map acceptance", () => {
         id: string;
       };
     }>(failedRunPath);
-    expect(failedRun.error.stage).toContain("data-flows");
-    for (const artifact of expectedRepoMapArtifacts.slice(0, 6)) {
-      await expectPath(path.join(runDir, artifact));
-    }
-    expect(await pathExists(path.join(runDir, "outputs", "repo-map", "data-flows.json"))).toBe(
-      false,
-    );
+    expect(failedRun.error.stage).toBe("pi");
+    await expectPath(path.join(runDir, "outputs", "repo-map", "coverage-structure.json"));
+    expect(
+      await pathExists(path.join(runDir, "outputs", "repo-map", "stack-build-deps.json")),
+    ).toBe(false);
     expect(await pathExists(path.join(runDir, "outputs", "repository-map.json"))).toBe(false);
     expect(failedRun.artifacts.diagnostics).toEqual(
       expect.arrayContaining([
@@ -687,26 +727,26 @@ describe("AppSec repository map acceptance", () => {
 
     failedRun.sandbox.cleanup = { attempted: false, deleted: false, success: false };
     await writeFile(failedRunPath, `${JSON.stringify(failedRun, null, 2)}\n`, "utf8");
-    provider.liveSandboxIds.push(failedRun.sandbox.id);
-    dataFlowsAreValid = true;
+    const resumeProvider = (await createProvider()).provider;
+    resumeProvider.liveSandboxIds.push(failedRun.sandbox.id);
 
-    const resumed = await runResume({ runDir, sandboxProvider: provider });
+    const resumed = await runResume({ runDir, sandboxProvider: resumeProvider });
 
-    expect(resumed.exitCode).toBe(0);
-    expect(provider.staleDeleteCalls).toContain(failedRun.sandbox.id);
-    expect(provider.createdSandboxIds).toHaveLength(2);
-    expect(provider.liveSandboxIds).toEqual([]);
+    expect(resumed).toMatchObject({ exitCode: 0 });
+    expect(resumeProvider.staleDeleteCalls).toContain(failedRun.sandbox.id);
+    expect(resumeProvider.createdSandboxIds).toHaveLength(1);
+    expect(resumeProvider.liveSandboxIds).toEqual([]);
 
     const resumedCommands =
-      provider.sessions
+      resumeProvider.sessions
         .at(-1)
         ?.commands.filter((command) => command.command.startsWith("vibeshield-runtime-job"))
         .map((command) => command.command) ?? [];
-    expect(resumedCommands[0]).toContain("data-flows");
+    expect(resumedCommands[0]).toContain("stack-deps");
     expect(resumedCommands.some((command) => command.includes("coverage-structure"))).toBe(false);
-    expect(resumedCommands.some((command) => command.includes("operation-sinks"))).toBe(false);
-    await expectPath(path.join(runDir, "outputs", "repo-map", "data-flows.json"));
-    await expectPath(path.join(runDir, "outputs", "repository-map.json"));
+    for (const artifact of expectedRepoMapArtifacts) {
+      await expectPath(path.join(runDir, artifact));
+    }
 
     const resumedRun = await readJson<{
       steps: Array<{ name: string; status: string }>;
@@ -715,6 +755,135 @@ describe("AppSec repository map acceptance", () => {
       1,
     );
     expect(resumedRun.steps.every((step) => step.status === "success")).toBe(true);
+  });
+
+  it("records a degraded map section and still writes the final report when Pi output is unusable", async () => {
+    const { provider } = await createProvider({
+      piOutputs: {
+        entrypoints: {
+          rawText: "entrypoints were found but no JSON object was produced",
+        },
+      },
+    });
+
+    const result = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const runDir = expectRunDir(result);
+    const entrypoints = await readJson<EntrypointsArtifact>(
+      path.join(runDir, "outputs", "repo-map", "entrypoints.json"),
+    );
+    expect(entrypoints.entrypoints).toEqual([]);
+    expect(entrypoints.metadata).toMatchObject({
+      degraded: {
+        raw_artifact: "outputs/pi/entrypoints/entrypoints.raw.redacted.txt",
+      },
+    });
+    const report = await readFile(path.join(runDir, "report.md"), "utf8");
+    expect(report).toContain("## 3. Attack Surface And Entry Points");
+    expect(report).toContain("Collection degraded");
+    await expectPath(path.join(runDir, "outputs", "repository-map.json"));
+  });
+
+  it("accepts a single markdown JSON fence around a Pi final response", async () => {
+    const fencedEntrypoints = fakeRepoMapEntrypoints();
+    const { provider } = await createProvider({
+      piOutputs: {
+        entrypoints: {
+          rawText: `\`\`\`json\n${JSON.stringify(fencedEntrypoints, null, 2)}\n\`\`\``,
+        },
+      },
+    });
+
+    const result = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const runDir = expectRunDir(result);
+    const entrypoints = await readJson<EntrypointsArtifact>(
+      path.join(runDir, "outputs", "repo-map", "entrypoints.json"),
+    );
+    expect(entrypoints.entrypoints).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "entry-http-spam" })]),
+    );
+  });
+
+  it("recovers fenced JSON from a Pi final response with surrounding prose", async () => {
+    const fencedConfigSecrets = fakeRepoMapConfigSecrets();
+    const { provider } = await createProvider({
+      piOutputs: {
+        "config-secrets": {
+          rawText: `Now I have sufficient evidence.\n\n\`\`\`json\n${JSON.stringify(
+            fencedConfigSecrets,
+            null,
+            2,
+          )}\n\`\`\``,
+        },
+      },
+    });
+
+    const result = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const runDir = expectRunDir(result);
+    const configSecrets = await readJson<ConfigSecretsArtifact>(
+      path.join(runDir, "outputs", "repo-map", "config-secrets.json"),
+    );
+    expect(configSecrets.config).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "config-api-base-url" })]),
+    );
+    expect(configSecrets.metadata).toMatchObject({
+      pi: {
+        json_delivery: "fenced",
+        repair_applied: false,
+      },
+    });
+  });
+
+  it("repairs a salvageable Pi JSON final response before schema validation", async () => {
+    const rawEntrypoints = `${JSON.stringify(fakeRepoMapEntrypoints(), null, 2).replace(
+      /\n}$/,
+      ",\n}",
+    )}`;
+    const { provider } = await createProvider({
+      piOutputs: {
+        entrypoints: {
+          rawText: rawEntrypoints,
+        },
+      },
+    });
+
+    const result = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot: await createTempRoot("vibeshield-runs-"),
+      sandboxProvider: provider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const runDir = expectRunDir(result);
+    const entrypoints = await readJson<EntrypointsArtifact>(
+      path.join(runDir, "outputs", "repo-map", "entrypoints.json"),
+    );
+    expect(entrypoints.entrypoints).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "entry-http-spam" })]),
+    );
+    expect(entrypoints.metadata).toMatchObject({
+      pi: {
+        json_delivery: "repaired",
+        repair_applied: true,
+      },
+    });
   });
 });
 
@@ -1645,12 +1814,6 @@ function fakeRepoMapDataFlows(): DataFlowsArtifact {
     metadata: fakeRepoMapMetadata("data-flows"),
     repo: fakeRepo(),
   };
-}
-
-function fakeRepoMapDataFlowsWithInvalidSchema(): unknown {
-  const artifact = fakeRepoMapDataFlows();
-  (artifact as unknown as Record<string, unknown>).flows = "invalid";
-  return artifact;
 }
 
 function fakeRepoMapTrustBoundaries(): TrustBoundariesArtifact {

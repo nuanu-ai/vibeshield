@@ -130,6 +130,7 @@ function createRenderer(io: CliIo, interactive: boolean): Renderer {
   let activeToolStep: string | undefined;
   let activeStartedWall = Date.now();
   let runStartedWall = Date.now();
+  let lastActionLine = "";
 
   const startedAtMs = new Map<string, number>();
   const toolCountByStep = new Map<string, number>();
@@ -201,7 +202,20 @@ function createRenderer(io: CliIo, interactive: boolean): Renderer {
     activeKind = kind;
     activeToolStep = toolStep;
     activeStartedWall = Date.now();
+    lastActionLine = "";
     startedAtMs.set(key, eventMs);
+  };
+
+  // Live trail of what the agent is doing inside a step (read/grep/find/ls),
+  // printed as dim nested lines under the active section. Consecutive identical
+  // actions collapse so the trail stays readable.
+  const printAction = (event: RunEvent): void => {
+    const action = humanLabel(event.message);
+    if (action === "" || action === lastActionLine) {
+      return;
+    }
+    lastActionLine = action;
+    out(`    ${paint(code.gray, glyph.step)} ${paint(code.dim, action)}\n`);
   };
 
   const duration = (key: string, eventMs: number): string | undefined => {
@@ -412,13 +426,16 @@ function createRenderer(io: CliIo, interactive: boolean): Renderer {
 
   const isSpinnerOnly = (event: RunEvent): boolean =>
     event.type === "pi.thinking" ||
-    event.type === "pi.tool.called" ||
     event.type === "pi.output.started" ||
     event.type.endsWith(".heartbeat");
 
   return {
     event(event) {
       updateSpinnerActivity(event);
+      if (event.type === "pi.tool.called") {
+        printAction(event);
+        return;
+      }
       if (isSpinnerOnly(event)) {
         return;
       }
