@@ -371,13 +371,13 @@ export class DaytonaSandboxSession implements SandboxSession {
           cause: error,
           message: errorMessage(error),
           stage: "deterministic-baseline",
-          userMessage: `Could not prepare deterministic baseline tools inside Daytona sandbox: ${errorMessage(
+          userMessage: `Could not prepare baseline checks inside Daytona sandbox: ${errorMessage(
             error,
           )}`,
         });
       });
 
-    assertSandboxCommandSucceeded(response, "deterministic-baseline", "prepare baseline tools");
+    assertSandboxCommandSucceeded(response, "deterministic-baseline", "prepare baseline checks");
 
     try {
       return parseJsonObjectFromText(readCommandStdout(response)) as PrepareBaselineToolsResult;
@@ -485,6 +485,7 @@ export class DaytonaSandboxSession implements SandboxSession {
       provider: input.pi.provider,
       repoPath: this.options.repoPath,
       step: input.pi.step,
+      thinking: input.pi.thinking ?? "low",
       tools: input.pi.tools,
     });
     const exitCode = await this.runLongRunningPiCommand(command, apiKey, input.onProgress);
@@ -515,7 +516,7 @@ export class DaytonaSandboxSession implements SandboxSession {
           "--model",
           input.pi.model,
           "--thinking",
-          "low",
+          input.pi.thinking ?? "low",
           "--mode",
           "json",
           "<prompt>",
@@ -992,7 +993,7 @@ for (const requested of config.tools) {
       diagnostics:
         readiness.diagnostics.length > 0
           ? readiness.diagnostics
-          : ["Required baseline tool could not be provisioned: " + requested.tool],
+          : ["Required baseline check could not be prepared."],
       required: true,
       status: "failed",
       tool: requested.tool,
@@ -1170,7 +1171,7 @@ if (skippedReason !== null) {
   diagnostics.push(skippedReason);
 } else if (!executable) {
   status = "failed";
-  diagnostics.push("Required baseline tool is unavailable after provisioning: " + config.tool);
+  diagnostics.push("Required baseline check is unavailable after preparation.");
 } else {
   version = toolVersion(executable);
   const result = spawnSync(executable, args, {
@@ -1290,6 +1291,7 @@ function buildPiRunnerCommand(input: {
   provider: "openrouter";
   repoPath: string;
   step: string;
+  thinking: string;
   tools: string[];
 }): string {
   const runnerSource = String.raw`
@@ -1341,6 +1343,53 @@ function textFromAssistantMessage(message) {
     .filter((part) => part && part.type === "text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("");
+}
+
+function extractJsonObject(text) {
+  if (typeof text !== "string") {
+    return undefined;
+  }
+  const trimmed = text.trim();
+  if (trimmed === "") {
+    return undefined;
+  }
+  const start = trimmed.indexOf("{");
+  if (start < 0) {
+    return undefined;
+  }
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < trimmed.length; i += 1) {
+    const ch = trimmed[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        const candidate = trimmed.slice(start, i + 1);
+        try {
+          JSON.parse(candidate);
+          return candidate;
+        } catch {
+          return undefined;
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 function actorLabel() {
@@ -1689,7 +1738,7 @@ const piArgs = [
   "--model",
   config.model,
   "--thinking",
-  "low",
+  config.thinking,
   "--mode",
   "json",
   config.prompt,
@@ -1727,10 +1776,24 @@ runPiJsonStream(command, args)
   .then((result) => {
     let outputText = "";
     let outputReadError = "";
+    let recoveredFromText = false;
     try {
       outputText = fs.readFileSync(agentOutputPath, "utf8");
     } catch (error) {
       outputReadError = error && error.message ? error.message : String(error);
+    }
+    if (outputText.trim() === "") {
+      const recovered = extractJsonObject(result.finalText || "");
+      if (recovered) {
+        outputText = recovered;
+        outputReadError = "";
+        recoveredFromText = true;
+        try {
+          fs.mkdirSync(path.dirname(agentOutputPath), { recursive: true });
+          fs.writeFileSync(agentOutputPath, recovered);
+        } catch {}
+        emitProgress("pi.output.recovered", actorLabel() + ": recovered structured output from final message (write tool was not used).", { step: config.step });
+      }
     }
     const output = redact(outputText);
     const stderr = redact(result.stderr || (result.error ? result.error.message : ""));
@@ -1743,7 +1806,7 @@ runPiJsonStream(command, args)
     const metadata = {
       input_context_artifact: config.inputContextArtifact,
       invocation: {
-        args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", ...toolArgs, "--provider", config.provider, "--model", config.model, "--thinking", "low", "--mode", "json", "<prompt>"],
+        args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", ...toolArgs, "--provider", config.provider, "--model", config.model, "--thinking", config.thinking, "--mode", "json", "<prompt>"],
         command,
         cwd: config.repoPath,
         metadata: { output_file: config.outputFile, tools: config.tools },
@@ -1754,6 +1817,7 @@ runPiJsonStream(command, args)
       output_file: config.outputFile,
       output_read_error: outputReadError,
       pi_exit_code: result.status,
+      recovered_from_text: recoveredFromText,
       prompt_bytes: Buffer.byteLength(config.prompt, "utf8"),
       provider: config.provider,
       runner_package: "@earendil-works/pi-coding-agent",
@@ -1819,6 +1883,7 @@ runPiJsonStream(command, args)
       provider: input.provider,
       repoPath: input.repoPath,
       step: input.step,
+      thinking: input.thinking,
       tools: input.tools,
     }),
   );

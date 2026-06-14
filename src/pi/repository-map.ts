@@ -160,6 +160,7 @@ interface PiStageInput<TArtifact extends PiStructuredArtifact> {
   outputBaseName: TArtifact["kind"];
   prompt: string;
   step: TArtifact["kind"];
+  thinking?: "high" | "low" | "medium";
   tools?: string[];
   validateSchema: (artifact: TArtifact) => void;
   validationStage: PiStageValidationStage;
@@ -225,6 +226,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "entrypoints",
       prompt: buildEntrypointsPrompt(entrypointsContext),
       step: "entrypoints",
+      thinking: "medium",
       validateSchema: (artifact) => validateEntrypointsArtifact({ artifact }),
       validationStage: "entrypoints-validation",
     }));
@@ -349,6 +351,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "operation-sinks",
       prompt: buildOperationSinksPrompt(operationSinksContext),
       step: "operation-sinks",
+      thinking: "medium",
       validateSchema: (artifact) => validateOperationSinksArtifact({ artifact }),
       validationStage: "operation-sinks-validation",
     }));
@@ -411,6 +414,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "data-flows",
       prompt: buildDataFlowsPrompt(dataFlowContext),
       step: "data-flows",
+      thinking: "medium",
       validateSchema: (artifact) => validateDataFlowsArtifact({ artifact }),
       validationStage: "data-flows-validation",
     }));
@@ -1306,6 +1310,7 @@ async function runPiStage<TArtifact extends PiStructuredArtifact>(
         }),
         provider: defaultPiProvider,
         step: stage.step,
+        ...(stage.thinking === undefined ? {} : { thinking: stage.thinking }),
         tools: stage.tools ?? collectorTools,
       },
       stage: "pi",
@@ -1319,6 +1324,14 @@ async function runPiStage<TArtifact extends PiStructuredArtifact>(
     runDir: stage.input.runDir,
     sandbox: stage.input.sandbox,
   });
+  if (result.status === "failed") {
+    result.diagnostics = await enrichPiFailureDiagnostics({
+      artifactPaths,
+      diagnostics: result.diagnostics,
+      runDir: stage.input.runDir,
+      step: stage.step,
+    });
+  }
   const jobState = toRunJobState(stage.jobName, result, artifactPaths);
 
   try {
@@ -1395,11 +1408,15 @@ function piAgentOutputFile(outputBaseName: PiStructuredArtifact["kind"]): string
 function withPiOutputFileInstruction(input: { outputFile: string; prompt: string }): string {
   return `${input.prompt}
 
-Output file contract:
-- The JSON artifact MUST be written to this file using the write tool: ${input.outputFile}
-- This file is the primary result consumed by VibeShield.
-- Write exactly one JSON object to the file.
-- Do not write markdown fences or explanatory text to the file.
+Output file contract (read carefully — this is how the result is collected):
+- Deliver the result with ONE write tool call that saves the complete JSON object
+  to this exact path: ${input.outputFile}
+- Printing or "answering" the JSON in your reply does NOT deliver it — only the
+  write tool call does.
+- Write the file exactly once with the full, final object, then end your turn.
+  Do not write the file repeatedly to revise or "improve" it; write again only if
+  a previous write returned an error.
+- The file must contain exactly one JSON object, with no markdown fences or prose.
 - Do not modify any repository file other than this output file.`;
 }
 
@@ -1432,6 +1449,47 @@ function assertPiJobCompleted(result: RuntimeJobResult, step: string): void {
     stage: "pi",
     userMessage: `VibeShield stopped while running Pi ${step}.`,
   });
+}
+
+async function enrichPiFailureDiagnostics(input: {
+  artifactPaths: string[];
+  diagnostics: string[];
+  runDir: string;
+  step: string;
+}): Promise<string[]> {
+  const metadataPath = input.artifactPaths.find((artifact) => artifact.endsWith("metadata.json"));
+  if (metadataPath === undefined) {
+    return input.diagnostics;
+  }
+
+  let metadata: Record<string, unknown>;
+  try {
+    metadata = JSON.parse(await readFile(path.join(input.runDir, metadataPath), "utf8"));
+  } catch {
+    return input.diagnostics;
+  }
+
+  const extra: string[] = [];
+  const outputReadError =
+    typeof metadata.output_read_error === "string" ? metadata.output_read_error.trim() : "";
+  const outputFile =
+    typeof metadata.output_file === "string" ? metadata.output_file : "output file";
+  const outputBytes = typeof metadata.output_bytes === "number" ? metadata.output_bytes : undefined;
+  const piExitCode = typeof metadata.pi_exit_code === "number" ? metadata.pi_exit_code : undefined;
+
+  if (outputReadError !== "") {
+    extra.push(
+      `Pi exited ${piExitCode ?? "?"} but did not write ${outputFile}, and no JSON object could be recovered from its final message (${outputReadError}).`,
+    );
+  } else if (outputBytes === 0) {
+    extra.push(`Pi wrote an empty ${outputFile}.`);
+  }
+
+  const merged = [...input.diagnostics, ...extra];
+  const deduped = merged.filter(
+    (line, index) => line.trim() !== "" && merged.indexOf(line) === index,
+  );
+  return deduped.length > 0 ? deduped : input.diagnostics;
 }
 
 async function readPiStructuredArtifact<TArtifact extends PiStructuredArtifact>(
@@ -1648,47 +1706,60 @@ Collect only observable facts from manifests and config files:
 - vendored dependency directories as a fact when observable.
 
 Depth bounds:
-- Use the supplied repository navigation index as the starting map. Prioritize
-  manifest, package, lock, CI, IaC, config, and infra paths from that input.
+- The supplied repository navigation index already lists the manifest, package,
+  lock, CI, IaC, config, and infra files. That list IS your starting map; you do
+  not need to rediscover these files.
+- Read each manifest, lock, and CI file at most once. Reading package.json once
+  gives you every dependency it declares; the dependency NAME and declared
+  VERSION are the fact. Never grep for dependencies one-by-one to find a line —
+  that is forbidden and pointless, since the file path alone is the evidence.
 - Do not install dependencies.
 - Do not run package scripts, builds, tests, migrations, or generators.
 - Do not inspect source files unless a manifest/config points to a declared
-  framework, runtime, command, dependency, or CI/deploy fact that needs minimal
+  framework, runtime, command, or CI/deploy fact that needs minimal naming
   confirmation.
 - Do not infer runtime behavior from dependency names alone.
 - Do not expand transitive dependencies manually. If a lockfile exists, record that transitive dependencies are available through it.
 - Commands are declarations found in manifests/config, not commands you ran.
-- Keep direct dependency output compact. Group repetitive dependency families in
-  dependency_notes instead of dumping large dependency lists.
 
-Write ONLY valid JSON matching stack-build-deps:
+Dependency output:
+- Do NOT dump every dependency. List only security-relevant direct dependencies,
+  grouped by family (web framework, auth/session, crypto, database/ORM, HTTP
+  client, serialization/parsing, file upload, templating, payment), each with
+  its name and declared version. The name is the fact; evidence is the manifest
+  file, e.g. ["package.json"].
+- Record totals with a dependency_notes entry of kind "dependency_count", e.g.
+  summary "package.json declares 142 direct deps (47 runtime, 95 dev)",
+  evidence ["package.json"]. This replaces enumerating the long tail.
+
+Build one JSON object matching the stack-build-deps schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "stack-build-deps",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "stack": [
-    { "id": "stable short id", "kind": "language|runtime|framework|package-manager|build-tool|test-tool|service|dependency|other", "name": "string", "version": "optional string", "required_version": "optional string", "share": "optional inventory share", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "language|runtime|framework|package-manager|build-tool|test-tool|service|dependency|other", "name": "string", "version": "optional string", "required_version": "optional string", "share": "optional inventory share", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "build": {
-    "manifests": [{ "path": "relative/path", "evidence": ["relative/path:line"] }],
-    "lockfiles": [{ "path": "relative/path", "evidence": ["relative/path:line"] }],
-    "commands": [{ "id": "stable short id", "name": "string", "command": "declared command string", "source": "relative/path", "evidence": ["relative/path:line"] }]
+    "manifests": [{ "path": "relative/path", "evidence": ["relative/path"] }],
+    "lockfiles": [{ "path": "relative/path", "evidence": ["relative/path"] }],
+    "commands": [{ "id": "stable short id", "name": "string", "command": "declared command string", "source": "relative/path", "evidence": ["relative/path"] }]
   },
   "ci": [
-    { "id": "stable short id", "file": "relative/path", "step": "declared step name", "command": "declared command string", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "file": "relative/path", "step": "declared step name", "command": "declared command string", "evidence": ["relative/path"] }
   ],
   "dependencies": [
-    { "id": "stable short id", "kind": "dependency|framework|service|other", "name": "string", "version": "declared version", "direct": true, "role": "runtime|dev|peer|optional|other", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "dependency|framework|service|other", "name": "string", "version": "declared version", "direct": true, "role": "runtime|dev|peer|optional|other", "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "dependency_notes": [
-    { "kind": "lockfile_present|lockfile_absent|transitive_available|vendored_dependencies", "path": "optional relative/path", "summary": "short fact", "evidence": ["relative/path:line"] }
+    { "kind": "lockfile_present|lockfile_absent|transitive_available|vendored_dependencies|dependency_count", "path": "optional relative/path", "summary": "short fact", "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -1726,7 +1797,7 @@ Depth bounds:
 - If patterns repeat heavily, group by boundary family with representative
   evidence and explain the unexpanded area in coverage.not_covered.
 
-Write ONLY valid JSON matching entrypoints:
+Build one JSON object matching the entrypoints schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "entrypoints",
   "generated_at": "ISO timestamp",
@@ -1744,14 +1815,14 @@ Write ONLY valid JSON matching entrypoints:
       "command": "optional string",
       "schedule": "optional string",
       "confidence": "low|medium|high",
-      "evidence": ["relative/path:line"]
+      "evidence": ["relative/path"]
     }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -1786,23 +1857,23 @@ Depth bounds:
   identify an auth mechanism or session/token storage/check.
 - Group repeated auth patterns by family with representative evidence.
 
-Write ONLY valid JSON matching auth-access:
+Build one JSON object matching the auth-access schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "auth-access",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "auth": [
-    { "id": "stable short id", "kind": "auth_config|authorization_rule|identity_provider|middleware|other", "name": "string", "mechanism": "optional session|jwt|oauth|api-key|mtls|other", "location": "relative/path", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "auth_config|authorization_rule|identity_provider|middleware|other", "name": "string", "mechanism": "optional session|jwt|oauth|api-key|mtls|other", "location": "relative/path", "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "entrypoint_access": [
-    { "entrypoint_id": "id from inputs.entrypoints", "status": "protected|public|unknown", "mechanism": "optional string", "roles_scopes": ["optional role or scope names"], "session_storage": "optional observed storage/check location", "evidence": ["relative/path:line"] }
+    { "entrypoint_id": "id from inputs.entrypoints", "status": "protected|public|unknown", "mechanism": "optional string", "roles_scopes": ["optional role or scope names"], "session_storage": "optional observed storage/check location", "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -1836,23 +1907,23 @@ Depth bounds:
 - Group repeated config/env/secret references by family when exact values or all
   occurrences are not needed for the map.
 
-Write ONLY valid JSON matching config-secrets:
+Build one JSON object matching the config-secrets schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "config-secrets",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "config": [
-    { "id": "stable short id", "kind": "config_source|other", "name": "env/config key name", "location": "relative/path", "value_status": "unset|defaulted|required|example|unknown", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "config_source|other", "name": "env/config key name", "location": "relative/path", "value_status": "unset|defaulted|required|example|unknown", "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "secret_references": [
-    { "id": "stable short id", "kind": "secret_reference|credential_reference|other", "name": "secret name only", "location": "relative/path", "confidence": "low|medium|high", "value_redacted": true, "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "secret_reference|credential_reference|other", "name": "secret name only", "location": "relative/path", "confidence": "low|medium|high", "value_redacted": true, "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -1882,20 +1953,20 @@ Depth bounds:
 - Group repeated storage/model/schema declarations by family when exhaustive
   enumeration would make the map noisy.
 
-Write ONLY valid JSON matching storage-data-model:
+Build one JSON object matching the storage-data-model schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "storage-data-model",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "storage": [
-    { "id": "stable short id", "kind": "database|cache|message_queue|object_storage|file_storage|other", "name": "string", "type": "optional string", "location": "relative/path", "role": "string", "fields": ["optional observed field names"], "data_categories": ["optional observed categories by field name"], "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "database|cache|message_queue|object_storage|file_storage|other", "name": "string", "type": "optional string", "location": "relative/path", "role": "string", "fields": ["optional observed field names"], "data_categories": ["optional observed categories by field name"], "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -1925,20 +1996,20 @@ Depth bounds:
 - Do not include infra/deploy, storage model, crypto, logging, or data-flow facts.
 - Group repeated integrations by family with representative evidence.
 
-Write ONLY valid JSON matching external-integrations-egress:
+Build one JSON object matching the external-integrations-egress schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "external-integrations-egress",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "integrations": [
-    { "id": "stable short id", "kind": "external_api|service|message_broker|sdk|outbound_host|other", "name": "string", "from": "relative/path", "target": "host/service/sdk when observable", "location": "relative/path", "role": "purpose as declared", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "external_api|service|message_broker|sdk|outbound_host|other", "name": "string", "from": "relative/path", "target": "host/service/sdk when observable", "location": "relative/path", "role": "purpose as declared", "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -1966,23 +2037,23 @@ Depth bounds:
 - Do not include storage model, external integration, operation-sink, crypto, or logging facts.
 - Group repeated infra declarations by family with representative evidence.
 
-Write ONLY valid JSON matching infra-deploy:
+Build one JSON object matching the infra-deploy schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "infra-deploy",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "infra": [
-    { "id": "stable short id", "kind": "dockerfile|compose|kubernetes|iac|proxy|hosting|runtime|service|workflow|other", "name": "string", "location": "relative/path", "base_image": "optional string", "user": "optional string", "ports": ["optional observed ports"], "mounts": ["optional observed mounts"], "secrets": ["optional secret names only"], "entrypoint": "optional string", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "dockerfile|compose|kubernetes|iac|proxy|hosting|runtime|service|workflow|other", "name": "string", "location": "relative/path", "base_image": "optional string", "user": "optional string", "ports": ["optional observed ports"], "mounts": ["optional observed mounts"], "secrets": ["optional secret names only"], "entrypoint": "optional string", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "ci": [
-    { "id": "stable short id", "kind": "workflow|deploy|runtime|other", "name": "string", "location": "relative/path", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "workflow|deploy|runtime|other", "name": "string", "location": "relative/path", "role": "string", "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -2018,10 +2089,11 @@ Depth bounds:
 - Do not create one item per repeated helper call or log line.
 - Do not perform root-cause or full business-logic analysis.
 - Do not include crypto, randomness, password hashing, TLS, logging, or observability facts.
-- Cite operation lines or nearby variable construction lines that directly support classification.
+- Name the operation call (and any input/variable names that flow into it) in the
+  operation/input_variables fields; cite the file in evidence, without line numbers.
 - Group repeated operation calls by family with representative evidence.
 
-Write ONLY valid JSON matching operation-sinks:
+Build one JSON object matching the operation-sinks schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "operation-sinks",
   "generated_at": "ISO timestamp",
@@ -2038,14 +2110,14 @@ Write ONLY valid JSON matching operation-sinks:
       "parameters": ["optional observed parameter names only"],
       "destination": "optional egress destination",
       "confidence": "low|medium|high",
-      "evidence": ["relative/path:line"]
+      "evidence": ["relative/path"]
     }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -2072,20 +2144,20 @@ Depth bounds:
 - Do not include generic operation sinks, storage, integration, or logging facts.
 - Group repeated crypto/randomness calls by family with representative evidence.
 
-Write ONLY valid JSON matching crypto:
+Build one JSON object matching the crypto schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "crypto",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "crypto": [
-    { "id": "stable short id", "kind": "crypto_operation|password_hashing|randomness|tls_configuration|other", "name": "string", "operation": "observable operation only", "location": "relative/path", "algorithm": "optional observed algorithm", "mode": "optional observed mode", "parameters": ["optional observed parameter names only"], "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "crypto_operation|password_hashing|randomness|tls_configuration|other", "name": "string", "operation": "observable operation only", "location": "relative/path", "algorithm": "optional observed algorithm", "mode": "optional observed mode", "parameters": ["optional observed parameter names only"], "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -2113,20 +2185,20 @@ Depth bounds:
 - Do not include operation sinks, crypto, storage, or integration facts unless they are directly logging/telemetry destinations.
 - Group repeated logging calls by family with representative evidence.
 
-Write ONLY valid JSON matching logging-observability:
+Build one JSON object matching the logging-observability schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "logging-observability",
   "generated_at": "ISO timestamp",
   "generated_by": "pi",
   "repo": { "url": "string", "commit_sha": "string or null" },
   "logging": [
-    { "id": "stable short id", "kind": "logging|metrics|tracing|telemetry|other", "name": "string", "operation": "observable call or destination", "location": "relative/path", "destination": "optional configured destination", "logged_fields": ["optional observed field or variable names"], "confidence": "low|medium|high", "evidence": ["relative/path:line"] }
+    { "id": "stable short id", "kind": "logging|metrics|tracing|telemetry|other", "name": "string", "operation": "observable call or destination", "location": "relative/path", "destination": "optional configured destination", "logged_fields": ["optional observed field or variable names"], "confidence": "low|medium|high", "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -2149,12 +2221,12 @@ Rules:
 - Prefer key externally controlled inputs; do not enumerate every possible variable flow.
 - Do not perform exhaustive tracing, line-by-line handler review, callback resolution, framework internals analysis, or root-cause analysis.
 - Use "multi-step inferred" only for one or two named function hops with evidence.
-- Use "not traced beyond path:line" or "not established" when deeper analysis would be required.
+- Use "not traced further" or "not established" when deeper analysis would be required, and name where you stopped in breakpoint.
 - Every row with a connection across functions or files must set inference true.
 - Group similar flows and record not_covered/fact_gaps instead of producing a
   large speculative flow list.
 
-Write ONLY valid JSON matching data-flows:
+Build one JSON object matching the data-flows schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "data-flows",
   "generated_at": "ISO timestamp",
@@ -2168,20 +2240,20 @@ Write ONLY valid JSON matching data-flows:
     {
       "id": "stable short id",
       "source_entrypoint": "entrypoint id",
-      "source_evidence": ["relative/path:line"],
-      "intermediate_functions": [{ "name": "string", "evidence": ["relative/path:line"] }],
+      "source_evidence": ["relative/path"],
+      "intermediate_functions": [{ "name": "string", "evidence": ["relative/path"] }],
       "operation_sink": "operation sink id",
-      "operation_sink_evidence": ["relative/path:line"],
-      "trace_status": "direct observed|multi-step inferred|not traced beyond path:line|not established",
+      "operation_sink_evidence": ["relative/path"],
+      "trace_status": "direct observed|multi-step inferred|not traced further|not established",
       "breakpoint": null,
       "inference": true
     }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -2204,7 +2276,7 @@ Rules:
 - Base boundaries primarily on entrypoints, operation sinks, and data flows. Use storage/integration facts only to name the internal side when already present.
 - Use evidence already present in prior artifacts.
 
-Write ONLY valid JSON matching trust-boundaries:
+Build one JSON object matching the trust-boundaries schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "trust-boundaries",
   "generated_at": "ISO timestamp",
@@ -2233,14 +2305,14 @@ Write ONLY valid JSON matching trust-boundaries:
       "confidence": "low|medium|high",
       "source_artifact_ids": ["entrypoints", "operation-sinks"],
       "inference": true,
-      "evidence": ["relative/path:line"]
+      "evidence": ["relative/path"]
     }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "inference": true, "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "inference": true, "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -2260,7 +2332,7 @@ Rules:
 - Summary is a compact map-level inference and must set inference true.
 - Keep this as an index and orientation artifact, not a report and not an audit.
 
-Write ONLY valid JSON matching repository-map:
+Build one JSON object matching the repository-map schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
 {
   "kind": "repository-map",
   "generated_at": "ISO timestamp",
@@ -2286,16 +2358,16 @@ Write ONLY valid JSON matching repository-map:
     "text": "compact map-level orientation",
     "confidence": "low|medium|high",
     "inference": true,
-    "evidence": ["relative/path:line"]
+    "evidence": ["relative/path"]
   },
   "sections": [
-    { "artifact": "coverage-structure", "path": "${repoMapPaths.coverageStructure}", "item_count": 0, "summary": "string", "evidence": ["relative/path:line"] }
+    { "artifact": "coverage-structure", "path": "${repoMapPaths.coverageStructure}", "item_count": 0, "summary": "string", "evidence": ["relative/path"] }
   ],
   "coverage": {
-    "reviewed": [{ "area": "string", "evidence": ["relative/path:line"] }],
+    "reviewed": [{ "area": "string", "evidence": ["relative/path"] }],
     "not_covered": [{ "area": "string", "reason": "string" }]
   },
-  "fact_gaps": [{ "area": "string", "missing_fact": "string", "inference": true, "evidence": ["relative/path:line"] }]
+  "fact_gaps": [{ "area": "string", "missing_fact": "string", "inference": true, "evidence": ["relative/path"] }]
 }
 
 Stage input:
@@ -2306,13 +2378,27 @@ function factsOnlyPreamble(): string {
   return `You are a static AppSec repository cartographer in read-only, facts-only mode.
 
 Goal:
-Create compact, evidence-backed JSON map artifacts for later AppSec
+Create a compact, evidence-backed JSON map artifact for later AppSec
 attack-hypothesis building and manual review.
+The final report is read by a security reviewer who has NO access to the
+codebase. Everything they need to reason about an attack vector must be carried
+by NAMED facts: routes, handlers, functions, variables, env/config keys, table
+and field names, libraries, commands, images, and hosts.
 Stay at map level: identify observable repository structure, declared stack,
 entrypoints, config references, integrations, operation families, shallow data
 connections, and explicit inference boundaries.
 Prefer declarations, registrations, manifests, configs, schemas, and the
-minimum nearby code needed to classify a fact.
+minimum nearby code needed to classify and NAME a fact.
+
+Working method:
+- This is a navigation map, not an exhaustive inventory. Capture enough for a
+  reviewer to know WHERE and WHAT to look at, then move on.
+- Read each file at most once. You already hold its contents after reading it;
+  never re-read or re-grep a file you have already opened.
+- When a pattern repeats, record one representative example per family plus a
+  count of the rest. Do not enumerate every occurrence.
+- Spend effort on breadth across the section surface, not depth into any single
+  file.
 
 Forbidden:
 - Do not look for vulnerabilities.
@@ -2331,19 +2417,29 @@ Allowed collector tools:
 - ls
 - write, only for the requested VibeShield JSON output file
 
-Evidence rules:
-- Every claimed fact must have evidence as relative/path:line or relative/path:start-end.
-- Inventory-derived metrics such as repo_size and language_summary use
-  source "inventory" and do not need path-line evidence.
+Evidence rules (provenance, not navigation):
+- Evidence proves a fact is REAL and was actually observed. It is not a link the
+  reviewer will click — they have no code. So evidence is the repository file
+  where you saw the fact, and the concrete named symbol you saw there carries
+  the meaning.
+- Put the named symbol in the record's dedicated fields (name, handler, route,
+  method, variables, fields, operation, mechanism, algorithm, destination, and
+  similar). Put the file in "evidence" as "relative/path". One representative
+  path is enough.
+- Do NOT include line numbers. "relative/path" is correct; "relative/path:line"
+  is wrong. Never grep or search just to obtain a line number.
+- You must have actually opened a file before citing it. Do not cite a path you
+  only saw in the supplied index/inventory as evidence of a code-level fact.
+- Naming a symbol you did not actually read in that file is a hallucination. If
+  you cannot name the concrete symbol, do not assert the fact — record it in
+  fact_gaps or coverage.not_covered instead.
 - Evidence must point to repository files, not tool calls. Never output evidence
   like "ls: .", "grep: pattern", "read: file", or any other tool invocation.
-- For repository layout or coverage claims, cite representative files with
-  line evidence. If no file-line evidence exists, record the limitation in
-  coverage.not_covered or fact_gaps instead of inventing tool-call evidence.
-- If line evidence is unavailable, omit the claim or put the uncertainty in fact_gaps or coverage.not_covered.
+- Inventory-derived metrics such as repo_size and language_summary use
+  source "inventory" and do not need file evidence.
 - fact_gaps may use "evidence": [] when the missing fact is absence, unknown
   state, or an intentionally uncovered area. Do not invent evidence for gaps.
-- If a fact is inferred from multiple artifacts, set inference true where the schema allows it and include the supporting evidence.
+- If a fact is inferred from multiple artifacts, set inference true where the schema allows it and include the supporting named evidence.
 - Do not quote large code blocks.
 - Do not output full secret, token, private key, cookie, password, or connection string values; use names only or redacted previews.
 
