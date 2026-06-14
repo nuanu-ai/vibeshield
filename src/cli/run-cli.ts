@@ -416,6 +416,15 @@ function createRenderer(io: CliIo, interactive: boolean): Renderer {
           finalizeBaseline(eventMs);
           return true;
         }
+        if (event.stage === "final-report") {
+          milestoneLine({
+            glyph: glyph.done,
+            glyphCode: code.green,
+            label: "Final report",
+            meta: duration("final-report", eventMs),
+          });
+          return true;
+        }
         return false;
       case "step.started":
         if (event.stage === "deterministic-baseline") {
@@ -518,6 +527,9 @@ function createRenderer(io: CliIo, interactive: boolean): Renderer {
           sub: true,
         });
         return true;
+      case "final-report.started":
+        setActive("Rendering final report", "final-report", "idle", eventMs);
+        return true;
       default:
         return false;
     }
@@ -601,7 +613,12 @@ function createRenderer(io: CliIo, interactive: boolean): Renderer {
       );
       io.stdout.write(`    Run directory: ${result.runDir}\n`);
       if (result.runDir !== undefined) {
-        io.stdout.write(`    ${paint(code.dim, `Report: ${result.runDir}/report.md`)}\n`);
+        io.stdout.write(
+          `    ${paint(code.dim, `Final report PDF: ${result.runDir}/final-report.pdf`)}\n`,
+        );
+        io.stdout.write(
+          `    ${paint(code.dim, `Final report MD:  ${result.runDir}/final-report.md`)}\n`,
+        );
       }
     },
   };

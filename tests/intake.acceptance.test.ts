@@ -117,6 +117,7 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     expect(stderr.join("")).toBe("");
     expect(stdout.join("")).toContain("vibeshield resume /path/to/run-directory [--from <step>]");
     expect(stdout.join("")).toContain("attack-hypotheses");
+    expect(stdout.join("")).toContain("final-report");
     expect(stdout.join("")).toContain("stack-build-deps");
   });
 
@@ -189,7 +190,11 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
     expect(await pathExists(path.join(runDir, "run.json"))).toBe(true);
     expect(await pathExists(path.join(runDir, "events.jsonl"))).toBe(true);
     expect(await pathExists(path.join(runDir, "outputs"))).toBe(true);
-    expect(await pathExists(path.join(runDir, "report.md"))).toBe(true);
+    expect(await pathExists(path.join(runDir, "final-report.md"))).toBe(true);
+    expect(await pathExists(path.join(runDir, "final-report.pdf"))).toBe(true);
+    expect(await pathExists(path.join(runDir, "report.md"))).toBe(false);
+    expect(stdout.join("")).toContain("Final report PDF:");
+    expect(stdout.join("")).toContain("Final report MD:");
 
     const inventory = await readJson<{
       files: Array<{ path: string }>;
@@ -203,9 +208,20 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
       expect.arrayContaining(["README.md", "package.json", "src/app.ts", "vibeshield-marker.txt"]),
     );
 
-    const report = await readFile(path.join(runDir, "report.md"), "utf8");
-    expect(report).toContain("# VibeShield Repository Map");
-    expect(report).toContain("## 0. Coverage");
+    const report = await readFile(path.join(runDir, "final-report.md"), "utf8");
+    expect(report).toContain("# Security Report");
+    expect(report).toContain("Repository: https://github.com/vibeshield/intake-fixture");
+    expect(report).toContain("## Status:");
+    expect(report).toContain("## Summary");
+    expect(report).toContain("## Issues to fix");
+    expect(report).toContain("## Leads to check");
+    expect(report).not.toContain("syft");
+    expect(report).not.toContain("trivy");
+    expect(report).not.toContain("gitleaks");
+    expect(report).not.toContain("## 0. Coverage");
+    expect((await readFile(path.join(runDir, "final-report.pdf"))).subarray(0, 4).toString()).toBe(
+      "%PDF",
+    );
   });
 
   it("creates a fresh sandbox per run and keeps the checkout out of local artifacts", async () => {
@@ -285,8 +301,8 @@ describe("GitHub intake and sandbox inventory acceptance", () => {
       success: true,
     });
 
-    const report = await readFile(path.join(runDir, "report.md"), "utf8");
-    expect(report).toContain("Scan did not complete");
-    expect(report).toContain("Failed stage: inventory");
+    expect(await pathExists(path.join(runDir, "report.md"))).toBe(false);
+    expect(await pathExists(path.join(runDir, "final-report.md"))).toBe(false);
+    expect(await pathExists(path.join(runDir, "final-report.pdf"))).toBe(false);
   });
 });

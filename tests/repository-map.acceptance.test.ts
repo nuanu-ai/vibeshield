@@ -109,6 +109,8 @@ describe("AppSec repository map acceptance", () => {
     for (const artifact of expectedAcceptedArtifacts) {
       await expectPath(path.join(runDir, artifact));
     }
+    await expectPath(path.join(runDir, "final-report.md"));
+    await expectPath(path.join(runDir, "final-report.pdf"));
 
     const entrypoints = await readJson<EntrypointsArtifact>(
       path.join(runDir, "outputs", "repo-map", "entrypoints.json"),
@@ -248,7 +250,7 @@ describe("AppSec repository map acceptance", () => {
     );
   });
 
-  it("renders an auditor-readable 0-14 Markdown repository map with scanner observations", async () => {
+  it("renders owner-facing Markdown and PDF final reports with scanner findings and grouped hypotheses", async () => {
     const { provider } = await createProvider();
 
     const result = await runScan({
@@ -258,22 +260,37 @@ describe("AppSec repository map acceptance", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    const report = await readFile(path.join(expectRunDir(result), "report.md"), "utf8");
-    for (let section = 0; section <= 14; section += 1) {
-      expect(report).toMatch(new RegExp(`(^|\\n)##\\s+${section}\\.\\s+`));
-    }
-    expect(report).toContain("| Tool | Severity | Kind | Observation | Evidence |");
-    expect(report).toContain("## Attack Hypotheses");
+    const runDir = expectRunDir(result);
+    const report = await readFile(path.join(runDir, "final-report.md"), "utf8");
+    expect(report).toContain("# Security Report");
+    expect(report).toContain("Repository: https://github.com/vibeshield/repository-map-fixture");
+    expect(report).toContain("## Status:");
+    expect(report).toContain("## Summary");
+    expect(report).toContain(
+      "One medium-priority hypothesis links external HTTP input to a database write.",
+    );
+    expect(report).toContain("## Issues to fix");
+    expect(report).toContain("## Leads to check");
+    expect(report).toContain("Unconfirmed lead");
+    expect(report).toContain("Copy for your AI agent:");
+    expect(report).toContain("### Medium");
     expect(report).toContain("HTTP request body reaches database write");
     expect(report).toContain("CVE-FAKE-0001 in fixture-dependency@1.0.0 fixed in 1.0.1");
     expect(report).toContain("CKV_FAKE_1: Fixture IaC check failed");
-    expect(report).toContain("| Type | Name | Handler | External Input | Evidence |");
-    expect(report).toContain("POST /api/spam");
-    expect(report).toContain("requireSession middleware");
     expect(report).toContain("entry-http-spam");
     expect(report).toContain("sink-db-insert");
-    expect(report).toContain("External HTTP to app/database");
     expect(report).toContain("src/server.ts:5");
+    expect(report).not.toContain("syft");
+    expect(report).not.toContain("trivy");
+    expect(report).not.toContain("gitleaks");
+    expect(report).not.toContain("actionlint");
+    expect(report).not.toContain("zizmor");
+    expect(report).not.toContain("checkov");
+    expect(report).not.toContain("## 0. Coverage");
+    expect(await pathExists(path.join(runDir, "report.md"))).toBe(false);
+    expect((await readFile(path.join(runDir, "final-report.pdf"))).subarray(0, 4).toString()).toBe(
+      "%PDF",
+    );
   });
 
   it("keeps untrusted checkout work inside a fresh sandbox and preserves failure diagnostics", async () => {
@@ -392,7 +409,8 @@ describe("AppSec repository map acceptance", () => {
       "Could not complete dependency inventory collection",
     );
     await expectPath(path.join(runDir, "outputs", "repository-map.json"));
-    await expectPath(path.join(runDir, "report.md"));
+    await expectPath(path.join(runDir, "final-report.md"));
+    await expectPath(path.join(runDir, "final-report.pdf"));
   });
 
   it("continues to repository mapping when scanner tool preparation fails", async () => {
@@ -418,7 +436,8 @@ describe("AppSec repository map acceptance", () => {
     expect(baseline.tools.find((tool) => tool.tool === "actionlint")?.status).toBe("failed");
     await expectPath(path.join(runDir, "outputs", "baseline", "tool-availability.json"));
     await expectPath(path.join(runDir, "outputs", "repository-map.json"));
-    await expectPath(path.join(runDir, "report.md"));
+    await expectPath(path.join(runDir, "final-report.md"));
+    await expectPath(path.join(runDir, "final-report.pdf"));
   });
 
   it("builds curated Pi context from validated artifacts and fails before Pi on invalid input", async () => {
@@ -861,6 +880,53 @@ describe("AppSec repository map acceptance", () => {
       "hyp-rerun-from-cli",
     );
     await expectPath(path.join(runDir, "outputs", "repository-map.json"));
+    expect(await readFile(path.join(runDir, "final-report.md"), "utf8")).toContain(
+      "Rerun generated attack hypothesis",
+    );
+    expect((await readFile(path.join(runDir, "final-report.pdf"))).subarray(0, 4).toString()).toBe(
+      "%PDF",
+    );
+  });
+
+  it("rerenders only final reports when resume starts from final-report", async () => {
+    const initial = await createProvider();
+    const runsRoot = await createTempRoot("vibeshield-runs-");
+    const scanned = await runScan({
+      repoUrlInput: fixtureUrl,
+      runsRoot,
+      sandboxProvider: initial.provider,
+    });
+
+    expect(scanned.exitCode).toBe(0);
+    const runDir = expectRunDir(scanned);
+    await rm(path.join(runDir, "final-report.md"), { force: true });
+    await rm(path.join(runDir, "final-report.pdf"), { force: true });
+
+    const sandboxRoot = await createTempRoot("vibeshield-fake-daytona-report-rerun-");
+    const resumeProvider = new FakeDaytonaSandboxProvider({
+      fixtureRepos: new Map([[fixtureUrl, initial.fixtureRepo]]),
+      piOutputs: fixtureRepoMapOutputs(),
+      sandboxRoot,
+    });
+    const resumed = await runResume({
+      fromStep: "final-report",
+      runDir,
+      sandboxProvider: resumeProvider,
+    });
+
+    expect(resumed.exitCode).toBe(0);
+    const runtimeCommands =
+      resumeProvider.sessions
+        .at(-1)
+        ?.commands.filter((command) => command.command.startsWith("vibeshield-runtime-job"))
+        .map((command) => command.command) ?? [];
+    expect(runtimeCommands).toHaveLength(0);
+    expect(await readFile(path.join(runDir, "final-report.md"), "utf8")).toContain(
+      "# Security Report",
+    );
+    expect((await readFile(path.join(runDir, "final-report.pdf"))).subarray(0, 4).toString()).toBe(
+      "%PDF",
+    );
   });
 
   it("records a degraded map section and still writes the final report when Pi output is unusable", async () => {
@@ -889,9 +955,9 @@ describe("AppSec repository map acceptance", () => {
         raw_artifact: "outputs/pi/entrypoints/entrypoints.raw.redacted.txt",
       },
     });
-    const report = await readFile(path.join(runDir, "report.md"), "utf8");
-    expect(report).toContain("## 3. Attack Surface And Entry Points");
-    expect(report).toContain("Collection degraded");
+    const report = await readFile(path.join(runDir, "final-report.md"), "utf8");
+    expect(report).toContain("# Security Report");
+    expect(report).toContain("## Leads to check");
     await expectPath(path.join(runDir, "outputs", "repository-map.json"));
     await expectPath(path.join(runDir, "outputs", "attack-hypotheses.json"));
   });

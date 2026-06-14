@@ -82,8 +82,13 @@ export const resumeStepDefinitions = [
   },
   {
     aliases: ["hypotheses"],
-    description: "Rerun only attack-hypothesis generation from the accepted repository map.",
+    description: "Rerun attack-hypothesis generation and the final report.",
     step: "attack-hypotheses",
+  },
+  {
+    aliases: ["report"],
+    description: "Rerender only the owner-facing final Markdown and PDF report.",
+    step: "final-report",
   },
 ] as const;
 

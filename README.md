@@ -67,7 +67,8 @@ flowchart TD
     end
 
     H --> PULL[Pull expected artifacts to host]
-    PULL --> R[("📂 Inspectable run directory<br/>report.md · repository-map.json<br/>attack-hypotheses.json · events.jsonl")]
+    PULL --> RPT["Render final owner report<br/>final-report.md · final-report.pdf"]
+    RPT --> R[("📂 Inspectable run directory<br/>repository-map.json · attack-hypotheses.json<br/>final-report.md · final-report.pdf · events.jsonl")]
 ```
 
 1. **Intake** — validate the URL, clone *inside the sandbox*, and build an inventory of languages, manifests, and structure.
@@ -75,7 +76,7 @@ flowchart TD
 3. **Context pack** — distill the repo into compact, neutral facts for the agents — no raw scanner noise, no debug spam.
 4. **Repository map** — agentic "Pi" collectors map the codebase section by section (entrypoints, auth, config & secrets, storage, integrations, operation sinks, data flows, trust boundaries, …). Each fact is **named** and backed by the file it was observed in.
 5. **Attack hypotheses** — a strong model (`claude-opus-4.8`) reads the accepted map — *not* the raw code — and proposes a prioritized list of testable attack hypotheses.
-6. **Report & cleanup** — pull the expected artifacts back to the host, write the report, and destroy the sandbox.
+6. **Final report & cleanup** — pull the expected artifacts back to the host, render a short owner-facing **Security Report** (Markdown + styled PDF), and destroy the sandbox.
 
 See [docs/architecture.md](docs/architecture.md) for the full flow and [docs/repository-map-expectations.md](docs/repository-map-expectations.md) for what each map section must contain.
 
@@ -103,10 +104,14 @@ A live scan **requires** both keys and will fail clearly if they're missing — 
 > pnpm resume runs/<run-directory>
 > ```
 >
-> While debugging a later step, rerun from a named artifact boundary:
+> Resume reuses every accepted artifact and only reruns what's missing. To force a rerun from a
+> named step — any single map section (e.g. `entrypoints`, `auth-access`, `data-flows`) plus
+> `inventory`, `deterministic-baseline`, `context`, `repository-map`, `attack-hypotheses`, or
+> `final-report` — pass `--from`:
 > ```bash
+> pnpm resume runs/<run-directory> --from auth-access
 > pnpm resume runs/<run-directory> --from attack-hypotheses
-> pnpm cli -- --help
+> pnpm cli -- --help            # lists every resume step and its aliases
 > ```
 
 ## 📂 What a run produces
@@ -114,7 +119,8 @@ A live scan **requires** both keys and will fail clearly if they're missing — 
 Every run writes a self-contained, inspectable directory. The highlights:
 
 ```text
-report.md                       # human-readable summary
+final-report.md                 # owner-facing report source
+final-report.pdf                # owner-facing PDF report
 run.json                        # run status, repo, commit SHA
 events.jsonl                    # sanitized lifecycle event stream
 outputs/
@@ -132,6 +138,11 @@ outputs/
    ├─ data-flows.json
    └─ … (coverage, stack, crypto, infra, integrations, logging, trust-boundaries)
 ```
+
+**The report itself** is short and owner-facing — the same content in `final-report.md` and a styled `final-report.pdf`. It opens with a plain-language **summary** of what the repo is and where risk concentrates, a quick metric strip (finding counts, top severity), then:
+
+- 🧮 **Deterministic scanner findings**, grouped by severity (critical → low), each with its evidence and confidence.
+- 🎯 **Attack hypotheses**, grouped by priority (`P0` critical → `P3` low). Every hypothesis spells out why it matters, where to look, the attack vector, how to check it, and what to fix if confirmed — each traceable back to the map evidence it came from.
 
 <details>
 <summary><b>Why a sandbox? (the threat model)</b></summary>

@@ -18,12 +18,12 @@ export type RunStage =
   | "deterministic-baseline"
   | "entrypoints-validation"
   | "external-integrations-egress-validation"
+  | "final-report"
   | "infra-deploy-validation"
   | "inventory"
   | "logging-observability-validation"
   | "operation-sinks-validation"
   | "pi"
-  | "report"
   | "repository-map-validation"
   | "resume"
   | "stack-build-deps-validation"
@@ -66,10 +66,11 @@ export interface ScanRunState {
     };
     events: string;
     diagnostics?: string[];
+    final_report_markdown?: string;
+    final_report_pdf?: string;
     inventory?: string;
     outputs_dir: string;
     pi_context_pack?: string;
-    report?: string;
     repository_map?: string;
   };
   commit_sha?: string;

@@ -69,7 +69,7 @@ vibeshield scan <github-url>
        -> Pi security-research synthesis: attack-hypotheses
             input: repository map, no repository inspection tools
 
-  -> write report.md
+  -> render final-report.md and final-report.pdf
   -> write run.json/events.jsonl
   -> delete Daytona sandbox
 ```
@@ -94,7 +94,7 @@ Current baseline tools:
 for the sandboxed scan pipeline.
 
 Concrete deterministic findings are written to `baseline-summary.json` and
-shown directly in `report.md`; raw scanner output remains available under
+shown directly in `final-report.md` and `final-report.pdf`; raw scanner output remains available under
 `outputs/baseline/<tool>/`.
 
 ## Pi Context Pack
@@ -228,7 +228,7 @@ collector run -> host-side JSON parse/repair -> schema validation -> accepted
 artifact. If a collector returns unusable output for one section, VibeShield
 writes a schema-valid degraded artifact for that section with a `fact_gaps`
 entry and keeps building the final report. This is current MVP error tolerance
-so one bad agent section does not prevent the auditor-facing `report.md` from
+so one bad agent section does not prevent the owner-facing final report from
 being produced.
 
 The collector is the exploration role. It runs with read/search/list tools and
@@ -292,7 +292,8 @@ Successful runs write inspectable artifacts under the local run directory:
 - `outputs/repository-map.json`
 - `outputs/attack-hypotheses.json`
 - `outputs/pi/<stage>/...` raw/stderr/progress/metadata artifacts
-- `report.md`
+- `final-report.md`
+- `final-report.pdf`
 - `run.json`
 - `events.jsonl`
 
@@ -333,4 +334,4 @@ The resume boundary is artifact-based:
   `coverage-structure` through `repository-map`, then `attack-hypotheses`;
 - when `--from <step>` is provided, ignore accepted artifacts from that step
   onward and overwrite their stable output paths;
-- rewrite `report.md` from the final accepted artifacts.
+- rerender `final-report.md` and `final-report.pdf` from the final accepted artifacts.

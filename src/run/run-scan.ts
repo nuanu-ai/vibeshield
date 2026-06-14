@@ -10,7 +10,7 @@ import { ArtifactStore } from "../artifacts/store.js";
 import { runDeterministicBaseline } from "../baseline/deterministic-baseline.js";
 import { buildPiContextPack } from "../context/step-context-builder.js";
 import { runPiRepositoryMapping } from "../pi/repository-map.js";
-import { writeFailureReport, writeSuccessReport } from "../report/report.js";
+import { writeFinalReport } from "../report/report.js";
 import { createDefaultSandboxProvider } from "../sandbox/default-provider.js";
 import type { SandboxProvider, SandboxSession } from "../sandbox/types.js";
 import { errorMessage, ScanStageError, toScanStageError } from "./errors.js";
@@ -77,6 +77,8 @@ type RepositoryMapExistingKey =
   | "trustBoundaries";
 
 const attackHypothesesArtifactPath = "outputs/attack-hypotheses.json";
+const finalReportMarkdownArtifactPath = "final-report.md";
+const finalReportPdfArtifactPath = "final-report.pdf";
 
 interface RepositoryMapArtifactDefinition {
   existingKey: RepositoryMapExistingKey;
@@ -234,7 +236,8 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   const outputsDir = path.join(runDir, "outputs");
   const runJsonPath = path.join(runDir, "run.json");
   const eventsPath = path.join(runDir, "events.jsonl");
-  const reportPath = path.join(runDir, "report.md");
+  const finalReportMarkdownPath = path.join(runDir, finalReportMarkdownArtifactPath);
+  const finalReportPdfPath = path.join(runDir, finalReportPdfArtifactPath);
   const inventoryPath = path.join(outputsDir, "inventory.json");
   const store = new ArtifactStore(runDir, outputsDir);
 
@@ -562,15 +565,27 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     }
   }
 
-  run.finished_at = new Date().toISOString();
-  run.artifacts.report = "report.md";
-
   if (run.status === "success") {
-    run.current_stage = "report";
+    run.finished_at = new Date().toISOString();
+    run.current_stage = "final-report";
     await persistRun();
-    await writeSuccessReport({
-      reportPath,
+    await appendEvent({
+      message: "Rendering owner-facing final report.",
+      stage: "final-report",
+      type: "final-report.started",
+    });
+    const finalReport = await writeFinalReport({
+      markdownPath: finalReportMarkdownPath,
+      pdfPath: finalReportPdfPath,
       run,
+    });
+    run.artifacts.final_report_markdown = finalReport.markdownPath;
+    run.artifacts.final_report_pdf = finalReport.pdfPath;
+    await appendEvent({
+      artifact: finalReport.pdfPath,
+      message: "Final report rendered.",
+      stage: "final-report",
+      type: "artifact.written",
     });
     run.current_stage = "completed";
     await persistRun();
@@ -581,10 +596,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     };
   }
 
-  await writeFailureReport({
-    reportPath,
-    run,
-  });
+  run.finished_at = new Date().toISOString();
   await persistRun();
 
   return {
@@ -600,7 +612,8 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
   const outputsDir = path.join(runDir, "outputs");
   const runJsonPath = path.join(runDir, "run.json");
   const eventsPath = path.join(runDir, "events.jsonl");
-  const reportPath = path.join(runDir, "report.md");
+  const finalReportMarkdownPath = path.join(runDir, finalReportMarkdownArtifactPath);
+  const finalReportPdfPath = path.join(runDir, finalReportPdfArtifactPath);
   const inventoryPath = path.join(outputsDir, "inventory.json");
   const sandboxProvider = options.sandboxProvider ?? createDefaultSandboxProvider();
   const store = new ArtifactStore(runDir, outputsDir);
@@ -1007,13 +1020,28 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
     }
   }
 
-  run.finished_at = new Date().toISOString();
-  run.artifacts.report = "report.md";
-
   if (run.status === "success") {
-    run.current_stage = "report";
+    run.finished_at = new Date().toISOString();
+    run.current_stage = "final-report";
     await persistRun();
-    await writeSuccessReport({ reportPath, run });
+    await appendEvent({
+      message: "Rendering owner-facing final report.",
+      stage: "final-report",
+      type: "final-report.started",
+    });
+    const finalReport = await writeFinalReport({
+      markdownPath: finalReportMarkdownPath,
+      pdfPath: finalReportPdfPath,
+      run,
+    });
+    run.artifacts.final_report_markdown = finalReport.markdownPath;
+    run.artifacts.final_report_pdf = finalReport.pdfPath;
+    await appendEvent({
+      artifact: finalReport.pdfPath,
+      message: "Final report rendered.",
+      stage: "final-report",
+      type: "artifact.written",
+    });
     run.current_stage = "completed";
     await persistRun();
     return {
@@ -1023,7 +1051,7 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
     };
   }
 
-  await writeFailureReport({ reportPath, run });
+  run.finished_at = new Date().toISOString();
   await persistRun();
 
   return {
@@ -1082,6 +1110,10 @@ function normalizeRunForResume(run: ScanRunState): void {
 }
 
 function clearRunArtifactsFromStep(run: ScanRunState, fromStep: RunResumeFromStep): void {
+  clearFinalReportRunArtifacts(run);
+  if (fromStep === "final-report") {
+    return;
+  }
   if (fromStep === "inventory") {
     delete run.artifacts.inventory;
   }
@@ -1102,6 +1134,12 @@ function clearAllRepositoryMapRunArtifacts(run: ScanRunState): void {
   delete run.artifacts.repo_map;
   delete run.artifacts.repository_map;
   delete run.artifacts.attack_hypotheses;
+  clearFinalReportRunArtifacts(run);
+}
+
+function clearFinalReportRunArtifacts(run: ScanRunState): void {
+  delete run.artifacts.final_report_markdown;
+  delete run.artifacts.final_report_pdf;
 }
 
 function clearRepositoryMapRunArtifactsFromStep(
@@ -1114,6 +1152,7 @@ function clearRepositoryMapRunArtifactsFromStep(
   }
   if (artifactKey === "attackHypotheses") {
     delete run.artifacts.attack_hypotheses;
+    clearFinalReportRunArtifacts(run);
     return;
   }
 
@@ -1135,6 +1174,7 @@ function clearRepositoryMapRunArtifactsFromStep(
     delete run.artifacts.repo_map;
   }
   delete run.artifacts.attack_hypotheses;
+  clearFinalReportRunArtifacts(run);
 }
 
 function dropExistingRepositoryMapArtifactsFromStep(
@@ -1142,6 +1182,9 @@ function dropExistingRepositoryMapArtifactsFromStep(
   fromStep: RunResumeFromStep | undefined,
 ): ExistingRepositoryMapArtifacts {
   if (fromStep === undefined) {
+    return input;
+  }
+  if (fromStep === "final-report") {
     return input;
   }
   if (fromStep === "inventory" || fromStep === "deterministic-baseline" || fromStep === "context") {
@@ -1210,6 +1253,7 @@ function repositoryMapArtifactKeyForResumeStep(
       return "trustBoundaries";
     case "context":
     case "deterministic-baseline":
+    case "final-report":
     case "inventory":
       return undefined;
   }

@@ -1,122 +1,133 @@
+import { createWriteStream } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { BaselineSummaryArtifact } from "../artifacts/contracts.js";
+import PDFDocument from "pdfkit";
+import type {
+  AttackHypothesesArtifact,
+  AttackHypothesisPriority,
+  AttackHypothesisRecord,
+  BaselineObservation,
+  BaselineSummaryArtifact,
+  RepositoryMapArtifact,
+} from "../artifacts/contracts.js";
 import type { ScanRunState } from "../run/types.js";
 
-type JsonObject = Record<string, unknown>;
+const severityOrder = ["critical", "high", "medium", "low", "info", "unknown"] as const;
+const priorityOrder: AttackHypothesisPriority[] = ["P0", "P1", "P2", "P3"];
 
-type RepoMapArtifactKey = keyof NonNullable<ScanRunState["artifacts"]["repo_map"]>;
+type Severity = (typeof severityOrder)[number];
+type VerdictLevel = "critical" | "review" | "clean";
 
-interface RepositoryMapReportSection {
-  artifactKey?: RepoMapArtifactKey;
-  index: number;
+interface FinalReportPaths {
+  markdownPath: string;
+  pdfPath: string;
+}
+
+interface ReportFact {
+  label: string;
+  value: string;
+}
+
+interface ReportCard {
+  agentPrompt: string;
+  category: string;
+  color: string;
+  confidenceNote: string;
+  confirmed: boolean;
+  facts: ReportFact[];
+  title: string;
+  why: string;
+}
+
+interface ReportCardGroup {
+  cards: ReportCard[];
+  color: string;
+  label: string;
+}
+
+interface ReportVerdict {
+  color: string;
+  level: VerdictLevel;
+  subline: string;
   title: string;
 }
 
-const repositoryMapReportSections: RepositoryMapReportSection[] = [
-  { artifactKey: "coverage_structure", index: 0, title: "Coverage" },
-  { artifactKey: "stack_build_deps", index: 1, title: "Stack And Build" },
-  { artifactKey: "coverage_structure", index: 2, title: "Repository Structure" },
-  { artifactKey: "entrypoints", index: 3, title: "Attack Surface And Entry Points" },
-  { artifactKey: "auth_access", index: 4, title: "Authentication And Authorization" },
-  { artifactKey: "data_flows", index: 5, title: "Data Flows To Operation Sinks" },
-  { artifactKey: "operation_sinks", index: 6, title: "Operation Sink Inventory" },
-  { artifactKey: "config_secrets", index: 7, title: "Secrets And Configuration" },
-  { artifactKey: "crypto", index: 8, title: "Cryptography" },
-  { artifactKey: "storage_data_model", index: 9, title: "Storage And Data Model" },
-  {
-    artifactKey: "external_integrations_egress",
-    index: 10,
-    title: "External Integrations And Network Egress",
-  },
-  { artifactKey: "stack_build_deps", index: 11, title: "Dependencies" },
-  {
-    artifactKey: "infra_deploy",
-    index: 12,
-    title: "Infrastructure And Deployment",
-  },
-  { artifactKey: "logging_observability", index: 13, title: "Logging And Observability" },
-  { artifactKey: "trust_boundaries", index: 14, title: "Trust Boundaries" },
-];
-
-export async function writeSuccessReport(input: {
-  reportPath: string;
-  run: ScanRunState;
-}): Promise<void> {
-  const runDir = path.dirname(input.reportPath);
-  const baseline = await readArtifact<BaselineSummaryArtifact>(
-    runDir,
-    input.run.artifacts.baseline_summary,
-  );
-  const attackHypotheses = await readArtifact<JsonObject>(
-    runDir,
-    input.run.artifacts.attack_hypotheses,
-  );
-  const repoMapSections = await readRepoMapSectionArtifacts(runDir, input.run);
-  const baselineObservations = formatBaselineObservations(baseline);
-  const lines = [
-    "# VibeShield Repository Map",
-    "",
-    `Source: ${input.run.source.url}`,
-    `Commit: ${input.run.commit_sha ?? "unknown"}`,
-    `Run ID: ${input.run.run_id}`,
-    "",
-    ...formatAttackHypothesesSection(attackHypotheses),
-    ...(baselineObservations.length > 0
-      ? ["## Deterministic Scanner Observations", ...baselineObservations, ""]
-      : []),
-    ...formatRepositoryMap(repoMapSections),
-  ];
-
-  await writeFile(input.reportPath, `${normalizeMarkdownSpacing(lines).join("\n")}\n`, "utf8");
+interface FinalReportModel {
+  confirmedGroups: ReportCardGroup[];
+  counts: {
+    confirmed: number;
+    leads: number;
+    needsNow: number;
+  };
+  generatedAt: string;
+  leadGroups: ReportCardGroup[];
+  limitations: string[];
+  repo: {
+    commitShaFull: string;
+    commitShaShort: string;
+    name: string;
+    url: string;
+  };
+  runId: string;
+  startHere: string[];
+  summary: string;
+  verdict: ReportVerdict;
 }
 
-export async function writeFailureReport(input: {
-  reportPath: string;
-  run: ScanRunState;
-}): Promise<void> {
-  const cleanup = input.run.sandbox?.cleanup;
-  const lines = [
-    "# VibeShield failure report",
-    "",
-    "Scan did not complete.",
-    "Completed artifacts remain inspectable below.",
-    `Run ID: ${input.run.run_id}`,
-    `Source: ${input.run.source.url}`,
-    `Failed stage: ${input.run.error?.stage ?? input.run.current_stage}`,
-    `Error: ${input.run.error?.user_message ?? "Unknown error"}`,
-    "",
-    "Diagnostics:",
-    ...(input.run.error?.diagnostics?.length
-      ? input.run.error.diagnostics.map((diagnostic) => `- ${diagnostic}`)
-      : ["- No additional diagnostics were recorded."]),
-    "",
-    "Partial artifacts:",
-    ...formatArtifactLinks(input.run),
-    "",
-    "Cleanup:",
-    `- sandbox cleanup attempted: ${cleanup?.attempted === true ? "yes" : "no"}.`,
-    `- sandbox deleted: ${cleanup?.deleted === true ? "yes" : "no"}.`,
-    "",
-    "Open run.json and events.jsonl in this run directory for diagnostics.",
-    "",
-  ];
-
-  await writeFile(input.reportPath, `${lines.join("\n")}\n`, "utf8");
+interface DeterministicFinding {
+  confidence: string;
+  evidence: string[];
+  kind: string;
+  message: string;
+  occurrences: number;
+  severity: Severity;
 }
 
-async function readRepoMapSectionArtifacts(
+export async function writeFinalReport(input: {
+  markdownPath: string;
+  pdfPath: string;
+  run: ScanRunState;
+}): Promise<FinalReportPaths> {
+  const runDir = path.dirname(input.markdownPath);
+  const [baseline, repositoryMap, attackHypotheses] = await Promise.all([
+    readArtifact<BaselineSummaryArtifact>(runDir, input.run.artifacts.baseline_summary),
+    readRequiredArtifact<RepositoryMapArtifact>(
+      runDir,
+      input.run.artifacts.repository_map,
+      "repository-map",
+    ),
+    readRequiredArtifact<AttackHypothesesArtifact>(
+      runDir,
+      input.run.artifacts.attack_hypotheses,
+      "attack-hypotheses",
+    ),
+  ]);
+  const model = buildFinalReportModel({
+    attackHypotheses,
+    baseline,
+    repositoryMap,
+    run: input.run,
+  });
+
+  await writeFile(input.markdownPath, `${renderMarkdown(model)}\n`, "utf8");
+  await writePdf(input.pdfPath, model);
+
+  return {
+    markdownPath: path.basename(input.markdownPath),
+    pdfPath: path.basename(input.pdfPath),
+  };
+}
+
+async function readRequiredArtifact<T>(
   runDir: string,
-  run: ScanRunState,
-): Promise<Partial<Record<RepoMapArtifactKey, JsonObject>>> {
-  const sections: Partial<Record<RepoMapArtifactKey, JsonObject>> = {};
-  for (const key of repositoryMapArtifactKeys(run)) {
-    const section = await readArtifact<JsonObject>(runDir, run.artifacts.repo_map?.[key]);
-    if (section !== null) {
-      sections[key] = section;
-    }
+  relativePath: string | undefined,
+  label: string,
+): Promise<T> {
+  const artifact = await readArtifact<T>(runDir, relativePath);
+  if (artifact === null) {
+    throw new Error(`Cannot render final report without ${label} artifact.`);
   }
-  return sections;
+  return artifact;
 }
 
 async function readArtifact<T>(
@@ -134,901 +145,853 @@ async function readArtifact<T>(
   }
 }
 
-function repositoryMapArtifactKeys(run: ScanRunState): RepoMapArtifactKey[] {
-  return Object.keys(run.artifacts.repo_map ?? {}) as RepoMapArtifactKey[];
+function buildFinalReportModel(input: {
+  attackHypotheses: AttackHypothesesArtifact;
+  baseline: BaselineSummaryArtifact | null;
+  repositoryMap: RepositoryMapArtifact;
+  run: ScanRunState;
+}): FinalReportModel {
+  const deterministicFindings = collectDeterministicFindings(input.baseline);
+  const hypotheses = input.attackHypotheses.hypotheses;
+  const repoName = repositoryName(input.run.source.url);
+  const commitShaFull = input.run.commit_sha ?? "unknown";
+  const commitShaShort = input.run.commit_sha === undefined ? "unknown" : shortSha(commitShaFull);
+
+  const needsNow = deterministicFindings.filter(
+    (finding) => finding.severity === "critical" || finding.severity === "high",
+  ).length;
+  const counts = {
+    confirmed: deterministicFindings.length,
+    leads: hypotheses.length,
+    needsNow,
+  };
+
+  const executiveText = input.attackHypotheses.executive_summary.text?.trim() ?? "";
+
+  return {
+    confirmedGroups: severityOrder
+      .map((severity) => ({
+        cards: deterministicFindings
+          .filter((finding) => finding.severity === severity)
+          .map((finding) => deterministicCard(finding, repoName)),
+        color: severityColor(severity),
+        label: severityLabel(severity),
+      }))
+      .filter((group) => group.cards.length > 0),
+    counts,
+    generatedAt: new Date().toISOString(),
+    leadGroups: priorityOrder
+      .map((priority) => ({
+        cards: hypotheses
+          .filter((hypothesis) => hypothesis.priority === priority)
+          .sort(compareHypotheses)
+          .map((hypothesis) => hypothesisCard(hypothesis, repoName)),
+        color: priorityColor(priority),
+        label: priorityLabel(priority),
+      }))
+      .filter((group) => group.cards.length > 0),
+    limitations: cleanList(input.attackHypotheses.executive_summary.limitations ?? []),
+    repo: {
+      commitShaFull,
+      commitShaShort,
+      name: repoName,
+      url: input.run.source.url,
+    },
+    runId: input.run.run_id,
+    startHere: cleanList(input.attackHypotheses.validation_roadmap?.first_pass ?? []).slice(0, 5),
+    summary: executiveText === "" ? fallbackSummary(repoName, commitShaShort) : executiveText,
+    verdict: buildVerdict({ counts, hypotheses }),
+  };
 }
 
-function formatBaselineObservations(baseline: BaselineSummaryArtifact | null): string[] {
-  const rows =
-    baseline?.tools.flatMap((tool) =>
-      tool.observations.map((observation) => [
-        tool.tool,
-        observation.severity,
-        observation.kind,
-        observation.message,
-        formatEvidence(observation.evidence),
-      ]),
-    ) ?? [];
+function buildVerdict(input: {
+  counts: { confirmed: number; leads: number; needsNow: number };
+  hypotheses: AttackHypothesisRecord[];
+}): ReportVerdict {
+  const { confirmed, leads, needsNow } = input.counts;
+  const p0 = input.hypotheses.filter((hypothesis) => hypothesis.priority === "P0").length;
+  const p1 = input.hypotheses.filter((hypothesis) => hypothesis.priority === "P1").length;
 
-  return rows.length > 0
-    ? markdownTable(["Tool", "Severity", "Kind", "Observation", "Evidence"], rows)
-    : [];
-}
-
-function formatRepositoryMap(
-  sectionArtifacts: Partial<Record<RepoMapArtifactKey, JsonObject>>,
-): string[] {
-  return repositoryMapReportSections.flatMap((section) => [
-    `## ${section.index}. ${section.title}`,
-    ...formatRepositoryMapSection(sectionArtifacts, section),
-    "",
-  ]);
-}
-
-function formatAttackHypothesesSection(artifact: JsonObject | null): string[] {
-  if (artifact === null) {
-    return ["## Attack Hypotheses", "- Not available.", ""];
+  if (needsNow > 0 || p0 > 0) {
+    const subline =
+      needsNow > 0
+        ? `${pluralize(needsNow, "confirmed issue")} ${needsNow === 1 ? "needs" : "need"} fixing right now${
+            leads > 0 ? `, and ${pluralize(leads, "lead")} worth checking` : ""
+          }.`
+        : `Nothing is confirmed yet, but ${pluralize(leads, "unconfirmed lead")} ${
+            leads === 1 ? "looks" : "look"
+          } serious — check ${leads === 1 ? "it" : "them"} before you rely on this code.`;
+    return { color: colors.critical, level: "critical", subline, title: "Not safe yet" };
   }
 
-  const summary = objectField(artifact, "summary");
-  const executiveSummary = objectField(artifact, "executive_summary");
-  const summaryText = field(summary ?? {}, "text");
-  const executiveText = field(executiveSummary ?? {}, "text");
-  return [
-    "## Attack Hypotheses",
-    ...compactLines([
-      ...formatDegradedNotice(artifact),
-      executiveText === "" ? undefined : `- ${executiveText}`,
-      summaryText === "" ? undefined : `- ${summaryText}`,
-      listField(executiveSummary ?? {}, "top_risk_areas") === ""
-        ? undefined
-        : `- Top risk areas: ${listField(executiveSummary ?? {}, "top_risk_areas")}`,
-      listField(executiveSummary ?? {}, "limitations") === ""
-        ? undefined
-        : `- Limitations: ${listField(executiveSummary ?? {}, "limitations")}`,
-      ...tableOrNotObserved(
-        [
-          "Priority",
-          "Confidence",
-          "Hypothesis",
-          "Target",
-          "Attack Vector",
-          "Validation Gaps",
-          "Evidence",
-        ],
-        attackHypothesisRecords(artifact).map((item) => [
-          field(item, "priority"),
-          field(item, "confidence"),
-          field(item, "title"),
-          compactJoin([field(item, "target_surface"), listField(item, "target_ids")]),
-          field(item, "attack_vector"),
-          listField(item, "missing_facts_to_validate"),
-          formatEvidence(evidenceArray(item.supporting_map_evidence)),
-        ]),
-      ),
-      ...formatCrossCuttingChains(artifact),
-      ...formatValidationRoadmap(artifact),
-      ...formatBlockingFactGaps(artifact),
-      ...formatDeprioritizedAreas(artifact),
-      ...formatFactGaps(artifact),
-    ]),
-    "",
-  ];
+  if (confirmed > 0 || p1 > 0 || leads > 0) {
+    const parts: string[] = [];
+    if (confirmed > 0) {
+      parts.push(pluralize(confirmed, "confirmed issue"));
+    }
+    if (leads > 0) {
+      parts.push(pluralize(leads, "lead"));
+    }
+    const tail = parts.length > 0 ? joinAnd(parts) : "a few things";
+    return {
+      color: colors.medium,
+      level: "review",
+      subline: `Nothing critical, but ${tail} worth a look before you rely on this code.`,
+      title: "Worth a closer look",
+    };
+  }
+
+  return {
+    color: colors.low,
+    level: "clean",
+    subline:
+      "No confirmed issues and no high-risk leads. This isn't a guarantee — automated checks can miss things, so keep reviewing as you build.",
+    title: "Nothing critical found",
+  };
 }
 
-function attackHypothesisRecords(artifact: JsonObject): JsonObject[] {
-  const priorityRank = new Map([
-    ["P0", 0],
-    ["P1", 1],
-    ["P2", 2],
-    ["P3", 3],
-  ]);
-  const confidenceRank = new Map([
-    ["high", 0],
-    ["medium", 1],
-    ["low", 2],
-  ]);
-  return recordArray(artifact, "hypotheses").sort(
+function deterministicCard(finding: DeterministicFinding, repoName: string): ReportCard {
+  const category = deterministicCategory(finding.kind);
+  const action = deterministicAction(finding.kind);
+  const where = compactList(finding.evidence);
+  const facts: ReportFact[] = [];
+  pushFact(facts, "Where", where || "not reported");
+  pushFact(facts, "What to do", action);
+  return {
+    agentPrompt: normalizeWhitespace(
+      `In ${repoName}, fix this ${category.toLowerCase()}: ${finding.message} ${action}${
+        where === "" ? "" : ` Affected: ${where}.`
+      }`,
+    ),
+    category,
+    color: severityColor(finding.severity),
+    confidenceNote: `${finding.confidence} confidence`,
+    confirmed: true,
+    facts,
+    title: `${finding.message}${finding.occurrences > 1 ? ` (${finding.occurrences} places)` : ""}`,
+    why: "",
+  };
+}
+
+function hypothesisCard(hypothesis: AttackHypothesisRecord, repoName: string): ReportCard {
+  const where = compactList([hypothesis.target_surface, ...(hypothesis.target_ids ?? [])]);
+  const checks = compactList(hypothesis.validation_plan);
+  const fix = compactList(hypothesis.likely_remediation_if_confirmed ?? []);
+  const facts: ReportFact[] = [];
+  pushFact(facts, "Where to look", where);
+  pushFact(facts, "How it could happen", hypothesis.attack_vector);
+  pushFact(facts, "How to check", checks);
+  pushFact(facts, "How to fix it", fix);
+  pushFact(facts, "Evidence", compactList(hypothesis.supporting_map_evidence));
+  pushFact(facts, "Still unknown", compactList(hypothesis.missing_facts_to_validate));
+  return {
+    agentPrompt: normalizeWhitespace(
+      `In ${repoName}, check a possible security issue: ${hypothesis.title}. ${hypothesis.potential_impact}${
+        where === "" ? "" : ` Where to look: ${where}.`
+      }${checks === "" ? "" : ` How to check: ${checks}.`}${
+        fix === "" ? "" : ` If it is real, fix it by: ${fix}.`
+      }`,
+    ),
+    category: "",
+    color: priorityColor(hypothesis.priority),
+    confidenceNote: `${hypothesis.confidence} confidence`,
+    confirmed: false,
+    facts,
+    title: hypothesis.title,
+    why: hypothesis.potential_impact,
+  };
+}
+
+function deterministicCategory(kind: string): string {
+  switch (kind) {
+    case "secret":
+      return "Exposed secret";
+    case "dependency":
+      return "Vulnerable dependency";
+    case "supply-chain":
+      return "Supply-chain risk";
+    case "iac":
+      return "Risky infrastructure setting";
+    case "workflow":
+      return "CI workflow risk";
+    default:
+      return "Issue";
+  }
+}
+
+function deterministicAction(kind: string): string {
+  switch (kind) {
+    case "secret":
+      return "Rotate this secret now, then remove it from the code and from git history.";
+    case "dependency":
+      return "Update the affected package to a patched version, then re-test.";
+    case "supply-chain":
+      return "Pin this dependency to a trusted, fixed version and review its source.";
+    case "iac":
+      return "Change this setting to a safer default.";
+    case "workflow":
+      return "Harden the workflow: pin actions by commit SHA and limit token permissions.";
+    default:
+      return "Review and fix this issue.";
+  }
+}
+
+function collectDeterministicFindings(
+  baseline: BaselineSummaryArtifact | null,
+): DeterministicFinding[] {
+  const findings = new Map<string, DeterministicFinding>();
+  for (const tool of baseline?.tools ?? []) {
+    for (const observation of tool.observations) {
+      const severity = normalizeSeverity(observation);
+      if (severity === "info") {
+        continue;
+      }
+      const key = [observation.kind, severity, observation.message].join("\0");
+      const existing = findings.get(key);
+      if (existing === undefined) {
+        findings.set(key, {
+          confidence: observation.confidence,
+          evidence: [...observation.evidence],
+          kind: observation.kind,
+          message: observation.message,
+          occurrences: 1,
+          severity,
+        });
+        continue;
+      }
+      existing.occurrences += 1;
+      existing.evidence = [...new Set([...existing.evidence, ...observation.evidence])];
+      if (confidenceRank(observation.confidence) < confidenceRank(existing.confidence)) {
+        existing.confidence = observation.confidence;
+      }
+    }
+  }
+
+  return [...findings.values()].sort(
     (left, right) =>
-      (priorityRank.get(field(left, "priority")) ?? 99) -
-        (priorityRank.get(field(right, "priority")) ?? 99) ||
-      (confidenceRank.get(field(left, "confidence")) ?? 99) -
-        (confidenceRank.get(field(right, "confidence")) ?? 99) ||
-      field(left, "id").localeCompare(field(right, "id")),
+      severityOrder.indexOf(left.severity) - severityOrder.indexOf(right.severity) ||
+      left.kind.localeCompare(right.kind) ||
+      left.message.localeCompare(right.message),
   );
 }
 
-function formatCrossCuttingChains(artifact: JsonObject): string[] {
-  return optionalTable(
-    "Cross-Cutting Chains",
-    ["Chain", "Theme", "Required Conditions", "Validation Order"],
-    recordArray(artifact, "cross_cutting_chains").map((item) => [
-      firstField(item, ["title", "id"]),
-      field(item, "theme"),
-      listField(item, "required_conditions"),
-      listField(item, "validation_order"),
-    ]),
-  );
+function fallbackSummary(repoName: string, commitShaShort: string): string {
+  return `This report reviews ${repoName} at commit ${commitShaShort}. It combines automated security scanners with an AI review of the code. The confirmed issues and unconfirmed leads are listed below.`;
 }
 
-function formatValidationRoadmap(artifact: JsonObject): string[] {
-  const roadmap = objectField(artifact, "validation_roadmap");
-  if (roadmap === undefined) {
-    return [];
-  }
-  return optionalTable(
-    "Validation Roadmap",
-    ["Phase", "Checks"],
-    [
-      ["First Pass", listField(roadmap, "first_pass")],
-      ["Deep Dive", listField(roadmap, "deep_dive")],
-      ["Later Hardening", listField(roadmap, "later_hardening")],
-    ],
-  );
-}
-
-function formatBlockingFactGaps(artifact: JsonObject): string[] {
-  return optionalTable(
-    "Blocking Fact Gaps",
-    ["Gap", "Why It Matters", "Hypotheses", "How To Close"],
-    recordArray(artifact, "blocking_fact_gaps").map((item) => [
-      field(item, "gap"),
-      field(item, "why_it_matters"),
-      listField(item, "hypothesis_ids"),
-      field(item, "how_to_close"),
-    ]),
-  );
-}
-
-function formatDeprioritizedAreas(artifact: JsonObject): string[] {
-  return optionalTable(
-    "Deprioritized Areas",
-    ["Area", "Reason", "Evidence"],
-    recordArray(artifact, "deprioritized_areas").map((item) => [
-      field(item, "area"),
-      field(item, "reason"),
-      recordEvidence(item),
-    ]),
-  );
-}
-
-function formatRepositoryMapSection(
-  sectionArtifacts: Partial<Record<RepoMapArtifactKey, JsonObject>>,
-  section: RepositoryMapReportSection,
-): string[] {
-  const artifact =
-    section.artifactKey === undefined ? undefined : sectionArtifacts[section.artifactKey];
-
-  const lines = (() => {
-    switch (section.index) {
-      case 0:
-        return formatCoverageSection(artifact);
-      case 1:
-        return formatStackAndBuildSection(artifact);
-      case 2:
-        return formatRepositoryStructureSection(artifact);
-      case 3:
-        return formatEntrypointsSection(artifact);
-      case 4:
-        return formatAuthSection(artifact);
-      case 5:
-        return formatDataFlowsSection(artifact);
-      case 6:
-        return formatOperationSinksSection(artifact);
-      case 7:
-        return formatSecretsConfigSection(artifact);
-      case 8:
-        return formatCryptographySection(artifact);
-      case 9:
-        return formatStorageSection(artifact);
-      case 10:
-        return formatIntegrationsSection(artifact);
-      case 11:
-        return formatDependenciesSection(artifact);
-      case 12:
-        return formatInfrastructureSection(artifact);
-      case 13:
-        return formatLoggingSection(artifact);
-      case 14:
-        return formatTrustBoundariesSection(artifact);
-      default:
-        return ["- Not available."];
-    }
-  })();
-
-  return artifact === undefined
-    ? lines
-    : compactLines([...formatDegradedNotice(artifact), ...lines]);
-}
-
-function formatDegradedNotice(artifact: JsonObject): string[] {
-  const degraded = objectField(objectField(artifact, "metadata"), "degraded");
-  if (degraded === undefined) {
-    return [];
-  }
-
-  const reason = firstField(degraded, ["reason"]);
-  const rawArtifact = firstField(degraded, ["raw_artifact"]);
-  return [
-    `- Collection degraded${reason === "" ? "." : `: ${reason}`}${
-      rawArtifact === "" ? "" : ` Raw response: ${rawArtifact}.`
-    }`,
+function renderMarkdown(model: FinalReportModel): string {
+  const lines = [
+    "# Security Report",
+    "",
+    `_${escapeMarkdown(model.repo.name)}_`,
+    "",
+    `## Status: ${model.verdict.title}`,
+    "",
+    model.verdict.subline,
+    "",
+    "## Summary",
+    "",
+    model.summary,
+    "",
+    "## Snapshot",
+    "",
+    `- Needs you now: ${model.counts.needsNow}`,
+    `- Confirmed issues: ${model.counts.confirmed}`,
+    `- Unconfirmed leads: ${model.counts.leads}`,
     "",
   ];
-}
 
-function formatCoverageSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
+  if (model.startHere.length > 0) {
+    lines.push("## Start here", "");
+    model.startHere.forEach((entry, index) => {
+      lines.push(`${index + 1}. ${escapeMarkdown(entry)}`);
+    });
+    lines.push("");
   }
 
-  const repoSize = objectField(artifact, "repo_size");
-  const sizeLine =
-    repoSize === undefined
-      ? undefined
-      : `- Repo size: ${cell(repoSize.file_count)} files${
-          repoSize.total_loc === undefined ? "" : `, ${cell(repoSize.total_loc)} LOC`
-        } (${cell(repoSize.source)}).`;
-
-  return compactLines([
-    sizeLine,
-    ...optionalTable(
-      "Languages",
-      ["Language", "Files", "LOC", "Source"],
-      recordArray(artifact, "language_summary").map((item) => [
-        field(item, "language"),
-        field(item, "file_count"),
-        field(item, "loc"),
-        field(item, "source"),
-      ]),
+  lines.push(
+    "## Issues to fix",
+    "",
+    ...renderCardGroupsMarkdown(
+      model.confirmedGroups,
+      "No issues were confirmed by the automated scanners. That isn't a clean bill of health — also read the leads below.",
     ),
-    ...optionalTable(
-      "Reviewed Areas",
-      ["Area", "Reason", "Evidence"],
-      [
-        ...recordArray(objectField(artifact, "coverage"), "reviewed").map((item) => [
-          field(item, "area"),
-          "",
-          recordEvidence(item),
-        ]),
-        ...recordArray(artifact, "reviewed_directories").map((item) => [
-          field(item, "path"),
-          field(item, "reason"),
-          recordEvidence(item),
-        ]),
-      ],
+    "## Leads to check",
+    "",
+    "These are unconfirmed — possible problems the AI review flagged for you to verify, not proven bugs.",
+    "",
+    ...renderCardGroupsMarkdown(
+      model.leadGroups,
+      "The AI review didn't flag any leads worth checking.",
     ),
-    ...optionalTable(
-      "Not Covered Or Excluded",
-      ["Area", "Reason", "Evidence"],
-      [
-        ...recordArray(objectField(artifact, "coverage"), "not_covered").map((item) => [
-          field(item, "area"),
-          field(item, "reason"),
-          recordEvidence(item),
-        ]),
-        ...recordArray(artifact, "excluded_directories").map((item) => [
-          field(item, "path"),
-          field(item, "reason"),
-          recordEvidence(item),
-        ]),
-        ...recordArray(artifact, "access_gaps").map((item) => [
-          field(item, "area"),
-          field(item, "reason"),
-          recordEvidence(item),
-        ]),
-      ],
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatStackAndBuildSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...optionalTable(
-      "Stack",
-      ["Kind", "Name", "Version", "Role", "Evidence"],
-      recordArray(artifact, "stack").map((item) => [
-        field(item, "kind"),
-        field(item, "name"),
-        firstField(item, ["version", "required_version", "share"]),
-        field(item, "role"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...optionalTable(
-      "Build Commands",
-      ["Name", "Command", "Source", "Evidence"],
-      recordArray(objectField(artifact, "build"), "commands").map((item) => [
-        field(item, "name"),
-        field(item, "command"),
-        field(item, "source"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...optionalTable(
-      "CI/CD",
-      ["File", "Step", "Command", "Evidence"],
-      recordArray(artifact, "ci").map((item) => [
-        field(item, "file"),
-        firstField(item, ["step", "name"]),
-        field(item, "command"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatRepositoryStructureSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  const rows = uniqueRows(
-    [
-      ...recordArray(artifact, "top_level_tree"),
-      ...recordArray(artifact, "repository_structure"),
-      ...recordArray(artifact, "important_files"),
-    ].map((item) => [
-      field(item, "path"),
-      field(item, "kind"),
-      firstField(item, ["role", "reason"]),
-      recordEvidence(item),
-    ]),
   );
 
-  return compactLines([
-    ...tableOrNotObserved(["Path", "Kind", "Purpose", "Evidence"], rows),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatEntrypointsSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...tableOrNotObserved(
-      ["Type", "Name", "Handler", "External Input", "Evidence"],
-      recordArray(artifact, "entrypoints").map((item) => {
-        const name = firstField(item, ["name", "route", "path", "command"]);
-        const count = typeof item.count === "number" && item.count > 1 ? ` ×${item.count}` : "";
-        return [
-          field(item, "kind"),
-          `${name}${count}`,
-          firstField(item, ["handler", "location"]),
-          entrypointExternalInput(item),
-          recordEvidence(item),
-        ];
-      }),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatAuthSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...optionalTable(
-      "Mechanisms",
-      ["Mechanism", "Name", "Location", "Protects", "Evidence"],
-      recordArray(artifact, "auth").map((item) => [
-        firstField(item, ["mechanism", "kind"]),
-        field(item, "name"),
-        field(item, "location"),
-        listField(item, "protects_entrypoint_ids"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...optionalTable(
-      "Entrypoint Access",
-      ["Entrypoint", "Status", "Mechanism", "Roles/Scopes", "Evidence"],
-      recordArray(artifact, "entrypoint_access").map((item) => [
-        field(item, "entrypoint_id"),
-        field(item, "status"),
-        firstField(item, ["mechanism", "session_storage"]),
-        listField(item, "roles_scopes"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatDataFlowsSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...tableOrNotObserved(
-      ["Source", "Intermediates", "Sink", "Trace Status", "Evidence"],
-      recordArray(artifact, "flows").map((item) => [
-        firstField(item, ["source_entrypoint", "source_entrypoint_id"]),
-        intermediateFunctions(item),
-        firstField(item, ["operation_sink", "sink_id"]),
-        field(item, "trace_status"),
-        formatEvidence(recordEvidenceRefs(item)),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatOperationSinksSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...tableOrNotObserved(
-      ["Category", "Operation", "Input Variables", "Destination", "Evidence"],
-      operationSinkRecords(artifact).map((item) => [
-        field(item, "kind"),
-        field(item, "operation"),
-        listField(item, "input_variables"),
-        firstField(item, ["destination", "location", "query_construction"]),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatSecretsConfigSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  const secretReferences = [
-    ...recordArray(artifact, "secret_references"),
-    ...recordArray(artifact, "secret_locations"),
-  ];
-
-  return compactLines([
-    ...optionalTable(
-      "Configuration",
-      ["Name", "Kind", "Location", "Status", "Evidence"],
-      recordArray(artifact, "config").map((item) => [
-        field(item, "name"),
-        field(item, "kind"),
-        firstField(item, ["location", "source"]),
-        field(item, "value_status"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...optionalTable(
-      "Secret References",
-      ["Name", "Kind", "Location", "Status", "Evidence"],
-      secretReferences.map((item) => [
-        field(item, "name"),
-        field(item, "kind"),
-        firstField(item, ["location", "source"]),
-        item.value_redacted === true ? "redacted" : field(item, "value_status"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatCryptographySection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...tableOrNotObserved(
-      ["Operation", "Algorithm/Mode", "Inputs", "Evidence"],
-      recordArray(artifact, "crypto").map((item) => [
-        firstField(item, ["operation", "name", "kind"]),
-        compactJoin([field(item, "algorithm"), field(item, "mode")]),
-        listField(item, "parameters"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatStorageSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...tableOrNotObserved(
-      ["Kind", "Name", "Location", "Fields/Data", "Evidence"],
-      recordArray(artifact, "storage").map((item) => [
-        firstField(item, ["kind", "type"]),
-        field(item, "name"),
-        field(item, "location"),
-        compactJoin([listField(item, "fields"), listField(item, "data_categories")]),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatIntegrationsSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...tableOrNotObserved(
-      ["Target", "From", "Purpose", "Evidence"],
-      recordArray(artifact, "integrations").map((item) => [
-        firstField(item, ["target", "name", "kind"]),
-        firstField(item, ["from", "location"]),
-        field(item, "role"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatDependenciesSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  const build = objectField(artifact, "build");
-  return compactLines([
-    ...optionalTable(
-      "Manifest And Lock Files",
-      ["Type", "Path", "Evidence"],
-      [
-        ...recordArray(build, "manifests").map((item) => [
-          "manifest",
-          field(item, "path"),
-          recordEvidence(item),
-        ]),
-        ...recordArray(build, "lockfiles").map((item) => [
-          "lockfile",
-          field(item, "path"),
-          recordEvidence(item),
-        ]),
-      ],
-    ),
-    ...optionalTable(
-      "Direct Dependencies",
-      ["Name", "Version", "Role", "Evidence"],
-      recordArray(artifact, "dependencies").map((item) => [
-        field(item, "name"),
-        field(item, "version"),
-        field(item, "role"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...optionalTable(
-      "Dependency Notes",
-      ["Kind", "Path", "Summary", "Evidence"],
-      recordArray(artifact, "dependency_notes").map((item) => [
-        field(item, "kind"),
-        field(item, "path"),
-        field(item, "summary"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatInfrastructureSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...optionalTable(
-      "Runtime And Deployment",
-      ["Kind", "Name", "Runtime Details", "Role", "Evidence"],
-      recordArray(artifact, "infra").map((item) => [
-        field(item, "kind"),
-        field(item, "name"),
-        compactJoin([
-          field(item, "base_image"),
-          field(item, "user"),
-          listField(item, "ports"),
-          listField(item, "mounts"),
-          field(item, "entrypoint"),
-        ]),
-        field(item, "role"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...optionalTable(
-      "CI/CD",
-      ["Name", "Location", "Role", "Evidence"],
-      recordArray(artifact, "ci").map((item) => [
-        firstField(item, ["name", "kind"]),
-        field(item, "location"),
-        field(item, "role"),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatLoggingSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...tableOrNotObserved(
-      ["Operation", "Fields/Inputs", "Destination", "Evidence"],
-      recordArray(artifact, "logging").map((item) => [
-        firstField(item, ["operation", "name", "kind"]),
-        listField(item, "logged_fields"),
-        firstField(item, ["destination", "location"]),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function formatTrustBoundariesSection(artifact: JsonObject | undefined): string[] {
-  if (artifact === undefined) {
-    return ["- Not available."];
-  }
-
-  return compactLines([
-    ...tableOrNotObserved(
-      ["Boundary", "Type", "Description", "Linked Facts", "Evidence"],
-      recordArray(artifact, "boundaries").map((item) => [
-        firstField(item, ["name", "id"]),
-        field(item, "kind"),
-        firstField(item, ["description", "summary"]),
-        compactJoin([
-          listField(item, "source_entrypoint_ids"),
-          listField(item, "flow_ids"),
-          listField(item, "sink_ids"),
-        ]),
-        recordEvidence(item),
-      ]),
-    ),
-    ...formatFactGaps(artifact),
-  ]);
-}
-
-function optionalTable(title: string, headers: string[], rows: string[][]): string[] {
-  const normalizedRows = rows.filter((row) => row.some((cellValue) => cellValue.trim() !== ""));
-  if (normalizedRows.length === 0) {
-    return [];
-  }
-  return [`**${title}**`, ...markdownTable(headers, normalizedRows), ""];
-}
-
-function tableOrNotObserved(headers: string[], rows: string[][]): string[] {
-  const normalizedRows = rows.filter((row) => row.some((cellValue) => cellValue.trim() !== ""));
-  return normalizedRows.length > 0
-    ? [...markdownTable(headers, normalizedRows), ""]
-    : ["- Not observed in accepted artifacts.", ""];
-}
-
-function markdownTable(headers: string[], rows: string[][]): string[] {
-  return [
-    `| ${headers.map(markdownCell).join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.map(markdownCell).join(" | ")} |`),
-  ];
-}
-
-function markdownCell(value: string): string {
-  const trimmed = value.trim();
-  return trimmed === ""
-    ? "n/a"
-    : trimmed.replaceAll("|", "\\|").replaceAll("\n", "<br>").replace(/\s+/g, " ");
-}
-
-function formatFactGaps(artifact: JsonObject): string[] {
-  return optionalTable(
-    "Fact Gaps",
-    ["Area", "Missing Fact", "Evidence"],
-    recordArray(artifact, "fact_gaps").map((item) => [
-      field(item, "area"),
-      field(item, "missing_fact"),
-      recordEvidence(item),
-    ]),
-  );
-}
-
-function operationSinkRecords(artifact: JsonObject): JsonObject[] {
-  return recordArray(artifact, "operation_sinks");
-}
-
-function entrypointExternalInput(item: JsonObject): string {
-  return compactJoin([
-    compactJoin([field(item, "method"), firstField(item, ["route", "path"])]),
-    field(item, "command"),
-    field(item, "schedule"),
-  ]);
-}
-
-function intermediateFunctions(flow: JsonObject): string {
-  const intermediates = [
-    ...recordArray(flow, "intermediate_functions"),
-    ...recordArray(flow, "steps"),
-  ].map((item) => {
-    const evidence = recordEvidence(item);
-    return evidence === "" ? field(item, "name") : `${field(item, "name")} (${evidence})`;
-  });
-  return intermediates.join(", ");
-}
-
-function recordEvidence(record: JsonObject): string {
-  return formatEvidence(evidenceArray(record.evidence));
-}
-
-function recordEvidenceRefs(record: JsonObject): string[] {
-  return [
-    ...evidenceArray(record.evidence),
-    ...evidenceArray(record.source_evidence),
-    ...evidenceArray(record.operation_sink_evidence),
-    ...evidenceArray(record.sink_evidence),
-    ...recordArray(record, "intermediate_functions").flatMap((item) =>
-      evidenceArray(item.evidence),
-    ),
-    ...recordArray(record, "steps").flatMap((item) => evidenceArray(item.evidence)),
-    ...evidenceArray(objectField(record, "breakpoint")?.evidence),
-  ];
-}
-
-function formatEvidence(value: string[]): string {
-  return [...new Set(value)].join(", ");
-}
-
-function evidenceArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
-function objectField(value: unknown, field: string): JsonObject | undefined {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  const candidate = (value as Record<string, unknown>)[field];
-  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return undefined;
-  }
-  return candidate as JsonObject;
-}
-
-function recordArray(value: unknown, field: string): JsonObject[] {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return [];
-  }
-  const candidate = (value as Record<string, unknown>)[field];
-  if (!Array.isArray(candidate)) {
-    return [];
-  }
-  return candidate.filter(
-    (item): item is JsonObject => item !== null && typeof item === "object" && !Array.isArray(item),
-  );
-}
-
-function field(record: JsonObject, key: string): string {
-  return cell(record[key]);
-}
-
-function firstField(record: JsonObject, keys: string[]): string {
-  for (const key of keys) {
-    const value = field(record, key);
-    if (value !== "") {
-      return value;
+  if (model.limitations.length > 0) {
+    lines.push("## What we couldn't fully check", "");
+    for (const limitation of model.limitations) {
+      lines.push(`- ${escapeMarkdown(limitation)}`);
     }
+    lines.push("");
   }
-  return "";
+
+  lines.push(
+    "---",
+    "",
+    `Repository: ${model.repo.url}`,
+    `Commit: ${model.repo.commitShaShort}`,
+    `Run ID: ${model.runId}`,
+    `Generated: ${model.generatedAt}`,
+  );
+
+  return normalizeMarkdownSpacing(lines).join("\n");
 }
 
-function listField(record: JsonObject, key: string): string {
-  const value = record[key];
-  if (Array.isArray(value)) {
-    return value
-      .map(cell)
-      .filter((item) => item !== "")
-      .join(", ");
+function renderCardGroupsMarkdown(groups: ReportCardGroup[], emptyText: string): string[] {
+  if (groups.length === 0) {
+    return [emptyText, ""];
   }
-  return cell(value);
+
+  return groups.flatMap((group) => [
+    `### ${group.label}`,
+    "",
+    ...group.cards.flatMap(renderCardMarkdown),
+  ]);
 }
 
-function cell(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
+function renderCardMarkdown(card: ReportCard): string[] {
+  const tags = [card.confirmed ? "Confirmed" : "Unconfirmed lead"];
+  if (card.category !== "") {
+    tags.push(card.category);
   }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
+  if (card.confidenceNote !== "") {
+    tags.push(card.confidenceNote);
   }
-  return "";
+
+  const lines = [
+    `#### ${escapeMarkdown(card.title)}`,
+    "",
+    `_${escapeMarkdown(tags.join(" · "))}_`,
+    "",
+  ];
+  if (card.why !== "") {
+    lines.push(escapeMarkdown(card.why), "");
+  }
+  for (const fact of card.facts) {
+    lines.push(`- **${escapeMarkdown(fact.label)}:** ${escapeMarkdown(fact.value)}`);
+  }
+  lines.push("", "**Copy for your AI agent:**", "", "```text", card.agentPrompt, "```", "");
+  return lines;
 }
 
-function compactJoin(values: string[]): string {
-  return values.filter((value) => value.trim() !== "").join(", ");
-}
-
-function uniqueRows(rows: string[][]): string[][] {
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = row.join("\u0000");
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
+async function writePdf(pdfPath: string, model: FinalReportModel): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const doc = new PDFDocument({
+      autoFirstPage: true,
+      info: {
+        Author: model.repo.name,
+        Subject: `Security report for ${model.repo.name}`,
+        Title: "Security Report",
+      },
+      margin: 48,
+      size: "A4",
+    });
+    const stream = createWriteStream(pdfPath);
+    stream.on("finish", resolve);
+    stream.on("error", reject);
+    doc.on("error", reject);
+    doc.pipe(stream);
+    renderPdf(doc, model);
+    doc.end();
   });
 }
 
-function compactLines(lines: Array<string | undefined>): string[] {
-  const compacted = lines.filter((line): line is string => line !== undefined);
-  return compacted.length > 0 ? trimTrailingEmptyLines(compacted) : ["- Not available."];
+function renderPdf(doc: PDFKit.PDFDocument, model: FinalReportModel): void {
+  drawCover(doc, model);
+  drawVerdictBanner(doc, model);
+
+  drawSectionTitle(doc, "Summary", 96);
+  drawParagraph(doc, model.summary, 11.5, colors.ink);
+  drawMetricStrip(doc, model);
+
+  if (model.startHere.length > 0) {
+    drawSectionTitle(doc, "Start here", 96);
+    model.startHere.forEach((entry, index) => {
+      drawMutedLine(doc, `${index + 1}. ${entry}`);
+    });
+  }
+
+  drawSectionTitle(doc, "Issues to fix", 120);
+  drawCardGroups(
+    doc,
+    model.confirmedGroups,
+    "No issues were confirmed by the automated scanners. That isn't a clean bill of health — also read the leads below.",
+  );
+
+  drawSectionTitle(doc, "Leads to check", 150);
+  drawMutedLine(
+    doc,
+    "These are unconfirmed — possible problems for you to verify, not proven bugs.",
+  );
+  drawCardGroups(doc, model.leadGroups, "The AI review didn't flag any leads worth checking.");
+
+  if (model.limitations.length > 0) {
+    drawSectionTitle(doc, "What we couldn't fully check", 80);
+    for (const limitation of model.limitations) {
+      drawMutedLine(doc, `- ${limitation}`);
+    }
+  }
+
+  drawFooter(doc, model);
 }
 
-function trimTrailingEmptyLines(lines: string[]): string[] {
-  const result = [...lines];
-  while (result[result.length - 1] === "") {
-    result.pop();
+const colors = {
+  background: "#F6F8FB",
+  border: "#D8DEE9",
+  critical: "#B42318",
+  high: "#D92D20",
+  info: "#2563EB",
+  ink: "#111827",
+  low: "#2E7D32",
+  medium: "#B54708",
+  muted: "#667085",
+  navy: "#172554",
+  panel: "#FFFFFF",
+  unknown: "#667085",
+};
+
+function drawCover(doc: PDFKit.PDFDocument, model: FinalReportModel): void {
+  doc.rect(0, 0, doc.page.width, doc.page.height).fill(colors.background);
+  doc.rect(0, 0, doc.page.width, 150).fill(colors.navy);
+  doc
+    .fillColor("#FFFFFF")
+    .font("Helvetica-Bold")
+    .fontSize(30)
+    .text("Security report", 48, 46, { width: pageWidth(doc) });
+  doc
+    .font("Helvetica")
+    .fontSize(13)
+    .fillColor("#DDE7FF")
+    .text(model.repo.name, 48, doc.y + 4, { width: pageWidth(doc) });
+  doc
+    .font("Helvetica")
+    .fontSize(10.5)
+    .fillColor("#DDE7FF")
+    .text("A plain-language read on what to fix before you rely on this code", 48, doc.y + 6, {
+      width: pageWidth(doc),
+    });
+  doc.y = 178;
+}
+
+function drawVerdictBanner(doc: PDFKit.PDFDocument, model: FinalReportModel): void {
+  const x = doc.page.margins.left;
+  const width = pageWidth(doc);
+  const innerWidth = width - 28;
+  doc.font("Helvetica").fontSize(10.5);
+  const sublineHeight = doc.heightOfString(model.verdict.subline, {
+    lineGap: 2,
+    width: innerWidth,
+  });
+  const boxHeight = 42 + sublineHeight;
+  ensureSpace(doc, boxHeight + 12);
+  const y = doc.y;
+  doc.roundedRect(x, y, width, boxHeight, 12).fill(model.verdict.color);
+  doc
+    .fillColor("#FFFFFF")
+    .font("Helvetica-Bold")
+    .fontSize(16)
+    .text(model.verdict.title, x + 14, y + 12, { width: innerWidth });
+  doc
+    .fillColor("#FFFFFF")
+    .font("Helvetica")
+    .fontSize(10.5)
+    .text(model.verdict.subline, x + 14, y + 34, { lineGap: 2, width: innerWidth });
+  doc.y = y + boxHeight + 14;
+}
+
+function drawMetricStrip(doc: PDFKit.PDFDocument, model: FinalReportModel): void {
+  const metrics = [
+    { label: "Needs you now", value: String(model.counts.needsNow) },
+    { label: "Confirmed issues", value: String(model.counts.confirmed) },
+    { label: "Unconfirmed leads", value: String(model.counts.leads) },
+  ];
+  const gap = 10;
+  const width = (pageWidth(doc) - gap * 2) / 3;
+  const y = doc.y + 8;
+  metrics.forEach((metric, index) => {
+    const x = doc.page.margins.left + index * (width + gap);
+    doc.roundedRect(x, y, width, 70, 10).fillAndStroke(colors.panel, colors.border);
+    doc
+      .fillColor(colors.muted)
+      .font("Helvetica")
+      .fontSize(8)
+      .text(metric.label.toUpperCase(), x + 14, y + 14);
+    doc
+      .fillColor(colors.ink)
+      .font("Helvetica-Bold")
+      .fontSize(20)
+      .text(metric.value, x + 14, y + 31, { width: width - 28 });
+  });
+  doc.y = y + 88;
+}
+
+function drawCardGroups(
+  doc: PDFKit.PDFDocument,
+  groups: ReportCardGroup[],
+  emptyText: string,
+): void {
+  if (groups.length === 0) {
+    drawMutedLine(doc, emptyText);
+    return;
   }
-  return result;
+  for (const group of groups) {
+    drawGroupLabel(doc, group.label, group.color, group.cards.length, 150);
+    for (const card of group.cards) {
+      drawCard(doc, card, group.label);
+    }
+  }
+}
+
+function drawCard(doc: PDFKit.PDFDocument, card: ReportCard, groupLabel: string): void {
+  const x = doc.page.margins.left;
+  const width = pageWidth(doc);
+  ensureSpace(doc, 130);
+  const y = doc.y;
+  doc.circle(x + 4, y + 8, 4).fill(card.color);
+  drawPill(doc, groupLabel, card.color, x + 14, y);
+  drawPill(
+    doc,
+    card.confirmed ? "Confirmed" : "Unconfirmed",
+    card.confirmed ? colors.low : colors.unknown,
+    x + 14 + 96,
+    y,
+  );
+  doc
+    .fillColor(colors.ink)
+    .font("Helvetica-Bold")
+    .fontSize(12)
+    .text(card.title, x + 14, y + 24, { lineGap: 2, width: width - 14 });
+  const meta = [card.category, card.confidenceNote].filter((entry) => entry !== "").join("  ·  ");
+  if (meta !== "") {
+    doc
+      .fillColor(colors.muted)
+      .font("Helvetica")
+      .fontSize(8)
+      .text(meta, x + 14, doc.y + 2, { width: width - 14 });
+  }
+  if (card.why !== "") {
+    doc
+      .fillColor(colors.ink)
+      .font("Helvetica")
+      .fontSize(9.5)
+      .text(card.why, x + 14, doc.y + 4, { lineGap: 1.5, width: width - 14 });
+  }
+  for (const fact of card.facts) {
+    drawFactLine(doc, fact.label, fact.value);
+  }
+  drawPromptBlock(doc, card.agentPrompt);
+  doc
+    .moveTo(x + 14, doc.y + 4)
+    .lineTo(doc.page.width - doc.page.margins.right, doc.y + 4)
+    .strokeColor(colors.border)
+    .lineWidth(0.5)
+    .stroke();
+  doc.y += 14;
+}
+
+function drawPromptBlock(doc: PDFKit.PDFDocument, prompt: string): void {
+  if (prompt.trim() === "") {
+    return;
+  }
+  const x = doc.page.margins.left + 14;
+  const width = pageWidth(doc) - 14;
+  const innerWidth = width - 24;
+  doc.font("Courier").fontSize(8.5);
+  const textHeight = doc.heightOfString(prompt, { lineGap: 1.5, width: innerWidth });
+  const boxHeight = textHeight + 18;
+  ensureSpace(doc, boxHeight + 18);
+  const labelY = doc.y + 4;
+  doc
+    .fillColor(colors.muted)
+    .font("Helvetica-Bold")
+    .fontSize(7)
+    .text("PASTE THIS TO YOUR AI AGENT", x, labelY);
+  const boxY = labelY + 12;
+  doc.roundedRect(x, boxY, width, boxHeight, 8).fillAndStroke(colors.background, colors.border);
+  doc
+    .fillColor(colors.ink)
+    .font("Courier")
+    .fontSize(8.5)
+    .text(prompt, x + 12, boxY + 9, { lineGap: 1.5, width: innerWidth });
+  doc.y = boxY + boxHeight + 6;
+}
+
+function drawSectionTitle(doc: PDFKit.PDFDocument, title: string, keepWithNext = 80): void {
+  ensureSpace(doc, keepWithNext);
+  doc.moveDown(0.3);
+  const x = doc.page.margins.left;
+  doc
+    .fillColor(colors.ink)
+    .font("Helvetica-Bold")
+    .fontSize(18)
+    .text(title, x, doc.y, {
+      width: pageWidth(doc),
+    });
+  doc
+    .moveTo(x, doc.y + 6)
+    .lineTo(doc.page.width - doc.page.margins.right, doc.y + 6)
+    .lineWidth(1)
+    .strokeColor(colors.border)
+    .stroke();
+  doc.moveDown(1.1);
+}
+
+function drawParagraph(doc: PDFKit.PDFDocument, text: string, size: number, color: string): void {
+  const width = pageWidth(doc);
+  ensureSpace(doc, doc.heightOfString(text, { width }) + 10);
+  doc.fillColor(color).font("Helvetica").fontSize(size).text(text, doc.page.margins.left, doc.y, {
+    align: "left",
+    lineGap: 3,
+    width,
+  });
+  doc.moveDown(0.5);
+}
+
+function drawGroupLabel(
+  doc: PDFKit.PDFDocument,
+  label: string,
+  color: string,
+  count: number,
+  keepWithNext: number,
+): void {
+  ensureSpace(doc, keepWithNext);
+  const text = `${label}  ${count}`;
+  const width = Math.max(88, doc.widthOfString(text) + 26);
+  doc.roundedRect(doc.page.margins.left, doc.y, width, 22, 11).fill(color);
+  doc
+    .fillColor("#FFFFFF")
+    .font("Helvetica-Bold")
+    .fontSize(9)
+    .text(text.toUpperCase(), doc.page.margins.left + 13, doc.y + 6);
+  doc.y += 34;
+}
+
+function drawMutedLine(doc: PDFKit.PDFDocument, text: string): void {
+  ensureSpace(doc, 24);
+  doc
+    .fillColor(colors.muted)
+    .font("Helvetica")
+    .fontSize(9.5)
+    .text(text, doc.page.margins.left, doc.y, { width: pageWidth(doc) });
+  doc.moveDown(0.6);
+}
+
+function drawPill(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  color: string,
+  x: number,
+  y: number,
+): void {
+  doc.font("Helvetica-Bold").fontSize(7.2);
+  const width = Math.max(68, doc.widthOfString(text.toUpperCase()) + 20);
+  doc.roundedRect(x, y, width, 17, 8.5).fill(color);
+  doc.fillColor("#FFFFFF").text(text.toUpperCase(), x + 10, y + 5, { width: width - 20 });
+}
+
+function drawFactLine(doc: PDFKit.PDFDocument, label: string, value: string): void {
+  if (value.trim() === "") {
+    return;
+  }
+  const x = doc.page.margins.left + 14;
+  const labelWidth = 88;
+  const valueX = x + labelWidth;
+  const width = pageWidth(doc) - 14 - labelWidth;
+  const height = Math.max(16, doc.heightOfString(value, { lineGap: 1.5, width }) + 2);
+  ensureSpace(doc, height + 4);
+  const y = doc.y + 4;
+  doc
+    .fillColor(colors.muted)
+    .font("Helvetica-Bold")
+    .fontSize(7.5)
+    .text(label.toUpperCase(), x, y, { width: labelWidth - 8 });
+  doc.fillColor(colors.ink).font("Helvetica").fontSize(9).text(value, valueX, y, {
+    lineGap: 1.5,
+    width,
+  });
+  doc.y = y + height;
+}
+
+function drawFooter(doc: PDFKit.PDFDocument, model: FinalReportModel): void {
+  drawSectionTitle(doc, "Run details", 80);
+  drawKeyValue(doc, "Repository", model.repo.url);
+  drawKeyValue(doc, "Commit", model.repo.commitShaShort);
+  drawKeyValue(doc, "Run ID", model.runId);
+  drawKeyValue(doc, "Generated", model.generatedAt);
+}
+
+function drawKeyValue(doc: PDFKit.PDFDocument, key: string, value: string): void {
+  const x = doc.page.margins.left;
+  const y = doc.y;
+  doc.fillColor(colors.muted).font("Helvetica-Bold").fontSize(8).text(key.toUpperCase(), x, y);
+  doc
+    .fillColor(colors.ink)
+    .font("Helvetica")
+    .fontSize(10.5)
+    .text(value, x + 98, y - 1, { width: pageWidth(doc) - 98 });
+  doc.y += 22;
+}
+
+function ensureSpace(doc: PDFKit.PDFDocument, height: number): void {
+  if (doc.y + height > doc.page.height - doc.page.margins.bottom - 8) {
+    doc.addPage();
+  }
+}
+
+function pageWidth(doc: PDFKit.PDFDocument): number {
+  return doc.page.width - doc.page.margins.left - doc.page.margins.right;
+}
+
+function normalizeSeverity(observation: BaselineObservation): Severity {
+  return severityOrder.includes(observation.severity as Severity)
+    ? (observation.severity as Severity)
+    : "unknown";
+}
+
+function compareHypotheses(left: AttackHypothesisRecord, right: AttackHypothesisRecord): number {
+  return (
+    confidenceRank(left.confidence) - confidenceRank(right.confidence) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function confidenceRank(value: string): number {
+  switch (value) {
+    case "high":
+      return 0;
+    case "medium":
+      return 1;
+    case "low":
+      return 2;
+    default:
+      return 99;
+  }
+}
+
+function priorityLabel(priority: AttackHypothesisPriority): string {
+  switch (priority) {
+    case "P0":
+      return "Critical";
+    case "P1":
+      return "High";
+    case "P2":
+      return "Medium";
+    case "P3":
+      return "Low";
+  }
+}
+
+function priorityColor(priority: AttackHypothesisPriority): string {
+  switch (priority) {
+    case "P0":
+      return colors.critical;
+    case "P1":
+      return colors.high;
+    case "P2":
+      return colors.medium;
+    case "P3":
+      return colors.low;
+  }
+}
+
+function severityLabel(severity: Severity): string {
+  switch (severity) {
+    case "critical":
+      return "Critical";
+    case "high":
+      return "High";
+    case "medium":
+      return "Medium";
+    case "low":
+      return "Low";
+    case "info":
+      return "Info";
+    case "unknown":
+      return "Unknown";
+  }
+}
+
+function severityColor(severity: Severity): string {
+  switch (severity) {
+    case "critical":
+      return colors.critical;
+    case "high":
+      return colors.high;
+    case "medium":
+      return colors.medium;
+    case "low":
+      return colors.low;
+    case "info":
+      return colors.info;
+    case "unknown":
+      return colors.unknown;
+  }
+}
+
+function repositoryName(url: string): string {
+  const match = url.match(/github\.com\/(?<owner>[^/]+)\/(?<repo>[^/.]+)(?:\.git)?/i);
+  if (match?.groups?.owner !== undefined && match.groups.repo !== undefined) {
+    return `${match.groups.owner}/${match.groups.repo}`;
+  }
+  return url;
+}
+
+function shortSha(value: string): string {
+  return value.length > 12 ? value.slice(0, 12) : value;
+}
+
+function pluralize(value: number, noun: string): string {
+  return `${value} ${value === 1 ? noun : `${noun}s`}`;
+}
+
+function joinAnd(parts: string[]): string {
+  if (parts.length <= 1) {
+    return parts.join("");
+  }
+  return `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+}
+
+function pushFact(facts: ReportFact[], label: string, value: string): void {
+  if (value.trim() !== "") {
+    facts.push({ label, value });
+  }
+}
+
+function cleanList(values: readonly string[]): string[] {
+  return values.map((value) => value.trim()).filter((value) => value !== "");
+}
+
+function compactList(values: readonly string[]): string {
+  return values
+    .map((value) => value.trim())
+    .filter((value, index, array) => value !== "" && array.indexOf(value) === index)
+    .join(", ");
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function escapeMarkdown(value: string): string {
+  return value.replaceAll("|", "\\|");
 }
 
 function normalizeMarkdownSpacing(lines: string[]): string[] {
   const output: string[] = [];
   for (const line of lines) {
-    if (needsBlankLineBefore(line) && output.length > 0 && output[output.length - 1] !== "") {
-      output.push("");
+    if (line === "" && output.at(-1) === "") {
+      continue;
     }
     output.push(line);
   }
-  return trimTrailingEmptyLines(output);
-}
-
-function needsBlankLineBefore(line: string): boolean {
-  return line.startsWith("## ") || /^\*\*[^*].*\*\*$/.test(line);
-}
-
-function formatArtifactLinks(run: ScanRunState): string[] {
-  const artifacts = [
-    run.artifacts.inventory,
-    run.artifacts.baseline_tool_availability,
-    run.artifacts.baseline_summary,
-    run.artifacts.pi_context_pack,
-    run.artifacts.repo_map?.coverage_structure,
-    run.artifacts.repo_map?.stack_build_deps,
-    run.artifacts.repo_map?.entrypoints,
-    run.artifacts.repo_map?.auth_access,
-    run.artifacts.repo_map?.config_secrets,
-    run.artifacts.repo_map?.storage_data_model,
-    run.artifacts.repo_map?.external_integrations_egress,
-    run.artifacts.repo_map?.infra_deploy,
-    run.artifacts.repo_map?.operation_sinks,
-    run.artifacts.repo_map?.crypto,
-    run.artifacts.repo_map?.logging_observability,
-    run.artifacts.repo_map?.data_flows,
-    run.artifacts.repo_map?.trust_boundaries,
-    run.artifacts.repository_map,
-    run.artifacts.events,
-    ...(run.steps?.flatMap((step) => step.jobs.flatMap((job) => job.artifacts)) ?? []),
-  ].filter((artifact): artifact is string => artifact !== undefined);
-
-  if (artifacts.length === 0) {
-    return ["- No artifacts were recorded."];
-  }
-
-  return [...new Set(artifacts)].map((artifact) => `- ${artifact}`);
+  return output;
 }
