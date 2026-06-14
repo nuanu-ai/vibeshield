@@ -653,7 +653,7 @@ describe("AppSec repository map acceptance", () => {
     const runDir = expectRunDir(failed);
     const failedRunPath = path.join(runDir, "run.json");
     const failedRun = await readJson<{
-      artifacts: Record<string, string | undefined>;
+      artifacts: Record<string, string | string[] | undefined>;
       error: { stage: string };
       sandbox: {
         cleanup: {
@@ -672,6 +672,18 @@ describe("AppSec repository map acceptance", () => {
       false,
     );
     expect(await pathExists(path.join(runDir, "outputs", "repository-map.json"))).toBe(false);
+    expect(failedRun.artifacts.diagnostics).toEqual(
+      expect.arrayContaining([
+        "outputs/diagnostics/sandbox-failure/manifest.json",
+        "outputs/diagnostics/sandbox-failure/sandbox-failure.tar.gz",
+      ]),
+    );
+    await expectPath(
+      path.join(runDir, "outputs", "diagnostics", "sandbox-failure", "manifest.json"),
+    );
+    await expectPath(
+      path.join(runDir, "outputs", "diagnostics", "sandbox-failure", "sandbox-failure.tar.gz"),
+    );
 
     failedRun.sandbox.cleanup = { attempted: false, deleted: false, success: false };
     await writeFile(failedRunPath, `${JSON.stringify(failedRun, null, 2)}\n`, "utf8");
@@ -695,6 +707,14 @@ describe("AppSec repository map acceptance", () => {
     expect(resumedCommands.some((command) => command.includes("operation-sinks"))).toBe(false);
     await expectPath(path.join(runDir, "outputs", "repo-map", "data-flows.json"));
     await expectPath(path.join(runDir, "outputs", "repository-map.json"));
+
+    const resumedRun = await readJson<{
+      steps: Array<{ name: string; status: string }>;
+    }>(failedRunPath);
+    expect(resumedRun.steps.filter((step) => step.name === "pi-repository-mapping")).toHaveLength(
+      1,
+    );
+    expect(resumedRun.steps.every((step) => step.status === "success")).toBe(true);
   });
 });
 

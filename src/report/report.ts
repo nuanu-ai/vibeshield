@@ -342,13 +342,17 @@ function formatEntrypointsSection(artifact: JsonObject | undefined): string[] {
   return compactLines([
     ...tableOrNotObserved(
       ["Type", "Name", "Handler", "External Input", "Evidence"],
-      recordArray(artifact, "entrypoints").map((item) => [
-        field(item, "kind"),
-        firstField(item, ["name", "route", "path", "command"]),
-        firstField(item, ["handler", "location"]),
-        entrypointExternalInput(item),
-        recordEvidence(item),
-      ]),
+      recordArray(artifact, "entrypoints").map((item) => {
+        const name = firstField(item, ["name", "route", "path", "command"]);
+        const count = typeof item.count === "number" && item.count > 1 ? ` ×${item.count}` : "";
+        return [
+          field(item, "kind"),
+          `${name}${count}`,
+          firstField(item, ["handler", "location"]),
+          entrypointExternalInput(item),
+          recordEvidence(item),
+        ];
+      }),
     ),
     ...formatFactGaps(artifact),
   ]);

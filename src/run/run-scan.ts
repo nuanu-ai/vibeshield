@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   BaselineSummaryArtifact,
@@ -507,6 +507,18 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
   }
 
   if (sandbox !== undefined) {
+    if (run.status === "failed") {
+      await collectSandboxFailureDiagnostics({
+        appendEvent,
+        outputsDir,
+        persistRun,
+        reason: run.error?.message ?? "scan failed",
+        run,
+        runDir,
+        sandbox,
+      });
+    }
+
     run.current_stage = "cleanup";
     await persistRun();
 
@@ -611,9 +623,9 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
   let sandbox: SandboxSession | undefined;
   let failure: ScanStageError | undefined;
 
+  normalizeRunForResume(run);
   run.status = "running";
   run.current_stage = "resume";
-  run.steps = run.steps ?? [];
   delete run.error;
   delete run.finished_at;
   await persistRun();
@@ -765,6 +777,7 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
         started_at: new Date().toISOString(),
         status: "running",
       };
+      run.steps = run.steps ?? [];
       run.steps.push(baselineStep);
       await persistRun();
       await appendEvent({
@@ -851,6 +864,7 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
         started_at: new Date().toISOString(),
         status: "running",
       };
+      run.steps = run.steps ?? [];
       run.steps.push(piStep);
       await persistRun();
       await appendEvent({
@@ -928,6 +942,18 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
   }
 
   if (sandbox !== undefined) {
+    if (run.status === "failed") {
+      await collectSandboxFailureDiagnostics({
+        appendEvent,
+        outputsDir,
+        persistRun,
+        reason: run.error?.message ?? "resume failed",
+        run,
+        runDir,
+        sandbox,
+      });
+    }
+
     run.current_stage = "cleanup";
     await persistRun();
     const cleanupResult = await sandbox.delete().catch((error: unknown) => ({
@@ -1028,6 +1054,73 @@ async function cleanupPreviousSandboxBeforeResume(input: {
       ? "resume.previous_sandbox_cleanup.completed"
       : "resume.previous_sandbox_cleanup.failed",
   });
+}
+
+function normalizeRunForResume(run: ScanRunState): void {
+  run.steps = (run.steps ?? []).filter((step) => step.status === "success");
+}
+
+async function collectSandboxFailureDiagnostics(input: {
+  appendEvent: (event: Omit<RunEvent, "timestamp">) => Promise<void>;
+  outputsDir: string;
+  persistRun: () => Promise<void>;
+  reason: string;
+  run: ScanRunState;
+  runDir: string;
+  sandbox: SandboxSession;
+}): Promise<void> {
+  if (input.sandbox.collectDiagnostics === undefined) {
+    await input.appendEvent({
+      diagnostics: ["Sandbox provider does not support failure diagnostics collection."],
+      message: "Sandbox failure diagnostics collection is not supported by this provider.",
+      sandbox_id: input.sandbox.id,
+      stage: "cleanup",
+      type: "sandbox.diagnostics.skipped",
+    });
+    return;
+  }
+
+  await input.appendEvent({
+    message: "Collecting sandbox failure diagnostics before cleanup.",
+    sandbox_id: input.sandbox.id,
+    stage: "cleanup",
+    type: "sandbox.diagnostics.started",
+  });
+
+  try {
+    const result = await input.sandbox.collectDiagnostics({ reason: input.reason });
+    const artifactPaths: string[] = [];
+    for (const artifact of result.artifacts) {
+      const localPath = path.join(input.outputsDir, artifact.relativePath);
+      await mkdir(path.dirname(localPath), { recursive: true });
+      await input.sandbox.pullFile(artifact.sandboxPath, localPath, {
+        artifact: artifact.relativePath,
+        stage: "cleanup",
+      });
+      artifactPaths.push(relativeArtifactPath(input.runDir, localPath));
+    }
+
+    input.run.artifacts.diagnostics = [
+      ...new Set([...(input.run.artifacts.diagnostics ?? []), ...artifactPaths]),
+    ];
+    await input.persistRun();
+    await input.appendEvent({
+      ...(result.diagnostics.length === 0 ? {} : { diagnostics: result.diagnostics }),
+      ...(artifactPaths[0] === undefined ? {} : { artifact: artifactPaths[0] }),
+      message: "Sandbox failure diagnostics collected.",
+      sandbox_id: input.sandbox.id,
+      stage: "cleanup",
+      type: "sandbox.diagnostics.collected",
+    });
+  } catch (error) {
+    await input.appendEvent({
+      diagnostics: [errorMessage(error)],
+      message: "Sandbox failure diagnostics collection failed; preserving original scan error.",
+      sandbox_id: input.sandbox.id,
+      stage: "cleanup",
+      type: "sandbox.diagnostics.failed",
+    });
+  }
 }
 
 async function executePiRepositoryMapping(input: {

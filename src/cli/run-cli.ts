@@ -1,4 +1,11 @@
-import { type RunScanOptions, type RunScanResult, runResume, runScan } from "../run/run-scan.js";
+import {
+  type RunScanFailure,
+  type RunScanOptions,
+  type RunScanResult,
+  type RunScanSuccess,
+  runResume,
+  runScan,
+} from "../run/run-scan.js";
 import type { RunEvent } from "../run/types.js";
 
 export interface CliWritable {
@@ -29,14 +36,11 @@ export async function runCli(
     return 1;
   }
 
-  const live = createLiveStatus(io, isInteractive(io.stdout));
-  const formatProgress = createProgressFormatter();
+  const renderer = createRenderer(io, isInteractive(io.stdout));
+  renderer.header(command, target);
+
   const onProgress = (event: RunEvent) => {
-    live.update(event);
-    const line = formatProgress(event);
-    if (line !== undefined) {
-      live.print(line);
-    }
+    renderer.event(event);
   };
 
   const scanOptions: RunScanOptions = { repoUrlInput: target };
@@ -48,7 +52,7 @@ export async function runCli(
     scanOptions.sandboxProvider = dependencies.sandboxProvider;
   }
 
-  live.start();
+  renderer.startSpinner();
   let result: RunScanResult;
   try {
     result =
@@ -62,178 +66,48 @@ export async function runCli(
               : { sandboxProvider: dependencies.sandboxProvider }),
           });
   } finally {
-    live.stop();
+    renderer.stopSpinner();
   }
 
   if (result.exitCode === 0) {
-    io.stdout.write(`Run directory: ${result.runDir}\n`);
+    renderer.success(result);
     return 0;
   }
 
-  io.stderr.write(`Error: ${result.userMessage}\n`);
-  const runError = result.run?.error;
-  if (runError !== undefined) {
-    const reasons = (
-      runError.diagnostics !== undefined && runError.diagnostics.length > 0
-        ? runError.diagnostics
-        : [runError.message]
-    ).filter((reason) => reason.trim() !== "" && reason !== result.userMessage);
-    for (const reason of reasons) {
-      io.stderr.write(`  - ${reason}\n`);
-    }
-  }
-  if (result.runDir !== undefined) {
-    io.stderr.write(`Run directory: ${result.runDir}\n`);
-  }
+  renderer.failure(result);
   return 1;
 }
 
-interface PiProgressState {
-  lastPrintedAtByJob: Map<string, number>;
-  lastPrintedMessageByJob: Map<string, string>;
-}
-
-const quietPiProgressIntervalMs = 60_000;
-
-function createProgressFormatter(): (event: RunEvent) => string | undefined {
-  const piState: PiProgressState = {
-    lastPrintedAtByJob: new Map(),
-    lastPrintedMessageByJob: new Map(),
-  };
-
-  return (event) => formatProgressLine(event, piState);
-}
-
-function formatProgressLine(event: RunEvent, piState: PiProgressState): string | undefined {
-  if (event.stage !== "pi") {
-    return `[${formatTimestamp(event.timestamp)}] [${progressLabel(event)}] ${event.message}\n`;
-  }
-
-  if (isRepositoryMapCoordinatorEvent(event) || isDeterministicRepositoryMapEvent(event)) {
-    return `[${formatTimestamp(event.timestamp)}] [${progressLabel(event)}] ${event.message}\n`;
-  }
-
-  return formatPiProgressLine(event, piState);
-}
-
-function formatPiProgressLine(event: RunEvent, state: PiProgressState): string | undefined {
-  const actor = piActorFromEvent(event);
-  const jobKey = actor.step ?? stringValue(event.details?.step) ?? event.job ?? "pi";
-  const timestampMs = timestampToMs(event.timestamp);
-  const message = normalizePiMessage(event.message);
-  const periodicProgress = isPeriodicPiProgress(event, message);
-  const lastPrintedAt = state.lastPrintedAtByJob.get(jobKey);
-
-  if (
-    (event.type === "pi.thinking" || message === "thinking...") &&
-    lastPrintedAt !== undefined &&
-    timestampMs - lastPrintedAt < quietPiProgressIntervalMs
-  ) {
-    return undefined;
-  }
-
-  if (
-    periodicProgress &&
-    lastPrintedAt !== undefined &&
-    timestampMs - lastPrintedAt < quietPiProgressIntervalMs
-  ) {
-    return undefined;
-  }
-
-  const displayMessage = actor.step === undefined ? message : `${actor.step}: ${message}`;
-  const printedMessageKey = `${progressLabel(event)} ${displayMessage}`;
-  if (!periodicProgress && state.lastPrintedMessageByJob.get(jobKey) === printedMessageKey) {
-    return undefined;
-  }
-
-  state.lastPrintedAtByJob.set(jobKey, timestampMs);
-  state.lastPrintedMessageByJob.set(jobKey, printedMessageKey);
-
-  return `[${formatTimestamp(event.timestamp)}] [${progressLabel(event)}] ${displayMessage}\n`;
-}
-
-function progressLabel(event: RunEvent): string {
-  if (event.stage !== "pi") {
-    return event.stage;
-  }
-
-  if (isRepositoryMapCoordinatorEvent(event)) {
-    return "repository-map";
-  }
-
-  if (isDeterministicRepositoryMapEvent(event)) {
-    return event.job ?? "deterministic-map";
-  }
-
-  return isEvaluatorEvent(event) ? "evaluator-agent" : "collector-agent";
-}
-
-function isRepositoryMapCoordinatorEvent(event: RunEvent): boolean {
-  return event.type.startsWith("repository-map.") || event.type === "resume.artifact_reused";
-}
-
-function isDeterministicRepositoryMapEvent(event: RunEvent): boolean {
-  return event.type.startsWith("coverage-structure.");
-}
-
-function isEvaluatorEvent(event: RunEvent): boolean {
-  const values = [event.job, event.message, event.type, event.details?.step, event.details?.role];
-  return values.some((value) => typeof value === "string" && value.includes("evaluator"));
-}
-
-function isPeriodicPiProgress(event: RunEvent, normalizedMessage: string): boolean {
-  return (
-    event.type.endsWith(".heartbeat") ||
-    event.type === "pi.thinking" ||
-    normalizedMessage === "agent still running." ||
-    normalizedMessage === "thinking..."
-  );
-}
-
-function normalizePiMessage(message: string): string {
-  return message
-    .replace(/^[^:]+? (?:collector|evaluator)(?: attempt \d+)?:\s*/, "")
-    .replaceAll("/home/daytona/repo/", "")
-    .trim();
-}
-
-function piActorFromEvent(event: RunEvent): { step?: string } {
-  const step = stringValue(event.details?.step) ?? stepFromPiActorMessage(event.message);
-  return step === undefined ? {} : { step };
-}
-
-function stepFromPiActorMessage(message: string): string | undefined {
-  const match = /^(?<step>[^:]+?) (?:collector|evaluator)(?: attempt \d+)?:/.exec(message);
-  return match?.groups?.step;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function formatTimestamp(timestamp: string): string {
-  return timestamp.replace("T", " ").replace(/\.\d{3}Z$/, "");
-}
-
-function timestampToMs(timestamp: string): number {
-  const parsed = Date.parse(timestamp);
-  return Number.isNaN(parsed) ? Date.now() : parsed;
-}
-
-interface LiveStatus {
-  print(line: string): void;
-  start(): void;
-  stop(): void;
-  update(event: RunEvent): void;
+interface Renderer {
+  event(event: RunEvent): void;
+  failure(result: RunScanFailure): void;
+  header(command: string, target: string): void;
+  startSpinner(): void;
+  stopSpinner(): void;
+  success(result: RunScanSuccess): void;
 }
 
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const spinnerIntervalMs = 120;
-const ansi = {
+
+const glyph = {
+  active: "◆",
+  done: "✓",
+  fail: "✗",
+  reuse: "↺",
+  skip: "⚠",
+  step: "›",
+} as const;
+
+const code = {
+  bold: "\x1b[1m",
   cyan: "\x1b[36m",
   dim: "\x1b[2m",
   gray: "\x1b[90m",
+  green: "\x1b[32m",
   hideCursor: "\x1b[?25l",
+  magenta: "\x1b[35m",
+  red: "\x1b[31m",
   reset: "\x1b[0m",
   showCursor: "\x1b[?25h",
   yellow: "\x1b[33m",
@@ -243,114 +117,414 @@ function isInteractive(stdout: CliWritable): boolean {
   return (stdout as { isTTY?: boolean }).isTTY === true && process.env.NO_COLOR === undefined;
 }
 
-function createLiveStatus(io: CliIo, interactive: boolean): LiveStatus {
-  if (!interactive) {
-    return {
-      print: (line) => {
-        io.stdout.write(line);
-      },
-      start: () => {},
-      stop: () => {},
-      update: () => {},
-    };
-  }
+function createRenderer(io: CliIo, interactive: boolean): Renderer {
+  const paint = (codes: string, text: string): string =>
+    interactive ? `${codes}${text}${code.reset}` : text;
 
   let frame = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
   let onScreen = false;
-  let phaseKey = "";
-  let phaseLabel = "starting";
-  let phaseStartedAt = Date.now();
-  let activity = "warming up";
-  let activityKind: "idle" | "info" | "think" | "tool" = "info";
-  let toolCount = 0;
+  let activeLabel = "starting";
+  let activeDetail = "";
+  let activeKind: "idle" | "think" | "tool" = "idle";
+  let activeToolStep: string | undefined;
+  let activeStartedWall = Date.now();
+  let runStartedWall = Date.now();
+
+  const startedAtMs = new Map<string, number>();
+  const toolCountByStep = new Map<string, number>();
+  const labelByKey = new Map<string, string>();
 
   const columns = (): number => (io.stdout as { columns?: number }).columns ?? 80;
 
-  const render = (): void => {
+  const renderSpinner = (): void => {
+    if (!interactive || timer === undefined) {
+      return;
+    }
     const spinner = spinnerFrames[frame % spinnerFrames.length];
     const color =
-      activityKind === "think" ? ansi.yellow : activityKind === "tool" ? ansi.cyan : ansi.gray;
-    const segments = [phaseLabel];
-    if (toolCount > 0) {
-      segments.push(`${toolCount} tool${toolCount === 1 ? "" : "s"}`);
+      activeKind === "think" ? code.yellow : activeKind === "tool" ? code.cyan : code.gray;
+    const segments = [activeLabel];
+    if (activeDetail !== "") {
+      segments.push(activeDetail);
     }
-    if (activity !== "") {
-      segments.push(activity);
+    const count = activeToolStep === undefined ? 0 : (toolCountByStep.get(activeToolStep) ?? 0);
+    if (count > 0) {
+      segments.push(`${count} step${count === 1 ? "" : "s"}`);
     }
-    segments.push(formatElapsed(Date.now() - phaseStartedAt));
-
+    segments.push(formatElapsed(Date.now() - activeStartedWall));
     let body = segments.join(" · ");
     const max = Math.max(12, columns() - 3);
     if (body.length > max) {
       body = `${body.slice(0, max - 1)}…`;
     }
-    io.stdout.write(`\r\x1b[2K${color}${spinner}${ansi.reset} ${ansi.dim}${body}${ansi.reset}`);
+    io.stdout.write(`\r\x1b[2K${color}${spinner}${code.reset} ${code.dim}${body}${code.reset}`);
     onScreen = true;
   };
 
-  const clear = (): void => {
-    if (onScreen) {
+  const clearSpinner = (): void => {
+    if (interactive && onScreen) {
       io.stdout.write("\r\x1b[2K");
       onScreen = false;
     }
   };
 
+  const out = (text: string): void => {
+    clearSpinner();
+    io.stdout.write(text);
+    renderSpinner();
+  };
+
+  const milestoneLine = (params: {
+    glyph: string;
+    glyphCode: string;
+    label: string;
+    meta?: string | undefined;
+    sub?: boolean;
+  }): void => {
+    const indent = params.sub === true ? "    " : "  ";
+    const width = params.sub === true ? 22 : 24;
+    const label = params.label.length > width ? params.label : params.label.padEnd(width);
+    const meta = params.meta === undefined ? "" : ` ${paint(code.dim, params.meta)}`;
+    out(`${indent}${paint(params.glyphCode, params.glyph)} ${label}${meta}\n`);
+  };
+
+  const setActive = (
+    label: string,
+    key: string,
+    kind: typeof activeKind,
+    eventMs: number,
+    toolStep?: string,
+  ): void => {
+    activeLabel = label;
+    activeDetail = "";
+    activeKind = kind;
+    activeToolStep = toolStep;
+    activeStartedWall = Date.now();
+    startedAtMs.set(key, eventMs);
+  };
+
+  const duration = (key: string, eventMs: number): string | undefined => {
+    const started = startedAtMs.get(key);
+    return started === undefined ? undefined : formatElapsed(eventMs - started);
+  };
+
+  // Baseline scanners run sequentially and only emit a start signal on success,
+  // so the next start (or the summary write) finalizes the previous tool as done.
+  let pendingBaseline: { key: string; label: string } | undefined;
+  const finalizeBaseline = (eventMs: number): void => {
+    if (pendingBaseline !== undefined) {
+      milestoneLine({
+        glyph: glyph.done,
+        glyphCode: code.green,
+        label: pendingBaseline.label,
+        meta: duration(pendingBaseline.key, eventMs),
+        sub: true,
+      });
+      pendingBaseline = undefined;
+    }
+  };
+
+  const updateSpinnerActivity = (event: RunEvent): void => {
+    if (event.type === "pi.tool.called") {
+      const step = stringValue(event.details?.step);
+      if (step !== undefined) {
+        toolCountByStep.set(step, (toolCountByStep.get(step) ?? 0) + 1);
+        activeToolStep = step;
+      }
+      const tool = stringValue(event.details?.tool) ?? "tool";
+      const targetValue = stringValue(event.details?.target);
+      activeDetail = targetValue === undefined ? tool : `${tool} ${shortenTail(targetValue, 40)}`;
+      activeKind = "tool";
+    } else if (
+      event.type === "pi.thinking" ||
+      normalizePiMessage(event.message) === "thinking..."
+    ) {
+      activeDetail = "thinking";
+      activeKind = "think";
+    } else if (event.type.endsWith(".heartbeat")) {
+      activeKind = "idle";
+    }
+  };
+
+  const handleMilestone = (event: RunEvent): boolean => {
+    const eventMs = timestampToMs(event.timestamp);
+    switch (event.type) {
+      case "run.created":
+        return true;
+      case "sandbox.create.started":
+        setActive("Creating sandbox", "sandbox", "idle", eventMs);
+        return true;
+      case "sandbox.created":
+        milestoneLine({
+          glyph: glyph.done,
+          glyphCode: code.green,
+          label: "Sandbox ready",
+          meta: duration("sandbox", eventMs),
+        });
+        return true;
+      case "clone.started":
+        setActive("Cloning repository", "clone", "idle", eventMs);
+        return true;
+      case "clone.completed":
+        milestoneLine({
+          glyph: glyph.done,
+          glyphCode: code.green,
+          label: "Repository cloned",
+          meta: duration("clone", eventMs),
+        });
+        return true;
+      case "inventory.started":
+        setActive("Taking inventory", "inventory", "idle", eventMs);
+        return true;
+      case "context.started":
+        setActive("Preparing analysis context", "context", "idle", eventMs);
+        return true;
+      case "artifact.written":
+        if (event.stage === "inventory") {
+          milestoneLine({
+            glyph: glyph.done,
+            glyphCode: code.green,
+            label: "Inventory",
+            meta: duration("inventory", eventMs),
+          });
+          return true;
+        }
+        if (event.stage === "context") {
+          milestoneLine({
+            glyph: glyph.done,
+            glyphCode: code.green,
+            label: "Analysis context ready",
+            meta: duration("context", eventMs),
+          });
+          return true;
+        }
+        if (event.stage === "deterministic-baseline") {
+          finalizeBaseline(eventMs);
+          return true;
+        }
+        return false;
+      case "step.started":
+        if (event.stage === "deterministic-baseline") {
+          out(`\n  ${paint(code.bold, "Quick security checks")}\n`);
+          return true;
+        }
+        return false;
+      case "baseline.job.started": {
+        finalizeBaseline(eventMs);
+        const label = humanLabel(event.message);
+        const key = `bl:${event.job ?? label}`;
+        setActive(label, key, "idle", eventMs);
+        pendingBaseline = { key, label };
+        return true;
+      }
+      case "baseline.job.failed": {
+        const label = pendingBaseline?.label ?? humanLabel(event.message);
+        const meta =
+          pendingBaseline === undefined ? undefined : duration(pendingBaseline.key, eventMs);
+        pendingBaseline = undefined;
+        milestoneLine({ glyph: glyph.fail, glyphCode: code.red, label, meta, sub: true });
+        return true;
+      }
+      case "baseline.job.skipped":
+        finalizeBaseline(eventMs);
+        milestoneLine({
+          glyph: glyph.skip,
+          glyphCode: code.yellow,
+          label: humanLabel(event.message),
+          sub: true,
+        });
+        return true;
+      case "repository-map.started":
+        out(`\n  ${paint(code.bold, "Understanding your project")}\n`);
+        return true;
+      case "coverage-structure.started": {
+        const label = humanLabel(event.message);
+        labelByKey.set("pi:coverage-structure", label);
+        setActive(label, "pi:coverage-structure", "idle", eventMs);
+        return true;
+      }
+      case "coverage-structure.completed":
+        milestoneLine({
+          glyph: glyph.done,
+          glyphCode: code.green,
+          label: labelByKey.get("pi:coverage-structure") ?? humanLabel(event.message),
+          meta: duration("pi:coverage-structure", eventMs),
+          sub: true,
+        });
+        return true;
+      case "runner.started": {
+        const step = stringValue(event.details?.step) ?? "section";
+        const label = humanLabel(event.message);
+        labelByKey.set(`pi:${step}`, label);
+        setActive(label, `pi:${step}`, "think", eventMs, step);
+        return true;
+      }
+      case "pi.completed": {
+        const step = stringValue(event.details?.step) ?? "section";
+        milestoneLine({
+          glyph: glyph.done,
+          glyphCode: code.green,
+          label: labelByKey.get(`pi:${step}`) ?? humanLabel(event.message),
+          meta: duration(`pi:${step}`, eventMs),
+          sub: true,
+        });
+        return true;
+      }
+      case "pi.failed": {
+        const step = stringValue(event.details?.step) ?? "section";
+        milestoneLine({
+          glyph: glyph.fail,
+          glyphCode: code.red,
+          label: labelByKey.get(`pi:${step}`) ?? humanLabel(event.message),
+          meta: duration(`pi:${step}`, eventMs),
+          sub: true,
+        });
+        return true;
+      }
+      case "pi.output.recovered": {
+        const step = stringValue(event.details?.step) ?? "section";
+        milestoneLine({
+          glyph: glyph.reuse,
+          glyphCode: code.yellow,
+          label: `${labelByKey.get(`pi:${step}`) ?? "Section"} · recovered`,
+          sub: true,
+        });
+        return true;
+      }
+      case "resume.started":
+        out(
+          `  ${paint(code.gray, glyph.reuse)} ${paint(code.dim, "Resuming from durable artifacts")}\n`,
+        );
+        return true;
+      case "resume.artifact_reused":
+        milestoneLine({
+          glyph: glyph.reuse,
+          glyphCode: code.gray,
+          label: normalizePiMessage(event.message),
+          sub: true,
+        });
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  const isSpinnerOnly = (event: RunEvent): boolean =>
+    event.type === "pi.thinking" ||
+    event.type === "pi.tool.called" ||
+    event.type === "pi.output.started" ||
+    event.type.endsWith(".heartbeat");
+
   return {
-    print(line) {
-      clear();
-      io.stdout.write(line);
-      if (timer !== undefined) {
-        render();
+    event(event) {
+      updateSpinnerActivity(event);
+      if (isSpinnerOnly(event)) {
+        return;
+      }
+      const handled = handleMilestone(event);
+      if (!handled && event.stage !== "pi") {
+        out(
+          `  ${paint(code.gray, glyph.step)} ${paint(code.dim, normalizePiMessage(event.message))}\n`,
+        );
       }
     },
-    start() {
-      io.stdout.write(ansi.hideCursor);
+    failure(result) {
+      const elapsed = formatElapsed(Date.now() - runStartedWall);
+      io.stderr.write(
+        `\n  ${paint(code.red, glyph.fail)} ${paint(code.bold, "Scan failed")} ${paint(code.dim, `· ${elapsed}`)}\n`,
+      );
+      io.stderr.write(`    ${result.userMessage}\n`);
+      const runError = result.run?.error;
+      if (runError !== undefined) {
+        const reasons = (
+          runError.diagnostics !== undefined && runError.diagnostics.length > 0
+            ? runError.diagnostics
+            : [runError.message]
+        ).filter((reason) => reason.trim() !== "" && reason !== result.userMessage);
+        for (const reason of reasons) {
+          io.stderr.write(`    ${paint(code.dim, `- ${reason}`)}\n`);
+        }
+      }
+      if (result.runDir !== undefined) {
+        io.stderr.write(`    Run directory: ${result.runDir}\n`);
+      }
+    },
+    header(command, target) {
+      runStartedWall = Date.now();
+      const repo = prettifyTarget(command, target);
+      io.stdout.write(
+        `\n  ${paint(code.magenta, glyph.active)} ${paint(code.bold, "vibeshield")} ${paint(code.dim, `· ${command} ·`)} ${paint(code.cyan, repo)}\n\n`,
+      );
+    },
+    startSpinner() {
+      if (!interactive) {
+        return;
+      }
+      io.stdout.write(code.hideCursor);
       timer = setInterval(() => {
         frame += 1;
-        render();
+        renderSpinner();
       }, spinnerIntervalMs);
       (timer as { unref?: () => void }).unref?.();
     },
-    stop() {
+    stopSpinner() {
       if (timer !== undefined) {
         clearInterval(timer);
         timer = undefined;
       }
-      clear();
-      io.stdout.write(ansi.showCursor);
-    },
-    update(event) {
-      const step = stringValue(event.details?.step);
-      const key = step ?? progressLabel(event);
-      if (key !== phaseKey) {
-        phaseKey = key;
-        phaseStartedAt = Date.now();
-        toolCount = 0;
+      clearSpinner();
+      if (interactive) {
+        io.stdout.write(code.showCursor);
       }
-      phaseLabel = key;
-
-      if (event.type === "pi.tool.called") {
-        toolCount += 1;
-        const tool = stringValue(event.details?.tool) ?? "tool";
-        const target = stringValue(event.details?.target);
-        activity = target === undefined ? tool : `${tool} ${shortenTail(target, 44)}`;
-        activityKind = "tool";
-      } else if (
-        event.type === "pi.thinking" ||
-        normalizePiMessage(event.message) === "thinking..."
-      ) {
-        activity = "thinking";
-        activityKind = "think";
-      } else if (event.type.endsWith(".heartbeat")) {
-        activity = "working";
-        activityKind = "idle";
-      } else {
-        activity = shortenTail(normalizePiMessage(event.message), 60);
-        activityKind = "info";
+    },
+    success(result) {
+      const elapsed = formatElapsed(Date.now() - runStartedWall);
+      io.stdout.write(
+        `\n  ${paint(code.green, glyph.done)} ${paint(code.bold, "Scan complete")} ${paint(code.dim, `· ${elapsed}`)}\n`,
+      );
+      io.stdout.write(`    Run directory: ${result.runDir}\n`);
+      if (result.runDir !== undefined) {
+        io.stdout.write(`    ${paint(code.dim, `Report: ${result.runDir}/report.md`)}\n`);
       }
     },
   };
+}
+
+function prettifyTarget(command: string, target: string): string {
+  if (command === "resume") {
+    return (
+      target
+        .split("/")
+        .filter((segment) => segment !== "")
+        .pop() ?? target
+    );
+  }
+  const match = target.match(/github\.com[/:](?<slug>[^/]+\/[^/]+?)(?:\.git)?\/?$/i);
+  return match?.groups?.slug ?? target;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function normalizePiMessage(message: string): string {
+  return message
+    .replace(/^[^:]+? (?:collector|evaluator)(?: attempt \d+)?:\s*/, "")
+    .replaceAll("/home/daytona/repo/", "")
+    .trim();
+}
+
+// Human-facing label from a progress message: strip the agent prefix and the
+// trailing period so it reads as a clean checklist item for non-technical users.
+function humanLabel(message: string): string {
+  const text = normalizePiMessage(message);
+  return text.endsWith(".") ? text.slice(0, -1) : text;
+}
+
+function timestampToMs(timestamp: string): number {
+  const parsed = Date.parse(timestamp);
+  return Number.isNaN(parsed) ? Date.now() : parsed;
 }
 
 function formatElapsed(ms: number): string {

@@ -63,6 +63,7 @@ export interface ScanRunState {
       trust_boundaries?: string;
     };
     events: string;
+    diagnostics?: string[];
     inventory?: string;
     outputs_dir: string;
     pi_context_pack?: string;

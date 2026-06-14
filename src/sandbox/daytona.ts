@@ -10,6 +10,8 @@ import { buildDaytonaInventoryScript } from "./daytona-inventory-script.js";
 import type {
   CloneRepositoryOptions,
   CloneRepositoryResult,
+  CollectDiagnosticsInput,
+  CollectDiagnosticsResult,
   GenerateInventoryInput,
   PrepareBaselineToolsInput,
   PrepareBaselineToolsResult,
@@ -259,6 +261,42 @@ export class DaytonaSandboxSession implements SandboxSession {
     return this.sandbox.id;
   }
 
+  async collectDiagnostics(input: CollectDiagnosticsInput): Promise<CollectDiagnosticsResult> {
+    const response = await this.sandbox.process
+      .codeRun(
+        buildFailureDiagnosticsScript({
+          artifactDir: this.options.sandboxArtifactDir,
+          reason: input.reason,
+          repoPath: this.options.repoPath,
+        }),
+        undefined,
+        this.options.commandTimeoutSeconds,
+      )
+      .catch((error: unknown) => {
+        throw new ScanStageError({
+          cause: error,
+          message: errorMessage(error),
+          stage: "cleanup",
+          userMessage: `Could not collect sandbox diagnostics before cleanup: ${errorMessage(
+            error,
+          )}`,
+        });
+      });
+
+    assertSandboxCommandSucceeded(response, "pi", "collect failure diagnostics");
+
+    try {
+      return parseJsonObjectFromText(readCommandStdout(response)) as CollectDiagnosticsResult;
+    } catch (error) {
+      throw new ScanStageError({
+        cause: error,
+        message: `Could not parse sandbox diagnostics metadata: ${errorMessage(error)}`,
+        stage: "cleanup",
+        userMessage: "VibeShield could not read sandbox diagnostics metadata.",
+      });
+    }
+  }
+
   async cloneRepository(
     repo: { url: string },
     options: CloneRepositoryOptions = {},
@@ -479,7 +517,6 @@ export class DaytonaSandboxSession implements SandboxSession {
       inputContextArtifact: input.pi.inputContextArtifact,
       jobName: input.name,
       model: input.pi.model,
-      outputFile: input.pi.outputFile,
       outputBaseName: input.pi.outputBaseName,
       prompt: input.pi.prompt,
       provider: input.pi.provider,
@@ -524,7 +561,7 @@ export class DaytonaSandboxSession implements SandboxSession {
         command: "pi",
         cwd: this.options.repoPath,
         metadata: {
-          output_file: input.pi.outputFile,
+          delivery: "final-response",
           package: "@earendil-works/pi-coding-agent",
           tools: input.pi.tools,
           verified_help_version: "0.79.1",
@@ -1277,6 +1314,117 @@ fs.writeFileSync(
   return `node <<'NODE'\n${source}\nNODE`;
 }
 
+function buildFailureDiagnosticsScript(input: {
+  artifactDir: string;
+  reason: string;
+  repoPath: string;
+}): string {
+  return `const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const config = ${JSON.stringify(input)};
+const diagnosticsDir = path.join(config.artifactDir, "diagnostics", "sandbox-failure");
+fs.mkdirSync(diagnosticsDir, { recursive: true });
+
+const manifestPath = path.join(diagnosticsDir, "manifest.json");
+const archivePath = path.join(diagnosticsDir, "sandbox-failure.tar.gz");
+const tempArchivePath = path.join("/tmp", "vibeshield-sandbox-failure-" + Date.now() + ".tar.gz");
+const candidates = [
+  { label: "vibeshield_artifacts", path: path.resolve(config.artifactDir) },
+].filter((candidate) => fs.existsSync(candidate.path));
+
+function walk(root, limit = 2000) {
+  const output = [];
+  const queue = [root];
+  while (queue.length > 0 && output.length < limit) {
+    const current = queue.shift();
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      output.push({
+        error: String(error && error.message ? error.message : error),
+        path: path.relative(root, current) || ".",
+      });
+      continue;
+    }
+    output.push({
+      path: path.relative(root, current) || ".",
+      size_bytes: stat.size,
+      type: stat.isDirectory()
+        ? "directory"
+        : stat.isSymbolicLink()
+          ? "symlink"
+          : stat.isFile()
+            ? "file"
+            : "other",
+    });
+    if (!stat.isDirectory()) {
+      continue;
+    }
+    let children = [];
+    try {
+      children = fs.readdirSync(current).sort();
+    } catch {
+      continue;
+    }
+    for (const child of children) {
+      queue.push(path.join(current, child));
+    }
+  }
+  return output;
+}
+
+const diagnostics = [];
+if (candidates.length > 0) {
+  const tar = spawnSync(
+    "tar",
+    ["-czf", tempArchivePath, ...candidates.map((candidate) => candidate.path)],
+    { encoding: "utf8", timeout: 120000 },
+  );
+  if (tar.error) {
+    diagnostics.push("Could not create diagnostics archive: " + tar.error.message);
+  } else if (tar.status !== 0) {
+    diagnostics.push(
+      "Diagnostics archive tar exited " +
+        tar.status +
+        ": " +
+        String(tar.stderr || tar.stdout || "").trim(),
+    );
+  } else {
+    fs.copyFileSync(tempArchivePath, archivePath);
+  }
+}
+
+const manifest = {
+  diagnostics,
+  generated_at: new Date().toISOString(),
+  included: candidates.map((candidate) => ({
+    label: candidate.label,
+    path: candidate.path,
+    tree: walk(candidate.path),
+  })),
+  reason: config.reason,
+};
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\\n");
+
+const artifacts = [
+  {
+    relativePath: "diagnostics/sandbox-failure/manifest.json",
+    sandboxPath: manifestPath,
+  },
+];
+if (fs.existsSync(archivePath)) {
+  artifacts.push({
+    relativePath: "diagnostics/sandbox-failure/sandbox-failure.tar.gz",
+    sandboxPath: archivePath,
+  });
+}
+
+process.stdout.write(JSON.stringify({ artifacts, diagnostics }));`;
+}
+
 function buildPiRunnerCommand(input: {
   artifactSubdir: string;
   artifactDir: string;
@@ -1285,7 +1433,6 @@ function buildPiRunnerCommand(input: {
   inputContextArtifact: string;
   jobName: string;
   model: string;
-  outputFile: string;
   outputBaseName: string;
   prompt: string;
   provider: "openrouter";
@@ -1319,8 +1466,6 @@ const rawPath = path.join(piDir, config.outputBaseName + ".raw.redacted.txt");
 const stderrPath = path.join(piDir, "stderr.redacted.log");
 const progressPath = path.join(piDir, "progress.jsonl");
 const metadataPath = path.join(piDir, "metadata.json");
-const agentOutputPath = path.resolve(config.repoPath, config.outputFile);
-fs.mkdirSync(path.dirname(agentOutputPath), { recursive: true });
 
 const progressEvents = [];
 const progressPrefix = "__VIBESHIELD_PROGRESS__";
@@ -1343,53 +1488,6 @@ function textFromAssistantMessage(message) {
     .filter((part) => part && part.type === "text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("");
-}
-
-function extractJsonObject(text) {
-  if (typeof text !== "string") {
-    return undefined;
-  }
-  const trimmed = text.trim();
-  if (trimmed === "") {
-    return undefined;
-  }
-  const start = trimmed.indexOf("{");
-  if (start < 0) {
-    return undefined;
-  }
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < trimmed.length; i += 1) {
-    const ch = trimmed[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-    } else if (ch === "{") {
-      depth += 1;
-    } else if (ch === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        const candidate = trimmed.slice(start, i + 1);
-        try {
-          JSON.parse(candidate);
-          return candidate;
-        } catch {
-          return undefined;
-        }
-      }
-    }
-  }
-  return undefined;
 }
 
 function actorLabel() {
@@ -1774,32 +1872,29 @@ const version = redact((versionResult.stdout || versionResult.stderr || "").trim
 
 runPiJsonStream(command, args)
   .then((result) => {
-    let outputText = "";
-    let outputReadError = "";
-    let recoveredFromText = false;
-    try {
-      outputText = fs.readFileSync(agentOutputPath, "utf8");
-    } catch (error) {
-      outputReadError = error && error.message ? error.message : String(error);
-    }
-    if (outputText.trim() === "") {
-      const recovered = extractJsonObject(result.finalText || "");
-      if (recovered) {
-        outputText = recovered;
-        outputReadError = "";
-        recoveredFromText = true;
-        try {
-          fs.mkdirSync(path.dirname(agentOutputPath), { recursive: true });
-          fs.writeFileSync(agentOutputPath, recovered);
-        } catch {}
-        emitProgress("pi.output.recovered", actorLabel() + ": recovered structured output from final message (write tool was not used).", { step: config.step });
+    // The result is the agent's final assistant message.
+    // VibeShield parses, validates, and persists it on the host.
+    const finalResponse = String(result.finalText || "").trim();
+    let finalResponseParseError = "";
+    if (finalResponse === "") {
+      finalResponseParseError = "Pi returned an empty final response (no JSON object delivered).";
+    } else {
+      try {
+        const parsed = JSON.parse(finalResponse);
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          finalResponseParseError = "Pi final response was JSON, but not a JSON object.";
+        }
+      } catch (error) {
+        finalResponseParseError =
+          "Pi final response was not valid JSON: " +
+          String(error && error.message ? error.message : error);
       }
     }
-    const output = redact(outputText);
+    const output = redact(finalResponse);
     const stderr = redact(result.stderr || (result.error ? result.error.message : ""));
     fs.writeFileSync(rawPath, output);
     fs.writeFileSync(stderrPath, stderr);
-    const completed = result.status === 0 && outputReadError === "";
+    const completed = result.status === 0 && finalResponseParseError === "";
     emitProgress(completed ? "pi.completed" : "pi.failed", completed ? piStepDoneMessage(config.step) : piStepFailedMessage(config.step), { signal: result.signal, step: config.step });
     fs.writeFileSync(progressPath, progressEvents.map((event) => JSON.stringify(event)).join("\n") + "\n");
 
@@ -1809,15 +1904,13 @@ runPiJsonStream(command, args)
         args: ["-p", "--no-session", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", ...toolArgs, "--provider", config.provider, "--model", config.model, "--thinking", config.thinking, "--mode", "json", "<prompt>"],
         command,
         cwd: config.repoPath,
-        metadata: { output_file: config.outputFile, tools: config.tools },
+        metadata: { delivery: "final-response", tools: config.tools },
         provider: config.provider,
       },
       model: config.model,
-      output_bytes: Buffer.byteLength(output, "utf8"),
-      output_file: config.outputFile,
-      output_read_error: outputReadError,
+      final_response_bytes: Buffer.byteLength(output, "utf8"),
+      final_response_parse_error: finalResponseParseError,
       pi_exit_code: result.status,
-      recovered_from_text: recoveredFromText,
       prompt_bytes: Buffer.byteLength(config.prompt, "utf8"),
       provider: config.provider,
       runner_package: "@earendil-works/pi-coding-agent",
@@ -1838,7 +1931,7 @@ runPiJsonStream(command, args)
         ? []
         : [
             ...(result.status === 0 ? [] : ["Pi exited with code " + result.status + "."]),
-            ...(outputReadError === "" ? [] : ["Pi did not write output file " + config.outputFile + ": " + redact(outputReadError)]),
+            ...(finalResponseParseError === "" ? [] : [finalResponseParseError]),
           ],
       exitCode: completed ? result.status : result.status === 0 ? 1 : result.status,
       finishedAt: new Date().toISOString(),
@@ -1877,7 +1970,6 @@ runPiJsonStream(command, args)
       inputContextArtifact: input.inputContextArtifact,
       jobName: input.jobName,
       model: input.model,
-      outputFile: input.outputFile,
       outputBaseName: input.outputBaseName,
       prompt: input.prompt,
       provider: input.provider,

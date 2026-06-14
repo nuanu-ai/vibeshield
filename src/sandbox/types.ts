@@ -37,6 +37,15 @@ export interface PullFileContext {
   stage: RunStage;
 }
 
+export interface CollectDiagnosticsInput {
+  reason: string;
+}
+
+export interface CollectDiagnosticsResult {
+  artifacts: SandboxArtifact[];
+  diagnostics: string[];
+}
+
 export interface PrepareBaselineToolsInput {
   generatedAt: string;
   tools: Array<{
@@ -79,7 +88,6 @@ export interface RuntimeJobInput {
     contextPack: unknown;
     inputContextArtifact: string;
     model: string;
-    outputFile: string;
     outputBaseName: string;
     prompt: string;
     provider: "openrouter";
@@ -127,6 +135,7 @@ export interface SandboxSession {
     repo: GitHubRepoReference,
     options?: CloneRepositoryOptions,
   ): Promise<CloneRepositoryResult>;
+  collectDiagnostics?(input: CollectDiagnosticsInput): Promise<CollectDiagnosticsResult>;
   delete(): Promise<SandboxCleanupState>;
   generateInventory(input: GenerateInventoryInput): Promise<SandboxArtifact>;
   prepareBaselineTools(input: PrepareBaselineToolsInput): Promise<PrepareBaselineToolsResult>;

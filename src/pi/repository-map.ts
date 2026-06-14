@@ -31,7 +31,7 @@ import type {
 
 const defaultPiModel = "moonshotai/kimi-k2.7-code";
 const defaultPiProvider = "openrouter";
-const collectorTools = ["read", "grep", "find", "ls", "write"];
+const collectorTools = ["read", "grep", "find", "ls"];
 
 const repoMapPaths = {
   authAccess: "outputs/repo-map/auth-access.json",
@@ -226,7 +226,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "entrypoints",
       prompt: buildEntrypointsPrompt(entrypointsContext),
       step: "entrypoints",
-      thinking: "medium",
+      thinking: "high",
       validateSchema: (artifact) => validateEntrypointsArtifact({ artifact }),
       validationStage: "entrypoints-validation",
     }));
@@ -351,7 +351,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "operation-sinks",
       prompt: buildOperationSinksPrompt(operationSinksContext),
       step: "operation-sinks",
-      thinking: "medium",
+      thinking: "high",
       validateSchema: (artifact) => validateOperationSinksArtifact({ artifact }),
       validationStage: "operation-sinks-validation",
     }));
@@ -414,7 +414,7 @@ export async function runPiRepositoryMapping(
       outputBaseName: "data-flows",
       prompt: buildDataFlowsPrompt(dataFlowContext),
       step: "data-flows",
-      thinking: "medium",
+      thinking: "high",
       validateSchema: (artifact) => validateDataFlowsArtifact({ artifact }),
       validationStage: "data-flows-validation",
     }));
@@ -1302,12 +1302,8 @@ async function runPiStage<TArtifact extends PiStructuredArtifact>(
         contextPack: stage.contextPack,
         inputContextArtifact: stage.contextArtifactLabel,
         model: defaultPiModel,
-        outputFile: piAgentOutputFile(stage.outputBaseName),
         outputBaseName: stage.outputBaseName,
-        prompt: withPiOutputFileInstruction({
-          outputFile: piAgentOutputFile(stage.outputBaseName),
-          prompt: stage.prompt,
-        }),
+        prompt: withPiFinalResponseInstruction(stage.prompt),
         provider: defaultPiProvider,
         step: stage.step,
         ...(stage.thinking === undefined ? {} : { thinking: stage.thinking }),
@@ -1401,23 +1397,19 @@ function piHandoffArtifact(artifact: PiStructuredArtifact): unknown {
   return stripHandoffMetadata(artifact);
 }
 
-function piAgentOutputFile(outputBaseName: PiStructuredArtifact["kind"]): string {
-  return `.vibeshield-pi-output/${outputBaseName}.json`;
-}
+function withPiFinalResponseInstruction(prompt: string): string {
+  return `${prompt}
 
-function withPiOutputFileInstruction(input: { outputFile: string; prompt: string }): string {
-  return `${input.prompt}
-
-Output file contract (read carefully — this is how the result is collected):
-- Deliver the result with ONE write tool call that saves the complete JSON object
-  to this exact path: ${input.outputFile}
-- Printing or "answering" the JSON in your reply does NOT deliver it — only the
-  write tool call does.
-- Write the file exactly once with the full, final object, then end your turn.
-  Do not write the file repeatedly to revise or "improve" it; write again only if
-  a previous write returned an error.
-- The file must contain exactly one JSON object, with no markdown fences or prose.
-- Do not modify any repository file other than this output file.`;
+Final response contract (read carefully — this is how the result is collected):
+- You have NO write/edit tool. You do not create or modify any file. VibeShield
+  persists the result for you.
+- Deliver the result as your FINAL response: exactly one JSON object matching the
+  schema above.
+- Your final message must be the JSON object only — no markdown fences, no prose,
+  no commentary, nothing before or after it. It must parse with JSON.parse as-is.
+- Do all reasoning in your thinking; keep it out of the final message.
+- If you cannot complete the full object, still return the best valid JSON object
+  you can rather than prose; partial-but-valid is better than commentary.`;
 }
 
 function stripHandoffMetadata(value: unknown): unknown {
@@ -1470,19 +1462,14 @@ async function enrichPiFailureDiagnostics(input: {
   }
 
   const extra: string[] = [];
-  const outputReadError =
-    typeof metadata.output_read_error === "string" ? metadata.output_read_error.trim() : "";
-  const outputFile =
-    typeof metadata.output_file === "string" ? metadata.output_file : "output file";
-  const outputBytes = typeof metadata.output_bytes === "number" ? metadata.output_bytes : undefined;
+  const finalResponseBytes =
+    typeof metadata.final_response_bytes === "number" ? metadata.final_response_bytes : undefined;
   const piExitCode = typeof metadata.pi_exit_code === "number" ? metadata.pi_exit_code : undefined;
 
-  if (outputReadError !== "") {
+  if (finalResponseBytes === 0) {
     extra.push(
-      `Pi exited ${piExitCode ?? "?"} but did not write ${outputFile}, and no JSON object could be recovered from its final message (${outputReadError}).`,
+      `Pi exited ${piExitCode ?? "?"} but returned an empty final response — no JSON object was delivered.`,
     );
-  } else if (outputBytes === 0) {
-    extra.push(`Pi wrote an empty ${outputFile}.`);
   }
 
   const merged = [...input.diagnostics, ...extra];
@@ -1732,7 +1719,7 @@ Dependency output:
   summary "package.json declares 142 direct deps (47 runtime, 95 dev)",
   evidence ["package.json"]. This replaces enumerating the long tail.
 
-Build one JSON object matching the stack-build-deps schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the stack-build-deps schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "stack-build-deps",
   "generated_at": "ISO timestamp",
@@ -1794,10 +1781,24 @@ Depth bounds:
 - Do not list internal helper functions, serializers, SDK calls, or transformations as entrypoints.
 - Prefer declaration and registration evidence when both are visible.
 - Include handler or callback name/path when observable.
-- If patterns repeat heavily, group by boundary family with representative
-  evidence and explain the unexpanded area in coverage.not_covered.
 
-Build one JSON object matching the entrypoints schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Compactness (the artifact must stay small enough to write to one file, without
+losing security signal):
+- This is a navigable map of the attack surface, not a complete route table.
+- Collapse uniform or framework-generated boundary sets into ONE family entry:
+  set name to the family, route to a representative pattern, count to how many
+  boundaries it covers, and handler/notes to the generator or router. Examples:
+  ORM/REST CRUD scaffolding, auto-registered resource routers, static file
+  serving, bulk identical webhooks.
+- Keep a boundary as its OWN entry whenever it is security-distinctive: custom
+  handler logic, file upload, authentication/login/OAuth/callback, admin-only,
+  webhook or payment, raw-body or external-format parser, redirect, or a
+  different framework/runtime. Never collapse these into a family.
+- Do not emit near-duplicate entries that differ only by id or path. Prefer
+  fewer, higher-signal entries; record each collapsed family in
+  coverage.not_covered with its pattern and count so coverage stays honest.
+
+Return your result as your final response: exactly one JSON object matching the entrypoints schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "entrypoints",
   "generated_at": "ISO timestamp",
@@ -1807,13 +1808,14 @@ Build one JSON object matching the entrypoints schema below and save it to the o
     {
       "id": "stable short id",
       "kind": "http_route|graphql_resolver|grpc_method|cli_command|queue_event_handler|webhook|cron_job|file_upload_handler|external_format_parser|other",
-      "name": "string",
+      "name": "individual boundary name, or family name when collapsed",
       "location": "relative/path",
       "method": "optional string",
-      "route": "optional string",
-      "handler": "optional handler or callback name",
+      "route": "optional string or representative pattern for a family",
+      "handler": "optional handler or callback name, or generator/router for a family",
       "command": "optional string",
       "schedule": "optional string",
+      "count": "optional integer: number of boundaries a family entry represents",
       "confidence": "low|medium|high",
       "evidence": ["relative/path"]
     }
@@ -1857,7 +1859,7 @@ Depth bounds:
   identify an auth mechanism or session/token storage/check.
 - Group repeated auth patterns by family with representative evidence.
 
-Build one JSON object matching the auth-access schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the auth-access schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "auth-access",
   "generated_at": "ISO timestamp",
@@ -1907,7 +1909,7 @@ Depth bounds:
 - Group repeated config/env/secret references by family when exact values or all
   occurrences are not needed for the map.
 
-Build one JSON object matching the config-secrets schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the config-secrets schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "config-secrets",
   "generated_at": "ISO timestamp",
@@ -1953,7 +1955,7 @@ Depth bounds:
 - Group repeated storage/model/schema declarations by family when exhaustive
   enumeration would make the map noisy.
 
-Build one JSON object matching the storage-data-model schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the storage-data-model schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "storage-data-model",
   "generated_at": "ISO timestamp",
@@ -1996,7 +1998,7 @@ Depth bounds:
 - Do not include infra/deploy, storage model, crypto, logging, or data-flow facts.
 - Group repeated integrations by family with representative evidence.
 
-Build one JSON object matching the external-integrations-egress schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the external-integrations-egress schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "external-integrations-egress",
   "generated_at": "ISO timestamp",
@@ -2037,7 +2039,7 @@ Depth bounds:
 - Do not include storage model, external integration, operation-sink, crypto, or logging facts.
 - Group repeated infra declarations by family with representative evidence.
 
-Build one JSON object matching the infra-deploy schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the infra-deploy schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "infra-deploy",
   "generated_at": "ISO timestamp",
@@ -2093,7 +2095,7 @@ Depth bounds:
   operation/input_variables fields; cite the file in evidence, without line numbers.
 - Group repeated operation calls by family with representative evidence.
 
-Build one JSON object matching the operation-sinks schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the operation-sinks schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "operation-sinks",
   "generated_at": "ISO timestamp",
@@ -2144,7 +2146,7 @@ Depth bounds:
 - Do not include generic operation sinks, storage, integration, or logging facts.
 - Group repeated crypto/randomness calls by family with representative evidence.
 
-Build one JSON object matching the crypto schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the crypto schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "crypto",
   "generated_at": "ISO timestamp",
@@ -2185,7 +2187,7 @@ Depth bounds:
 - Do not include operation sinks, crypto, storage, or integration facts unless they are directly logging/telemetry destinations.
 - Group repeated logging calls by family with representative evidence.
 
-Build one JSON object matching the logging-observability schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the logging-observability schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "logging-observability",
   "generated_at": "ISO timestamp",
@@ -2226,7 +2228,7 @@ Rules:
 - Group similar flows and record not_covered/fact_gaps instead of producing a
   large speculative flow list.
 
-Build one JSON object matching the data-flows schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the data-flows schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "data-flows",
   "generated_at": "ISO timestamp",
@@ -2276,7 +2278,7 @@ Rules:
 - Base boundaries primarily on entrypoints, operation sinks, and data flows. Use storage/integration facts only to name the internal side when already present.
 - Use evidence already present in prior artifacts.
 
-Build one JSON object matching the trust-boundaries schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the trust-boundaries schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "trust-boundaries",
   "generated_at": "ISO timestamp",
@@ -2332,7 +2334,7 @@ Rules:
 - Summary is a compact map-level inference and must set inference true.
 - Keep this as an index and orientation artifact, not a report and not an audit.
 
-Build one JSON object matching the repository-map schema below and save it to the output file with the write tool (see the Output file contract at the end of this prompt). Do not put the JSON in your reply text. Schema:
+Return your result as your final response: exactly one JSON object matching the repository-map schema below — no markdown fences, no prose, and nothing before or after it. Schema:
 {
   "kind": "repository-map",
   "generated_at": "ISO timestamp",
@@ -2407,15 +2409,13 @@ Forbidden:
 - Do not perform exhaustive code review, line-by-line handler analysis, full control-flow tracing, framework internals tracing, or root-cause analysis.
 - Do not trust README, docs, examples, comments, or marketing text as truth about actual code behavior. Use them only as evidence that documentation exists or claims something.
 - Do not run the application, tests, builds, package scripts, migrations, Docker build/run, dependency installation, generators, or network calls.
-- Do not modify analyzed repository files.
-- You may write only the requested VibeShield JSON output file.
+- Do not modify or create any repository file. You have no write/edit tool.
 
-Allowed collector tools:
+Allowed tools (read-only exploration):
 - read
 - grep
 - find
 - ls
-- write, only for the requested VibeShield JSON output file
 
 Evidence rules (provenance, not navigation):
 - Evidence proves a fact is REAL and was actually observed. It is not a link the
@@ -2444,12 +2444,17 @@ Evidence rules (provenance, not navigation):
 - Do not output full secret, token, private key, cookie, password, or connection string values; use names only or redacted previews.
 
 Output rules:
-- Save exactly one JSON object to the output file named at the end of this prompt.
-- The saved file is the result consumed by VibeShield.
-- Do not wrap JSON in markdown fences.
+- Return exactly one JSON object as your final response. VibeShield reads your
+  final message and persists it; you do not write any file.
+- Your final message is the JSON object only — no markdown fences, no prose,
+  nothing before or after it. It must parse with JSON.parse as-is.
 - Keep output compact. Use short factual phrases, not paragraphs.
+- The whole object must fit in a single final message. If a section would be
+  large, collapse uniform/repeated items into families with a representative and
+  a count; never grow the output by listing near-duplicates.
 - Do not enumerate repeated files, routes, helpers, dependencies, or operation calls exhaustively.
-- Group repeated patterns by family and cite representative evidence.
+- Group repeated patterns by family and cite representative evidence. Keep
+  security-distinctive items individual; only collapse genuinely uniform ones.
 - Do not include raw file inventories, full dependency lists, tool output, or progress logs.
 - Include coverage.reviewed, coverage.not_covered, and fact_gaps.`;
 }
@@ -2501,100 +2506,30 @@ function parseJsonObjectFromText(
   validationStage: PiStageValidationStage,
   step: string,
 ): unknown {
-  const trimmed = text.trim();
-  if (trimmed === "") {
+  const fail = (reason: string): never => {
     throw new ScanStageError({
-      diagnostics: [`Pi ${step} output file was empty.`],
-      message: `Pi ${step} output file was empty.`,
+      diagnostics: [`Pi ${step} ${reason}`],
+      message: `Pi ${step} ${reason}`,
       stage: asRunStage(validationStage),
-      userMessage: `VibeShield rejected Pi ${step} output because the output file was empty.`,
+      userMessage: `VibeShield rejected Pi ${step} output because its final response was not a single JSON object.`,
     });
+  };
+
+  const body = text.trim();
+  if (body === "") {
+    return fail("returned an empty final response.");
   }
 
-  for (const candidate of jsonCandidates(trimmed)) {
-    try {
-      return JSON.parse(candidate);
-    } catch {
-      // Try the next extraction strategy before reporting a validation failure.
-    }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return fail("final response was not valid JSON.");
   }
-
-  throw new ScanStageError({
-    message: `Pi ${step} output was not valid JSON.`,
-    stage: asRunStage(validationStage),
-    userMessage: `VibeShield rejected Pi ${step} output because it was not valid JSON.`,
-  });
-}
-
-function jsonCandidates(trimmed: string): string[] {
-  const candidates = [trimmed];
-  for (const match of trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
-    if (match[1] !== undefined) {
-      candidates.push(match[1].trim());
-    }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return fail("final response was not a JSON object.");
   }
-
-  for (const candidate of balancedJsonObjectCandidates(trimmed)) {
-    candidates.push(candidate);
-  }
-
-  return Array.from(new Set(candidates));
-}
-
-function balancedJsonObjectCandidates(text: string): string[] {
-  const candidates: string[] = [];
-  for (let start = 0; start < text.length; start += 1) {
-    if (text[start] !== "{") {
-      continue;
-    }
-
-    const end = balancedJsonObjectEnd(text, start);
-    if (end !== undefined) {
-      candidates.push(text.slice(start, end + 1).trim());
-    }
-  }
-
-  return candidates;
-}
-
-function balancedJsonObjectEnd(text: string, start: number): number | undefined {
-  let depth = 0;
-  let escaped = false;
-  let inString = false;
-
-  for (let index = start; index < text.length; index += 1) {
-    const char = text[index];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-
-    if (char === "{") {
-      depth += 1;
-      continue;
-    }
-
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return index;
-      }
-    }
-  }
-
-  return undefined;
+  return parsed;
 }
 
 async function readJsonIfPresent<T>(filePath: string, step: string): Promise<T> {
@@ -2637,9 +2572,8 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
   }
   normalizeParsedArtifact(input.kind, parsed);
   const metadata = input.metadata as {
+    final_response_bytes?: unknown;
     model?: unknown;
-    output_bytes?: unknown;
-    output_file?: unknown;
     provider?: unknown;
     stderr_bytes?: unknown;
     step?: unknown;
@@ -2656,11 +2590,10 @@ function withRuntimeMetadata<TArtifact extends PiStructuredArtifact>(input: {
       pi: {
         input_context_artifact: input.contextPath,
         invocation: input.result.invocation,
-        model: typeof metadata.model === "string" ? metadata.model : defaultPiModel,
-        ...(typeof metadata.output_bytes === "number"
-          ? { output_bytes: metadata.output_bytes }
+        ...(typeof metadata.final_response_bytes === "number"
+          ? { final_response_bytes: metadata.final_response_bytes }
           : {}),
-        ...(typeof metadata.output_file === "string" ? { output_file: metadata.output_file } : {}),
+        model: typeof metadata.model === "string" ? metadata.model : defaultPiModel,
         provider: typeof metadata.provider === "string" ? metadata.provider : defaultPiProvider,
         ...(typeof metadata.stderr_bytes === "number"
           ? { stderr_bytes: metadata.stderr_bytes }

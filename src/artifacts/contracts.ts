@@ -171,9 +171,8 @@ export interface PiArtifactMetadata {
       metadata?: Record<string, unknown>;
       provider?: string;
     };
+    final_response_bytes?: number;
     model: string;
-    output_bytes?: number;
-    output_file?: string;
     provider: string;
     stderr_bytes?: number;
     step: string;
@@ -342,6 +341,9 @@ export interface StackBuildDepsArtifact extends PiRepositoryMapBaseArtifact<"sta
 export interface EntryPointRecord {
   command?: string;
   confidence?: PiConfidence;
+  // When this record represents a collapsed family of uniform boundaries, the
+  // number of boundaries it stands for.
+  count?: number;
   evidence: string[];
   handler?: string;
   id: string;

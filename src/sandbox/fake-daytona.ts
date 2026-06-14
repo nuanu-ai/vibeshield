@@ -17,6 +17,8 @@ import type { SandboxCleanupState } from "../run/types.js";
 import type {
   CloneRepositoryOptions,
   CloneRepositoryResult,
+  CollectDiagnosticsInput,
+  CollectDiagnosticsResult,
   GenerateInventoryInput,
   PrepareBaselineToolsInput,
   PrepareBaselineToolsResult,
@@ -129,6 +131,45 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
 
   get id(): string {
     return this.options.id;
+  }
+
+  async collectDiagnostics(input: CollectDiagnosticsInput): Promise<CollectDiagnosticsResult> {
+    const diagnosticsDir = path.join(this.artifactsDir, "diagnostics", "sandbox-failure");
+    await mkdir(diagnosticsDir, { recursive: true });
+    const manifestPath = path.join(diagnosticsDir, "manifest.json");
+    const archivePath = path.join(diagnosticsDir, "sandbox-failure.tar.gz");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          generated_at: new Date().toISOString(),
+          included: [
+            {
+              label: "fake_artifacts",
+              path: this.artifactsDir,
+            },
+          ],
+          reason: input.reason,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(archivePath, "fake diagnostics archive\n", "utf8");
+    return {
+      artifacts: [
+        {
+          relativePath: "diagnostics/sandbox-failure/manifest.json",
+          sandboxPath: manifestPath,
+        },
+        {
+          relativePath: "diagnostics/sandbox-failure/sandbox-failure.tar.gz",
+          sandboxPath: archivePath,
+        },
+      ],
+      diagnostics: [],
+    };
   }
 
   async cloneRepository(
@@ -447,14 +488,13 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
             args: ["-p", ...piToolArgs],
             command: "pi",
             cwd: this.repoPath,
-            metadata: { output_file: input.pi.outputFile, tools: input.pi.tools },
+            metadata: { delivery: "final-response", tools: input.pi.tools },
             provider: "openrouter",
           },
           model: input.pi.model,
-          output_bytes: isFakeRawPiOutput(output)
+          final_response_bytes: isFakeRawPiOutput(output)
             ? output.rawText.length
             : JSON.stringify(output, null, 2).length + 1,
-          output_file: input.pi.outputFile,
           provider: input.pi.provider,
           stderr_bytes: "fake pi completed\n".length,
           step: input.pi.step,
@@ -499,7 +539,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
         args: ["-p", ...piToolArgs],
         command: "pi",
         cwd: this.repoPath,
-        metadata: { output_file: input.pi.outputFile, tools: input.pi.tools },
+        metadata: { delivery: "final-response", tools: input.pi.tools },
         provider: "openrouter",
       },
       kind: "pi-repository-mapping",
@@ -1547,14 +1587,13 @@ function fakeManifestPath(input: RuntimeJobInput): string {
 function fakePiMetadata(input: RuntimeJobInput): PiArtifactMetadata["pi"] {
   const tools = input.pi?.tools ?? ["read", "grep", "find", "ls"];
   const toolArgs = tools.length > 0 ? ["--tools", tools.join(",")] : [];
-  const outputFile = input.pi?.outputFile ?? ".vibeshield-pi-output/fake.json";
   return {
     input_context_artifact: input.pi?.inputContextArtifact ?? "outputs/pi-context-pack.json",
     invocation: {
       args: ["-p", ...toolArgs],
       command: "pi",
       cwd: "repo",
-      metadata: { output_file: outputFile, tools },
+      metadata: { delivery: "final-response", tools },
       provider: "openrouter",
     },
     model: input.pi?.model ?? "fake",
