@@ -23,6 +23,60 @@ const baselineToolOrder: BaselineToolName[] = [
   "checkov",
 ];
 
+const baselineCheckDescriptions: Record<
+  BaselineToolName,
+  {
+    failed: string;
+    noun: string;
+    running: string;
+    skipped: string;
+    unavailable: string;
+  }
+> = {
+  actionlint: {
+    failed: "GitHub Actions syntax check failed.",
+    noun: "GitHub Actions syntax check",
+    running: "Checking GitHub Actions workflow syntax.",
+    skipped: "GitHub Actions syntax check skipped.",
+    unavailable: "GitHub Actions syntax checker is not available.",
+  },
+  checkov: {
+    failed: "Infrastructure configuration check failed.",
+    noun: "infrastructure configuration check",
+    running: "Checking infrastructure configuration.",
+    skipped: "Infrastructure configuration check skipped.",
+    unavailable: "Infrastructure configuration checker is not available.",
+  },
+  gitleaks: {
+    failed: "Secret exposure check failed.",
+    noun: "secret exposure check",
+    running: "Checking for exposed secrets.",
+    skipped: "Secret exposure check skipped.",
+    unavailable: "Secret exposure checker is not available.",
+  },
+  syft: {
+    failed: "Dependency inventory collection failed.",
+    noun: "dependency inventory collection",
+    running: "Collecting dependency inventory.",
+    skipped: "Dependency inventory collection skipped.",
+    unavailable: "Dependency inventory collector is not available.",
+  },
+  trivy: {
+    failed: "Dependency vulnerability check failed.",
+    noun: "dependency vulnerability check",
+    running: "Checking dependency vulnerabilities.",
+    skipped: "Dependency vulnerability check skipped.",
+    unavailable: "Dependency vulnerability checker is not available.",
+  },
+  zizmor: {
+    failed: "GitHub Actions security check failed.",
+    noun: "GitHub Actions security check",
+    running: "Checking GitHub Actions security signals.",
+    skipped: "GitHub Actions security check skipped.",
+    unavailable: "GitHub Actions security checker is not available.",
+  },
+};
+
 export interface BaselineProgressEvent {
   job?: string;
   message: string;
@@ -78,7 +132,7 @@ export async function runDeterministicBaseline(
       tools: toolRequests,
     })
     .catch(async (error: unknown) => {
-      const diagnostic = `Could not prepare deterministic baseline tools inside Daytona sandbox: ${errorMessage(
+      const diagnostic = `Could not prepare baseline checks inside Daytona sandbox: ${errorMessage(
         error,
       )}`;
       await input.onProgress?.({
@@ -132,7 +186,7 @@ export async function runDeterministicBaseline(
     if (availability?.required !== false) {
       await input.onProgress?.({
         job: tool,
-        message: `Running deterministic baseline job: ${tool}.`,
+        message: baselineCheckDescriptions[tool].running,
         type: "baseline.job.started",
       });
     }
@@ -140,10 +194,7 @@ export async function runDeterministicBaseline(
     const result =
       availability?.required === true && availability.status !== "available"
         ? buildUnavailableToolResult({
-            diagnostics:
-              availability.diagnostics.length > 0
-                ? availability.diagnostics
-                : [`Required baseline tool is not available: ${tool}`],
+            diagnostics: [baselineCheckDescriptions[tool].unavailable],
             generatedAt: input.generatedAt,
             tool,
           })
@@ -162,7 +213,11 @@ export async function runDeterministicBaseline(
             })
             .catch((error: unknown) =>
               buildFailedToolResult({
-                diagnostics: [`Could not run ${tool}: ${errorMessage(error)}`],
+                diagnostics: [
+                  `Could not complete ${baselineCheckDescriptions[tool].noun}: ${errorMessage(
+                    error,
+                  )}`,
+                ],
                 generatedAt: input.generatedAt,
                 tool,
               }),
@@ -216,9 +271,13 @@ export async function runDeterministicBaseline(
     });
 
     if (result.status === "skipped" || result.status === "failed") {
+      const statusMessage =
+        result.status === "skipped"
+          ? skippedBaselineMessage(tool, result.skippedReason)
+          : baselineCheckDescriptions[tool].failed;
       await input.onProgress?.({
         job: tool,
-        message: `Deterministic baseline job ${tool} ${result.status}.`,
+        message: statusMessage,
         type: result.status === "skipped" ? "baseline.job.skipped" : "baseline.job.failed",
       });
     }
@@ -256,6 +315,12 @@ export async function runDeterministicBaseline(
     summary,
     summaryPath,
   };
+}
+
+function skippedBaselineMessage(tool: BaselineToolName, reason: string | undefined): string {
+  return reason === undefined
+    ? baselineCheckDescriptions[tool].skipped
+    : `${baselineCheckDescriptions[tool].skipped} ${reason}`;
 }
 
 function buildFailedToolAvailability(input: {

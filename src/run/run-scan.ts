@@ -362,7 +362,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     run.steps.push(baselineStep);
     await persistRun();
     await appendEvent({
-      message: "Starting deterministic baseline step.",
+      message: "Running quick deterministic repository checks.",
       sandbox_id: sandbox.id,
       stage: "deterministic-baseline",
       type: "step.started",
@@ -395,7 +395,7 @@ export async function runScan(options: RunScanOptions): Promise<RunScanResult> {
     await persistRun();
     await appendEvent({
       artifact: baselineResult.summaryPath,
-      message: "Deterministic baseline summary written.",
+      message: "Baseline check summary written.",
       sandbox_id: sandbox.id,
       stage: "deterministic-baseline",
       type: "artifact.written",
@@ -750,7 +750,7 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
       }
       await appendEvent({
         artifact: run.artifacts.baseline_summary,
-        message: "Reusing accepted deterministic baseline summary.",
+        message: "Reusing accepted baseline check summary.",
         sandbox_id: sandbox.id,
         stage: "deterministic-baseline",
         type: "resume.artifact_reused",
@@ -767,6 +767,12 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
       };
       run.steps.push(baselineStep);
       await persistRun();
+      await appendEvent({
+        message: "Running quick deterministic repository checks.",
+        sandbox_id: sandbox.id,
+        stage: "deterministic-baseline",
+        type: "step.started",
+      });
       const activeSandbox = sandbox;
       const baselineResult = await runDeterministicBaseline({
         commitSha: cloneResult.commitSha,
@@ -792,6 +798,13 @@ export async function runResume(options: RunResumeOptions): Promise<RunResumeRes
       run.artifacts.baseline_summary = baselineResult.summaryPath;
       syncKnownArtifacts(run, store);
       baseline = baselineResult.summary;
+      await appendEvent({
+        artifact: baselineResult.summaryPath,
+        message: "Baseline check summary written.",
+        sandbox_id: sandbox.id,
+        stage: "deterministic-baseline",
+        type: "artifact.written",
+      });
     }
 
     let contextPack = await readExistingArtifact<PiContextPackArtifact>(

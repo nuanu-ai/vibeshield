@@ -260,7 +260,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
       throw new ScanStageError({
         message: "Fake Daytona baseline tool preparation failure: read ECONNRESET.",
         stage: "deterministic-baseline",
-        userMessage: "VibeShield could not prepare deterministic baseline tools.",
+        userMessage: "VibeShield could not prepare baseline checks.",
       });
     }
 
@@ -292,7 +292,7 @@ export class FakeDaytonaSandboxSession implements SandboxSession {
                 stderr: `${tool.tool} is unavailable in fake runtime`,
               },
             ],
-            diagnostics: [`Required baseline tool is unavailable: ${tool.tool}`],
+            diagnostics: ["Required baseline check is unavailable."],
             required: true,
             status: "failed",
             tool: tool.tool,

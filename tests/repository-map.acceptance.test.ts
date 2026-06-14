@@ -362,7 +362,7 @@ describe("AppSec repository map acceptance", () => {
     );
     expect(baseline.tools.find((tool) => tool.tool === "syft")?.status).toBe("failed");
     expect(baseline.tools.find((tool) => tool.tool === "syft")?.diagnostics.join("\n")).toContain(
-      "Could not run syft",
+      "Could not complete dependency inventory collection",
     );
     await expectPath(path.join(runDir, "outputs", "repository-map.json"));
     await expectPath(path.join(runDir, "report.md"));
@@ -386,7 +386,7 @@ describe("AppSec repository map acceptance", () => {
     );
     expect(baseline.tools.find((tool) => tool.tool === "syft")?.status).toBe("failed");
     expect(baseline.tools.find((tool) => tool.tool === "syft")?.diagnostics.join("\n")).toContain(
-      "Could not prepare deterministic baseline tools",
+      "Dependency inventory collector is not available",
     );
     expect(baseline.tools.find((tool) => tool.tool === "actionlint")?.status).toBe("failed");
     await expectPath(path.join(runDir, "outputs", "baseline", "tool-availability.json"));
