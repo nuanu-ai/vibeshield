@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type FakeExecHandler, FakeSandboxRuntime } from "../src/adapters/fake-sandbox.js";
 import { FilesystemBlobs } from "../src/adapters/filesystem-blobs.js";
@@ -23,6 +25,7 @@ import {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const execFileP = promisify(execFile);
 const PLANTED_SECRET = ["sk", "live", "26SGeL0ZOrD23wxj6X4Q5np2Ua0eJZ7m"].join("_");
 const TRIVY_DB_UPDATED_AT = "2026-06-22T09:00:00.000Z";
 let db: DatabaseSync;
@@ -817,7 +820,18 @@ async function writeLocalFixture(root: string) {
     path.join(sourcePath, "src", "config.ts"),
     ["export const config = {", `  stripeSecret: "${PLANTED_SECRET}",`, "};", ""].join("\n"),
   );
+  await initGitFixture(sourcePath);
   return { kind: "local" as const, path: sourcePath };
+}
+
+async function initGitFixture(sourcePath: string): Promise<void> {
+  await execFileP("git", ["init"], { cwd: sourcePath });
+  await execFileP("git", ["config", "user.email", "vibeshield-test@example.com"], {
+    cwd: sourcePath,
+  });
+  await execFileP("git", ["config", "user.name", "VibeShield Test"], { cwd: sourcePath });
+  await execFileP("git", ["add", "."], { cwd: sourcePath });
+  await execFileP("git", ["commit", "-m", "fixture"], { cwd: sourcePath });
 }
 
 function manifestFor(localPath: string, files = defaultManifestFiles()): Manifest {

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { copyFile, lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -33,6 +33,17 @@ export interface LocalSourcePackage {
   readonly commitSha: string | null;
   readonly exclusions: ReadonlyArray<ManifestExclusion>;
   cleanup(): Promise<void>;
+}
+
+export async function assertLocalGitWorktreeRoot(sourceRoot: string): Promise<void> {
+  const root = path.resolve(sourceRoot);
+  const worktreeRoot = await gitText(root, ["rev-parse", "--show-toplevel"]);
+  if (worktreeRoot === null) {
+    throw new Error(`Local source must be a Git worktree root: ${root}`);
+  }
+  if ((await realpath(worktreeRoot)) !== (await realpath(root))) {
+    throw new Error(`Local source must be the Git worktree root: ${root}`);
+  }
 }
 
 export async function createLocalSourcePackage(sourceRoot: string): Promise<LocalSourcePackage> {
@@ -72,10 +83,8 @@ export async function createLocalSourcePackage(sourceRoot: string): Promise<Loca
 async function collectLocalFiles(
   root: string,
 ): Promise<{ files: string[]; exclusions: ManifestExclusion[]; commitSha: string | null }> {
-  if (await hasOwnGitDir(root)) {
-    return collectGitFilteredFiles(root);
-  }
-  return { ...(await collectBuiltinFilteredFiles(root)), commitSha: null };
+  await assertLocalGitWorktreeRoot(root);
+  return collectGitFilteredFiles(root);
 }
 
 async function collectGitFilteredFiles(
@@ -102,42 +111,6 @@ async function collectGitFilteredFiles(
 
   const limited = await applyLimits(root, [...files].sort(), exclusions);
   return { ...limited, commitSha: await gitText(root, ["rev-parse", "HEAD"]) };
-}
-
-async function collectBuiltinFilteredFiles(
-  root: string,
-): Promise<{ files: string[]; exclusions: ManifestExclusion[] }> {
-  const files: string[] = [];
-  const exclusions: ManifestExclusion[] = [];
-
-  const walk = async (absDir: string, relDir: string): Promise<void> => {
-    const entries = await readdir(absDir, { withFileTypes: true });
-    for (const entry of entries) {
-      const rel = toPosixPath(path.join(relDir, entry.name));
-      if (!isSafeRelativePath(rel)) {
-        continue;
-      }
-      const abs = path.join(root, rel);
-      if (entry.isDirectory()) {
-        if (BUILTIN_IGNORED_DIRS.has(entry.name)) {
-          exclusions.push({ path: rel, reason: "builtin-ignore" });
-          continue;
-        }
-        await walk(abs, rel);
-        continue;
-      }
-      if (entry.isSymbolicLink()) {
-        exclusions.push({ path: rel, reason: "symlink-escape" });
-        continue;
-      }
-      if (entry.isFile()) {
-        files.push(rel);
-      }
-    }
-  };
-
-  await walk(root, "");
-  return applyLimits(root, files.sort(), exclusions);
 }
 
 async function applyLimits(
@@ -195,15 +168,6 @@ async function collectEnvFiles(root: string): Promise<string[]> {
   };
   await walk(root, "");
   return out;
-}
-
-async function hasOwnGitDir(root: string): Promise<boolean> {
-  try {
-    const st = await lstat(path.join(root, ".git"));
-    return st.isDirectory() || st.isFile();
-  } catch {
-    return false;
-  }
 }
 
 async function gitZ(cwd: string, args: string[]): Promise<string[]> {
