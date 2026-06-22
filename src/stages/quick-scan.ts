@@ -19,14 +19,31 @@ import {
   LOCAL_SOURCE_TAR,
   MANIFEST_PATH,
   MANIFEST_SCRIPT_PATH,
+  OPENGREP_REPORT_PATH,
+  OPENGREP_RULES_PATH,
   ORIGIN_PATH,
   SOURCE_DIR,
   SOURCE_FILTER_PATH,
+  SYFT_SBOM_PATH,
+  TRIVY_CONFIG_REPORT_PATH,
+  TRIVY_VULN_REPORT_PATH,
   WORK_DIR,
 } from "./paths.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+const SCANNER_STAGE_IDS = [
+  "scan.secrets.gitleaks",
+  "scan.code.opengrep",
+  "scan.sbom.syft",
+  "scan.dependencies.trivy",
+  "scan.github-actions.actionlint",
+  "scan.github-actions.zizmor",
+  "scan.iac.trivy-config",
+] as const;
+
+type ScannerStageId = (typeof SCANNER_STAGE_IDS)[number];
 
 export function quickScanStages(): StageDefinition[] {
   return [
@@ -34,6 +51,12 @@ export function quickScanStages(): StageDefinition[] {
     snapshotManifestStage(),
     inventoryDetectStage(),
     gitleaksStage(),
+    opengrepStage(),
+    syftStage(),
+    trivyDependencyStage(),
+    actionlintStage(),
+    zizmorStage(),
+    trivyConfigStage(),
     normalizeStage(),
     actionsStage(),
     remediationStage(),
@@ -56,8 +79,37 @@ interface InventoryData {
 }
 
 interface GitleaksData {
+  readonly check: "secrets.gitleaks";
+  readonly coverage: CoverageEntry;
   readonly rawArtifact: RedactedRawArtifact;
   readonly records: GitleaksRecord[];
+}
+
+interface ScannerRunData {
+  readonly check: string;
+  readonly tool: string;
+  readonly coverage: CoverageEntry;
+  readonly rawArtifact?: RedactedRawArtifact;
+  readonly recordCount: number;
+  readonly candidates: ScannerCandidate[];
+}
+
+interface ScannerCandidate {
+  readonly check: string;
+  readonly tool: string;
+  readonly ruleId?: string;
+  readonly message?: string;
+  readonly filePath?: string;
+  readonly startLine?: number;
+  readonly severity?: string;
+}
+
+interface ScannerCandidateFields {
+  readonly ruleId?: string | undefined;
+  readonly message?: string | undefined;
+  readonly filePath?: string | undefined;
+  readonly startLine?: number | undefined;
+  readonly severity?: string | undefined;
 }
 
 interface NormalizeData {
@@ -243,8 +295,187 @@ function gitleaksStage(): StageDefinition {
         redacted: true,
       };
       const artifact = artifactRef(stored.sha256, "scanner.raw", stored.bytes);
-      return success({ rawArtifact, records: redactedRecords } satisfies GitleaksData, [artifact]);
+      return success(
+        {
+          check: "secrets.gitleaks",
+          coverage: { check: "secrets.gitleaks", status: "checked" },
+          rawArtifact,
+          records: redactedRecords,
+        } satisfies GitleaksData,
+        [artifact],
+      );
     },
+  };
+}
+
+function opengrepStage(): StageDefinition {
+  return {
+    id: "scan.code.opengrep",
+    version: "1",
+    dependencies: ["inventory.detect"],
+    inputs: [],
+    outputs: ["scanner.raw"],
+    required: true,
+    run: async (ctx) => {
+      await ctx.session.uploadBytes(OPENGREP_RULES_PATH, encoder.encode(opengrepRules()));
+      return runJsonScanner(ctx, {
+        check: "code-patterns.opengrep",
+        tool: "opengrep",
+        command: [
+          "opengrep",
+          "scan",
+          "--no-git-ignore",
+          `--sarif-output=${OPENGREP_REPORT_PATH}`,
+          "-f",
+          OPENGREP_RULES_PATH,
+          SOURCE_DIR,
+        ],
+        outputPath: OPENGREP_REPORT_PATH,
+        format: "sarif-json",
+        successfulExitCodes: [0],
+        defaultOutput: sarifEmptyReport(),
+        candidatesFromRecords: candidatesFromSarif,
+      });
+    },
+  };
+}
+
+function syftStage(): StageDefinition {
+  return {
+    id: "scan.sbom.syft",
+    version: "1",
+    dependencies: ["inventory.detect"],
+    inputs: [],
+    outputs: ["scanner.raw"],
+    required: true,
+    run: (ctx) =>
+      runJsonScanner(ctx, {
+        check: "sbom.syft",
+        tool: "syft",
+        command: ["syft", `dir:${SOURCE_DIR}`, "-o", `cyclonedx-json=${SYFT_SBOM_PATH}`],
+        outputPath: SYFT_SBOM_PATH,
+        format: "cyclonedx-json",
+        successfulExitCodes: [0],
+        defaultOutput: "{}",
+        candidatesFromRecords: () => [],
+      }),
+  };
+}
+
+function trivyDependencyStage(): StageDefinition {
+  return {
+    id: "scan.dependencies.trivy",
+    version: "1",
+    dependencies: ["inventory.detect"],
+    inputs: [],
+    outputs: ["scanner.raw"],
+    required: true,
+    run: (ctx) =>
+      runJsonScanner(ctx, {
+        check: "dependencies.trivy",
+        tool: "trivy",
+        command: [
+          "trivy",
+          "fs",
+          "--scanners",
+          "vuln",
+          "--format",
+          "json",
+          "--output",
+          TRIVY_VULN_REPORT_PATH,
+          "--cache-dir",
+          `${WORK_DIR}/trivy-cache`,
+          SOURCE_DIR,
+        ],
+        outputPath: TRIVY_VULN_REPORT_PATH,
+        format: "trivy-json",
+        successfulExitCodes: [0],
+        defaultOutput: "{}",
+        candidatesFromRecords: candidatesFromTrivy,
+      }),
+  };
+}
+
+function actionlintStage(): StageDefinition {
+  return {
+    id: "scan.github-actions.actionlint",
+    version: "1",
+    dependencies: ["inventory.detect"],
+    inputs: [],
+    outputs: ["scanner.raw"],
+    required: true,
+    run: (ctx) => {
+      const { inventory } = readInput<InventoryData>(ctx, "inventory.detect");
+      return runJsonScanner(ctx, {
+        check: "github-actions.actionlint",
+        tool: "actionlint",
+        command: [
+          "actionlint",
+          "-format",
+          "{{json .}}",
+          "-shellcheck=",
+          "-pyflakes=",
+          ...inventory.workflows.map((workflow) => `${SOURCE_DIR}/${workflow}`),
+        ],
+        format: "actionlint-json",
+        successfulExitCodes: [0, 1],
+        defaultOutput: "[]",
+        candidatesFromRecords: candidatesFromActionlint,
+      });
+    },
+  };
+}
+
+function zizmorStage(): StageDefinition {
+  return {
+    id: "scan.github-actions.zizmor",
+    version: "1",
+    dependencies: ["inventory.detect"],
+    inputs: [],
+    outputs: ["scanner.raw"],
+    required: true,
+    run: (ctx) =>
+      runJsonScanner(ctx, {
+        check: "github-actions.zizmor",
+        tool: "zizmor",
+        command: ["zizmor", "--offline", "--format=json", SOURCE_DIR],
+        format: "zizmor-json-v1",
+        successfulExitCodes: [0, 11, 12, 13, 14],
+        defaultOutput: "[]",
+        candidatesFromRecords: candidatesFromZizmor,
+      }),
+  };
+}
+
+function trivyConfigStage(): StageDefinition {
+  return {
+    id: "scan.iac.trivy-config",
+    version: "1",
+    dependencies: ["inventory.detect"],
+    inputs: [],
+    outputs: ["scanner.raw"],
+    required: true,
+    run: (ctx) =>
+      runJsonScanner(ctx, {
+        check: "iac.trivy-config",
+        tool: "trivy",
+        command: [
+          "trivy",
+          "config",
+          "--format",
+          "json",
+          "--output",
+          TRIVY_CONFIG_REPORT_PATH,
+          "--cache-dir",
+          `${WORK_DIR}/trivy-cache`,
+          SOURCE_DIR,
+        ],
+        outputPath: TRIVY_CONFIG_REPORT_PATH,
+        format: "trivy-config-json",
+        successfulExitCodes: [0],
+        defaultOutput: "{}",
+        candidatesFromRecords: candidatesFromTrivy,
+      }),
   };
 }
 
@@ -252,7 +483,7 @@ function normalizeStage(): StageDefinition {
   return {
     id: "findings.normalize",
     version: "1",
-    dependencies: ["snapshot.manifest", "scan.secrets.gitleaks"],
+    dependencies: ["snapshot.manifest", ...SCANNER_STAGE_IDS],
     inputs: ["manifest", "scanner.raw"],
     outputs: [],
     required: true,
@@ -322,13 +553,14 @@ function actionsStage(): StageDefinition {
   return {
     id: "actions.rank",
     version: "1",
-    dependencies: ["findings.normalize", "inventory.detect"],
+    dependencies: ["findings.normalize", "inventory.detect", ...SCANNER_STAGE_IDS],
     inputs: [],
     outputs: [],
     required: true,
     run: async (ctx) => {
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
+      const coverage = coverageFromScanPlan(scanPlan, scannerRunsFromInputs(ctx));
       const candidates: ActionCandidate[] = [];
       if (findings.length > 0) {
         candidates.push({
@@ -341,7 +573,7 @@ function actionsStage(): StageDefinition {
           verdictImpact: "blocks-deploy",
         });
       }
-      const verdict = verdictFor(findings, scanPlan, new Set(["secrets.gitleaks"]));
+      const verdict = verdictFor(findings, coverage);
       return success({ candidates, verdict } satisfies ActionsData);
     },
   };
@@ -374,6 +606,7 @@ function reportStage(): StageDefinition {
     dependencies: [
       "snapshot.manifest",
       "inventory.detect",
+      ...SCANNER_STAGE_IDS,
       "findings.normalize",
       "actions.rank",
       "remediation.catalog",
@@ -384,6 +617,7 @@ function reportStage(): StageDefinition {
     run: async (ctx) => {
       const { manifest } = readInput<ManifestData>(ctx, "snapshot.manifest");
       const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
+      const coverage = coverageFromScanPlan(scanPlan, scannerRunsFromInputs(ctx));
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { verdict } = readInput<ActionsData>(ctx, "actions.rank");
       const { rankedActions } = readInput<RemediationData>(ctx, "remediation.catalog");
@@ -392,7 +626,7 @@ function reportStage(): StageDefinition {
         manifest: summarizeManifest(manifest),
         toolchain: summarizeToolchain(manifest.toolchain),
         verdict,
-        coverage: coverageFromScanPlan(scanPlan, new Set(["secrets.gitleaks"])),
+        coverage,
         findingSummary: summarizeFindings(findings),
         evidence,
         findings,
@@ -529,7 +763,7 @@ function scanPlanFromInventory(inventory: RepositoryInventory): ScanPlan {
       tool: "opengrep",
       applicable: hasCode,
       required: true,
-      implemented: false,
+      implemented: true,
       ...(!hasCode ? { reason: "no supported source code files found" } : {}),
     },
     {
@@ -537,7 +771,7 @@ function scanPlanFromInventory(inventory: RepositoryInventory): ScanPlan {
       tool: "syft",
       applicable: hasPackageManifests,
       required: true,
-      implemented: false,
+      implemented: true,
       ...(!hasPackageManifests ? { reason: "no dependency manifests found" } : {}),
     },
     {
@@ -545,7 +779,7 @@ function scanPlanFromInventory(inventory: RepositoryInventory): ScanPlan {
       tool: "trivy",
       applicable: hasPackageManifests,
       required: true,
-      implemented: false,
+      implemented: true,
       ...(!hasPackageManifests ? { reason: "no dependency manifests found" } : {}),
     },
     {
@@ -553,7 +787,7 @@ function scanPlanFromInventory(inventory: RepositoryInventory): ScanPlan {
       tool: "actionlint",
       applicable: hasWorkflows,
       required: true,
-      implemented: false,
+      implemented: true,
       ...(!hasWorkflows ? { reason: "no GitHub Actions workflows found" } : {}),
     },
     {
@@ -561,7 +795,7 @@ function scanPlanFromInventory(inventory: RepositoryInventory): ScanPlan {
       tool: "zizmor",
       applicable: hasWorkflows,
       required: true,
-      implemented: false,
+      implemented: true,
       ...(!hasWorkflows ? { reason: "no GitHub Actions workflows found" } : {}),
     },
     {
@@ -569,20 +803,165 @@ function scanPlanFromInventory(inventory: RepositoryInventory): ScanPlan {
       tool: "trivy",
       applicable: hasIac,
       required: true,
-      implemented: false,
+      implemented: true,
       ...(!hasIac ? { reason: "no IaC files found" } : {}),
     },
   ];
   return { checks };
 }
 
+function assertApplicableCheck(scanPlan: ScanPlan, checkId: string): void {
+  const check = scanPlan.checks.find((planned) => planned.check === checkId);
+  if (check === undefined) {
+    throw new Error(`Scan plan is missing required check: ${checkId}`);
+  }
+  if (!check.applicable) {
+    throw new Error(`Check ${checkId} is not applicable: ${check.reason ?? "no reason recorded"}`);
+  }
+}
+
+interface JsonScannerOptions {
+  readonly check: string;
+  readonly tool: string;
+  readonly command: string[];
+  readonly format: string;
+  readonly successfulExitCodes: ReadonlyArray<number>;
+  readonly defaultOutput: string;
+  readonly outputPath?: string;
+  readonly candidatesFromRecords: (
+    records: ReadonlyArray<unknown>,
+    check: string,
+    tool: string,
+  ) => ScannerCandidate[];
+}
+
+async function runJsonScanner(ctx: StageContext, opts: JsonScannerOptions): Promise<StageResult> {
+  const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
+  const planned = plannedCheck(scanPlan, opts.check);
+  if (!planned.applicable) {
+    return success({
+      check: opts.check,
+      tool: opts.tool,
+      coverage: {
+        check: opts.check,
+        status: "skipped",
+        reason: planned.reason ?? "not applicable to this snapshot",
+      },
+      recordCount: 0,
+      candidates: [],
+    } satisfies ScannerRunData);
+  }
+
+  let result: ExecResult;
+  try {
+    result = await ctx.session.exec(opts.command);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const rawBytes = jsonBytes({ error: message });
+    const stored = await ctx.artifacts.store(rawBytes);
+    const rawArtifact: RedactedRawArtifact = {
+      blobSha256: stored.sha256,
+      tool: opts.tool,
+      format: opts.format,
+      bytes: stored.bytes,
+      redacted: false,
+    };
+    const artifact = artifactRef(stored.sha256, "scanner.raw", stored.bytes);
+    return success(
+      {
+        check: opts.check,
+        tool: opts.tool,
+        coverage: {
+          check: opts.check,
+          status: "failed",
+          reason: message,
+        },
+        rawArtifact,
+        recordCount: 0,
+        candidates: [],
+      } satisfies ScannerRunData,
+      [artifact],
+    );
+  }
+  const acceptable = opts.successfulExitCodes.includes(result.exitCode);
+  const rawBytes = await readScannerBytes(ctx, opts.outputPath, result, opts.defaultOutput);
+  const stored = await ctx.artifacts.store(rawBytes);
+  const rawArtifact: RedactedRawArtifact = {
+    blobSha256: stored.sha256,
+    tool: opts.tool,
+    format: opts.format,
+    bytes: stored.bytes,
+    redacted: opts.tool === "gitleaks",
+  };
+  const artifact = artifactRef(stored.sha256, "scanner.raw", stored.bytes);
+  if (!acceptable) {
+    return success(
+      {
+        check: opts.check,
+        tool: opts.tool,
+        coverage: {
+          check: opts.check,
+          status: "failed",
+          reason: formatExecFailure(result),
+        },
+        rawArtifact,
+        recordCount: 0,
+        candidates: [],
+      } satisfies ScannerRunData,
+      [artifact],
+    );
+  }
+
+  const records = recordsFromJson(rawBytes);
+  return success(
+    {
+      check: opts.check,
+      tool: opts.tool,
+      coverage: { check: opts.check, status: "checked" },
+      rawArtifact,
+      recordCount: records.length,
+      candidates: opts.candidatesFromRecords(records, opts.check, opts.tool),
+    } satisfies ScannerRunData,
+    [artifact],
+  );
+}
+
+function plannedCheck(scanPlan: ScanPlan, checkId: string): PlannedCheck {
+  const check = scanPlan.checks.find((planned) => planned.check === checkId);
+  if (check === undefined) {
+    throw new Error(`Scan plan is missing check: ${checkId}`);
+  }
+  return check;
+}
+
+function scannerRunsFromInputs(ctx: StageContext): ScannerRunData[] {
+  return SCANNER_STAGE_IDS.map((stageId) => readScannerRun(ctx, stageId));
+}
+
+function readScannerRun(ctx: StageContext, stageId: ScannerStageId): ScannerRunData {
+  if (stageId === "scan.secrets.gitleaks") {
+    const data = readInput<GitleaksData>(ctx, stageId);
+    return {
+      check: data.check,
+      tool: "gitleaks",
+      coverage: data.coverage,
+      rawArtifact: data.rawArtifact,
+      recordCount: data.records.length,
+      candidates: [],
+    };
+  }
+  return readInput<ScannerRunData>(ctx, stageId);
+}
+
 function coverageFromScanPlan(
   scanPlan: ScanPlan,
-  completedChecks: ReadonlySet<string>,
+  scannerRuns: ReadonlyArray<ScannerRunData>,
 ): CoverageEntry[] {
+  const byCheck = new Map(scannerRuns.map((run) => [run.check, run.coverage]));
   return scanPlan.checks.map((check) => {
-    if (completedChecks.has(check.check)) {
-      return { check: check.check, status: "checked" };
+    const reported = byCheck.get(check.check);
+    if (reported !== undefined) {
+      return reported;
     }
     if (!check.applicable) {
       return {
@@ -603,8 +982,7 @@ function coverageFromScanPlan(
 
 function verdictFor(
   findings: ReadonlyArray<Finding>,
-  scanPlan: ScanPlan,
-  completedChecks: ReadonlySet<string>,
+  coverage: ReadonlyArray<CoverageEntry>,
 ): Verdict {
   if (findings.some((finding) => finding.severity === "critical")) {
     return "critical-fix-needed";
@@ -612,19 +990,230 @@ function verdictFor(
   if (findings.length > 0) {
     return "not-ready-to-deploy";
   }
-  const lostRequiredCoverage = scanPlan.checks.some(
-    (check) => check.required && check.applicable && !completedChecks.has(check.check),
+  const lostRequiredCoverage = coverage.some(
+    (entry) => entry.status === "failed" || entry.status === "degraded",
   );
   return lostRequiredCoverage ? "scan-incomplete" : "looks-ok-for-now";
 }
 
-function assertApplicableCheck(scanPlan: ScanPlan, checkId: string): void {
-  const check = scanPlan.checks.find((planned) => planned.check === checkId);
-  if (check === undefined) {
-    throw new Error(`Scan plan is missing required check: ${checkId}`);
+async function readScannerBytes(
+  ctx: StageContext,
+  outputPath: string | undefined,
+  result: ExecResult,
+  defaultOutput: string,
+): Promise<Uint8Array> {
+  if (outputPath !== undefined) {
+    try {
+      const fromFile = await ctx.session.read(outputPath);
+      if (fromFile.byteLength > 0) {
+        return fromFile;
+      }
+    } catch {
+      // Some tools write JSON to stdout instead of their output file on errors.
+    }
   }
-  if (!check.applicable) {
-    throw new Error(`Check ${checkId} is not applicable: ${check.reason ?? "no reason recorded"}`);
+  if (result.stdout.trim().length > 0) {
+    return encoder.encode(result.stdout);
+  }
+  const stderr = result.stderr.trim();
+  if (result.exitCode !== 0 && stderr.length > 0) {
+    return jsonBytes({ stderr });
+  }
+  return encoder.encode(defaultOutput);
+}
+
+function recordsFromJson(bytes: Uint8Array): unknown[] {
+  const text = decoder.decode(bytes).trim();
+  if (text.length === 0) {
+    return [];
+  }
+  const parsed = JSON.parse(text) as unknown;
+  if (Array.isArray(parsed)) {
+    return parsed;
+  }
+  if (isRecord(parsed)) {
+    const capitalResults = parsed.Results;
+    if (Array.isArray(capitalResults)) {
+      return capitalResults.flatMap((result) => {
+        if (!isRecord(result)) {
+          return [];
+        }
+        const target = stringFrom(result.Target);
+        return [
+          ...recordsWithTarget(result.Vulnerabilities, target),
+          ...recordsWithTarget(result.Misconfigurations, target),
+          ...recordsWithTarget(result.Secrets, target),
+        ];
+      });
+    }
+    const results = parsed.results;
+    if (Array.isArray(results)) {
+      return results;
+    }
+    const runs = parsed.runs;
+    if (Array.isArray(runs)) {
+      return runs.flatMap((run) =>
+        isRecord(run) && Array.isArray(run.results) ? (run.results as unknown[]) : [],
+      );
+    }
+    const vulnerabilities = parsed.Vulnerabilities;
+    if (Array.isArray(vulnerabilities)) {
+      return vulnerabilities;
+    }
+    const bomRefs = parsed.components;
+    if (Array.isArray(bomRefs)) {
+      return bomRefs;
+    }
+  }
+  return [];
+}
+
+function recordsWithTarget(value: unknown, target: string | undefined): unknown[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) =>
+    isRecord(item) && target !== undefined ? { ...item, Target: target } : item,
+  );
+}
+
+function candidatesFromActionlint(
+  records: ReadonlyArray<unknown>,
+  check: string,
+  tool: string,
+): ScannerCandidate[] {
+  return records.map((record) => {
+    const item = isRecord(record) ? record : {};
+    return scannerCandidate(check, tool, {
+      ruleId: stringFrom(item.kind) ?? stringFrom(item.Kind),
+      message: stringFrom(item.message) ?? stringFrom(item.Message),
+      filePath: normalizeCandidatePath(stringFrom(item.filepath) ?? stringFrom(item.Filepath)),
+      startLine: numberFrom(item.line) ?? numberFrom(item.Line),
+    });
+  });
+}
+
+function candidatesFromZizmor(
+  records: ReadonlyArray<unknown>,
+  check: string,
+  tool: string,
+): ScannerCandidate[] {
+  return records.map((record) => {
+    const item = isRecord(record) ? record : {};
+    const determinations = isRecord(item.determinations) ? item.determinations : {};
+    return scannerCandidate(check, tool, {
+      ruleId: stringFrom(item.ident),
+      message: stringFrom(item.desc),
+      filePath: pathFromZizmorLocations(item.locations),
+      startLine: lineFromZizmorLocations(item.locations),
+      severity: stringFrom(determinations.severity),
+    });
+  });
+}
+
+function candidatesFromSarif(
+  records: ReadonlyArray<unknown>,
+  check: string,
+  tool: string,
+): ScannerCandidate[] {
+  return records.map((record) => {
+    const item = isRecord(record) ? record : {};
+    const message = isRecord(item.message) ? item.message : {};
+    const firstLocation = firstRecord(item.locations);
+    const physicalLocation = isRecord(firstLocation?.physicalLocation)
+      ? firstLocation.physicalLocation
+      : {};
+    const artifactLocation = isRecord(physicalLocation.artifactLocation)
+      ? physicalLocation.artifactLocation
+      : {};
+    const region = isRecord(physicalLocation.region) ? physicalLocation.region : {};
+    return scannerCandidate(check, tool, {
+      ruleId: stringFrom(item.ruleId),
+      message: stringFrom(message.text),
+      filePath: normalizeCandidatePath(stringFrom(artifactLocation.uri)),
+      startLine: numberFrom(region.startLine),
+      severity: stringFrom(item.level),
+    });
+  });
+}
+
+function candidatesFromTrivy(
+  records: ReadonlyArray<unknown>,
+  check: string,
+  tool: string,
+): ScannerCandidate[] {
+  return records.map((record) => {
+    const item = isRecord(record) ? record : {};
+    const cause = isRecord(item.CauseMetadata) ? item.CauseMetadata : {};
+    return scannerCandidate(check, tool, {
+      ruleId:
+        stringFrom(item.VulnerabilityID) ??
+        stringFrom(item.ID) ??
+        stringFrom(item.AVDID) ??
+        stringFrom(item.RuleID),
+      message:
+        stringFrom(item.Title) ??
+        stringFrom(item.Message) ??
+        stringFrom(item.Description) ??
+        stringFrom(item.MisconfSummary),
+      filePath:
+        normalizeCandidatePath(stringFrom(cause.Resource)) ??
+        normalizeCandidatePath(stringFrom(item.Target)),
+      startLine: numberFrom(cause.StartLine),
+      severity: stringFrom(item.Severity),
+    });
+  });
+}
+
+function scannerCandidate(
+  check: string,
+  tool: string,
+  fields: ScannerCandidateFields,
+): ScannerCandidate {
+  return {
+    check,
+    tool,
+    ...(fields.ruleId !== undefined ? { ruleId: fields.ruleId } : {}),
+    ...(fields.message !== undefined ? { message: fields.message } : {}),
+    ...(fields.filePath !== undefined ? { filePath: fields.filePath } : {}),
+    ...(fields.startLine !== undefined ? { startLine: fields.startLine } : {}),
+    ...(fields.severity !== undefined ? { severity: fields.severity } : {}),
+  };
+}
+
+function pathFromZizmorLocations(value: unknown): string | undefined {
+  const location = firstRecord(value);
+  return normalizeCandidatePath(
+    stringFrom(location?.path) ?? stringFrom(location?.file) ?? stringFrom(location?.filename),
+  );
+}
+
+function lineFromZizmorLocations(value: unknown): number | undefined {
+  const location = firstRecord(value);
+  return (
+    numberFrom(location?.line) ??
+    numberFrom(location?.start_line) ??
+    numberFrom(location?.startLine) ??
+    numberFrom(location?.row)
+  );
+}
+
+function firstRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const first = value[0];
+  return isRecord(first) ? first : undefined;
+}
+
+function normalizeCandidatePath(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    return normalizeScannerPath(value);
+  } catch {
+    return undefined;
   }
 }
 
@@ -952,6 +1541,27 @@ function renderHtml(runId: string, assessment: ReturnType<typeof buildAssessment
   ].join("");
 }
 
+function opengrepRules(): string {
+  return [
+    "rules:",
+    "  - id: javascript-eval",
+    "    languages: [javascript, typescript]",
+    "    message: Avoid eval on application-controlled data.",
+    "    severity: ERROR",
+    "    pattern: eval($VALUE)",
+    "  - id: javascript-function-constructor",
+    "    languages: [javascript, typescript]",
+    "    message: Avoid constructing executable code from strings.",
+    "    severity: WARNING",
+    "    pattern: new Function(...)",
+    "",
+  ].join("\n");
+}
+
+function sarifEmptyReport(): string {
+  return JSON.stringify({ version: "2.1.0", runs: [{ results: [] }] });
+}
+
 function manifestScript(): string {
   return String.raw`
 import { createHash } from "node:crypto";
@@ -1032,7 +1642,14 @@ const manifest = {
   exclusions,
   toolchain: {
     imageTag: process.env.VIBESHIELD_TOOLCHAIN_TAG ?? "vibeshield-toolchain:latest",
-    tools: [{ tool: "gitleaks", version: gitleaksVersion() }],
+    tools: [
+      { tool: "gitleaks", version: toolVersion("gitleaks", ["version"]) },
+      { tool: "opengrep", version: toolVersion("opengrep", ["--version"]) },
+      { tool: "syft", version: toolVersion("syft", ["version"]) },
+      { tool: "trivy", version: toolVersion("trivy", ["--version"]) },
+      { tool: "actionlint", version: toolVersion("actionlint", ["-version"]) },
+      { tool: "zizmor", version: toolVersion("zizmor", ["--version"]) },
+    ],
   },
   createdAt: new Date().toISOString(),
 };
@@ -1112,9 +1729,9 @@ function git(args) {
   return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim();
 }
 
-function gitleaksVersion() {
+function toolVersion(bin, args) {
   try {
-    return execFileSync("gitleaks", ["version"], { encoding: "utf8" }).trim();
+    return execFileSync(bin, args, { encoding: "utf8" }).trim().split("\n")[0];
   } catch {
     return "unknown";
   }
@@ -1144,8 +1761,20 @@ function jsonBytes(value: unknown): Uint8Array {
   return encoder.encode(JSON.stringify(value, null, 2));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function positiveInt(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function numberFrom(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stringFrom(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function stringOr(value: unknown, fallback: string): string {

@@ -26,9 +26,17 @@ describe.skip("MicrosandboxRuntime (live)", () => {
       await session.uploadBytes("/tmp/vibe.txt", new TextEncoder().encode("hello-vibeshield"));
       const back = await session.read("/tmp/vibe.txt");
       expect(new TextDecoder().decode(back)).toBe("hello-vibeshield");
-      // gitleaks is installed in the toolchain image
-      const out = await session.exec(["gitleaks", "version"]);
-      expect(out.exitCode).toBe(0);
+      for (const command of [
+        ["gitleaks", "version"],
+        ["opengrep", "--version"],
+        ["syft", "version"],
+        ["trivy", "--version"],
+        ["actionlint", "-version"],
+        ["zizmor", "--version"],
+      ]) {
+        const out = await session.exec(command);
+        expect(out.exitCode).toBe(0);
+      }
     } finally {
       await runtime.destroy("vs-smoke-test");
     }

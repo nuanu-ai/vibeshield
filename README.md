@@ -6,8 +6,9 @@ local folder before deploy and gets a small Agent Fix Pack: concrete findings,
 file/line evidence, plain-language risk, and a ready-to-paste prompt for their
 coding agent.
 
-The current implementation is the first deterministic Quick Scan slice: secrets
-check only, end to end.
+The current implementation is a deterministic Quick Scan slice. It runs the
+sandboxed scanner toolchain, records truthful coverage, and turns detected
+secrets into a deterministic Fix Pack action.
 
 ## What Works Now
 
@@ -16,10 +17,13 @@ check only, end to end.
   `SandboxRuntime`.
 - GitHub input is cloned inside Microsandbox. Local folders are filtered,
   packaged temporarily, uploaded, and extracted inside Microsandbox.
-- `gitleaks` runs in the sandbox. The product path does not fabricate scanner
-  output.
+- `gitleaks`, `opengrep`, `syft`, `trivy`, `actionlint`, and `zizmor` run in
+  the sandbox when the inventory says they apply. Non-applicable checks are
+  skipped with a recorded reason.
 - Raw gitleaks JSON is redacted before it enters the blob store.
 - Findings outside the snapshot manifest are rejected.
+- Reports include a coverage table showing checked, skipped, failed, or
+  degraded checks.
 - Reports are written under `~/.vibeshield/runs/<run-id>/` as
   `manifest.json`, `report.json`, `report.md`, and `report.html`.
 - With a detected secret, the deterministic verdict is `Critical fix needed`
@@ -28,8 +32,9 @@ check only, end to end.
 Still not done:
 
 - Resume is intentionally not implemented yet.
-- Additional scanners are not wired yet: opengrep, syft, trivy, actionlint,
-  zizmor, and IaC checks.
+- Fix Pack actions are still normalized from secrets findings only. Other
+  scanner outputs are captured as raw artifacts and extracted candidates for the
+  next normalization pass.
 - The one OpenRouter/Opus remediation enhancement call is not wired yet; the
   current slice uses the deterministic catalog fallback.
 - The live Microsandbox acceptance run still requires a local toolchain image.

@@ -14,6 +14,7 @@ import {
   GITLEAKS_REPORT_PATH,
   MANIFEST_PATH,
   MANIFEST_SCRIPT_PATH,
+  OPENGREP_REPORT_PATH,
   SOURCE_DIR,
 } from "../src/stages/paths.js";
 
@@ -142,7 +143,7 @@ describe("runScan quick scan vertical slice", () => {
     ).rejects.toThrow("outside the snapshot");
   });
 
-  it("marks applicable workflow checks as degraded until their adapters run", async () => {
+  it("runs applicable workflow checks and records checked coverage", async () => {
     const source = await writeLocalFixture(dir);
     const sandbox = new FakeSandboxRuntime({
       exec: fakeQuickScanExec(
@@ -161,20 +162,101 @@ describe("runScan quick scan vertical slice", () => {
     });
 
     const coverage = coverageByCheck(outcome.assessment.coverage);
-    expect(outcome.assessment.verdict).toBe("scan-incomplete");
+    expect(outcome.assessment.verdict).toBe("looks-ok-for-now");
     expect(coverage.get("secrets.gitleaks")).toEqual({
       check: "secrets.gitleaks",
       status: "checked",
     });
     expect(coverage.get("github-actions.actionlint")).toEqual({
       check: "github-actions.actionlint",
-      status: "degraded",
-      reason: "adapter not implemented yet",
+      status: "checked",
     });
     expect(coverage.get("github-actions.zizmor")).toEqual({
       check: "github-actions.zizmor",
-      status: "degraded",
-      reason: "adapter not implemented yet",
+      status: "checked",
+    });
+    expect(sandbox.invocations.map((i) => i.command[0])).toContain("actionlint");
+    expect(sandbox.invocations.map((i) => i.command[0])).toContain("zizmor");
+  });
+
+  it("runs every applicable scanner from the inventory plan", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "src/app.ts", size: 20, sha256: "app-sha" },
+          { path: "package.json", size: 40, sha256: "package-sha" },
+          { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+          { path: "Dockerfile", size: 30, sha256: "dockerfile-sha" },
+        ]),
+        [],
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const coverage = coverageByCheck(outcome.assessment.coverage);
+    expect(outcome.assessment.verdict).toBe("looks-ok-for-now");
+    for (const check of [
+      "secrets.gitleaks",
+      "code-patterns.opengrep",
+      "sbom.syft",
+      "dependencies.trivy",
+      "github-actions.actionlint",
+      "github-actions.zizmor",
+      "iac.trivy-config",
+    ]) {
+      expect(coverage.get(check)).toEqual({ check, status: "checked" });
+    }
+    expect(sandbox.invocations.map((i) => i.command[0])).toEqual(
+      expect.arrayContaining(["gitleaks", "opengrep", "syft", "trivy", "actionlint", "zizmor"]),
+    );
+    expect(sandbox.invocations.filter((i) => i.command[0] === "trivy")).toHaveLength(2);
+  });
+
+  it("keeps a useful fix pack when one applicable scanner fails", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "README.md", size: 10, sha256: "readme-sha" },
+          { path: "src/config.ts", size: 80, sha256: "config-sha" },
+          { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+        ]),
+        [
+          {
+            RuleID: "stripe-access-token",
+            File: "src/config.ts",
+            StartLine: 3,
+            EndLine: 3,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/config.ts:stripe-access-token:3",
+          },
+        ],
+        { actionlint: { exitCode: 2, stdout: "", stderr: "invalid workflow syntax" } },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const coverage = coverageByCheck(outcome.assessment.coverage);
+    expect(outcome.assessment.verdict).toBe("critical-fix-needed");
+    expect(outcome.assessment.rankedActions[0]?.remediation.agentPrompt).toContain(
+      "src/config.ts:3",
+    );
+    expect(coverage.get("github-actions.actionlint")).toEqual({
+      check: "github-actions.actionlint",
+      status: "failed",
+      reason: "exit 2; stderr: invalid workflow syntax",
     });
   });
 
@@ -205,7 +287,20 @@ function deps(sandbox: FakeSandboxRuntime, blobs: FilesystemBlobs) {
   };
 }
 
-function fakeQuickScanExec(manifest: Manifest, gitleaksRecords: unknown[]): FakeExecHandler {
+interface FakeScannerOverrides {
+  readonly actionlint?: {
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+  };
+  readonly zizmor?: { readonly exitCode: number; readonly stdout: string; readonly stderr: string };
+}
+
+function fakeQuickScanExec(
+  manifest: Manifest,
+  gitleaksRecords: unknown[],
+  overrides: FakeScannerOverrides = {},
+): FakeExecHandler {
   return (command, session) => {
     const bin = command[0];
     if (bin === "mkdir" || bin === "rm" || bin === "tar" || bin === "git") {
@@ -221,6 +316,19 @@ function fakeQuickScanExec(manifest: Manifest, gitleaksRecords: unknown[]): Fake
     if (bin === "gitleaks") {
       session.files.set(GITLEAKS_REPORT_PATH, jsonBytes(gitleaksRecords));
       return { exitCode: gitleaksRecords.length > 0 ? 1 : 0, stdout: "", stderr: "" };
+    }
+    if (bin === "opengrep") {
+      session.files.set(
+        OPENGREP_REPORT_PATH,
+        jsonBytes({ version: "2.1.0", runs: [{ results: [] }] }),
+      );
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
+    if (bin === "actionlint" && command[1] !== "-version") {
+      return overrides.actionlint ?? { exitCode: 0, stdout: "[]", stderr: "" };
+    }
+    if (bin === "zizmor" && command[1] !== "--version") {
+      return overrides.zizmor ?? { exitCode: 0, stdout: "[]", stderr: "" };
     }
     return { exitCode: 0, stdout: "", stderr: "" };
   };

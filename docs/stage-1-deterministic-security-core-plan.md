@@ -134,7 +134,7 @@ still-useful Fix Pack when one check is killed.
 - [x] **Inventory.detect.** In: manifest. Do: detect languages, manifests,
   workflows, IaC to gate which checks apply. Out: a scan plan. Done: a repo with
   no workflows skips the Actions checks with a recorded reason.
-- [ ] **Remaining check adapters.** In: source dir. Do: thin adapters
+- [x] **Remaining check adapters.** In: source dir. Do: thin adapters
   (argv/config/parse) for code patterns (opengrep), SBOM (syft), dependencies
   (trivy), GitHub Actions (actionlint + zizmor), IaC (trivy config); vuln DBs
   refresh at run start. Out: raw artifacts + candidates per tool. Done: each
@@ -143,6 +143,8 @@ still-useful Fix Pack when one check is killed.
   same-root-cause findings; one failing check still yields a Fix Pack; lost
   required coverage → `Scan incomplete`. Out: clusters + truthful coverage. Done:
   killing one check keeps other findings; required-coverage loss blocks green.
+  Current: scanner-failure coverage and non-green verdict are implemented;
+  root-cause clustering remains.
 
 ### Gate 3 — the one AI fix-pack call
 
