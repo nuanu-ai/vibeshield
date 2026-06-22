@@ -22,26 +22,36 @@ export class MicrosandboxSession implements SandboxSession {
 
   async exec(command: string[]): Promise<ExecResult> {
     const joined = command.map(shellQuote).join(" ");
-    const out = await this.sb.shell(joined);
+    const out = await withMicrosandboxContext(`running in Microsandbox: ${joined}`, () =>
+      this.sb.shell(joined),
+    );
     return { exitCode: out.code, stdout: out.stdout(), stderr: out.stderr() };
   }
 
   async upload(localPath: string, guestPath: string): Promise<void> {
     const data = await readFile(localPath);
-    await this.sb.fs().write(guestPath, data);
+    await withMicrosandboxContext(`uploading ${guestPath} to Microsandbox`, () =>
+      this.sb.fs().write(guestPath, data),
+    );
   }
 
   async uploadBytes(guestPath: string, data: Uint8Array): Promise<void> {
-    await this.sb.fs().write(guestPath, Buffer.from(data));
+    await withMicrosandboxContext(`uploading ${guestPath} to Microsandbox`, () =>
+      this.sb.fs().write(guestPath, Buffer.from(data)),
+    );
   }
 
   async download(guestPath: string): Promise<Uint8Array> {
-    const buf = await this.sb.fs().read(guestPath);
+    const buf = await withMicrosandboxContext(`reading ${guestPath} from Microsandbox`, () =>
+      this.sb.fs().read(guestPath),
+    );
     return new Uint8Array(buf);
   }
 
   async read(guestPath: string): Promise<Uint8Array> {
-    const buf = await this.sb.fs().read(guestPath);
+    const buf = await withMicrosandboxContext(`reading ${guestPath} from Microsandbox`, () =>
+      this.sb.fs().read(guestPath),
+    );
     return new Uint8Array(buf);
   }
 
@@ -79,6 +89,24 @@ function shellQuote(arg: string): string {
     return arg;
   }
   return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+async function withMicrosandboxContext<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message.includes("client closed")) {
+      throw new Error(
+        `Microsandbox session closed while ${operation}. This is a sandbox runtime interruption, not a scan finding. Re-run the scan; if it repeats, check \`msb list\` and reload the toolchain with \`pnpm toolchain:prepare\`. Original error: ${message}`,
+      );
+    }
+    throw new Error(`Microsandbox failed while ${operation}: ${message}`);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function msbPath(): Promise<string | null> {
