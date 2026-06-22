@@ -665,10 +665,16 @@ function remediationStage(): StageDefinition {
     run: async (ctx) => {
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { candidates } = readInput<ActionsData>(ctx, "actions.rank");
-      const rankedActions = candidates.map((candidate) => ({
-        candidate,
-        remediation: catalogRemediation(candidate, findings, evidence),
-      }));
+      const rankedActions = candidates.map((candidate) => {
+        const candidateFindings = findings.filter((finding) =>
+          candidate.findingIds.includes(finding.id),
+        );
+        const candidateEvidence = evidence.filter((ev) => candidate.evidenceIds.includes(ev.id));
+        return {
+          candidate,
+          remediation: catalogRemediation(candidate, candidateFindings, candidateEvidence),
+        };
+      });
       return success({ rankedActions } satisfies RemediationData);
     },
   };

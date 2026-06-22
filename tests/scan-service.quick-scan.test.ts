@@ -307,6 +307,62 @@ describe("runScan quick scan vertical slice", () => {
     });
   });
 
+  it("keeps remediation prompts scoped to each action's own findings", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "src/config.ts", size: 80, sha256: "config-sha" },
+          { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+        ]),
+        [
+          {
+            RuleID: "stripe-access-token",
+            File: "src/config.ts",
+            StartLine: 3,
+            EndLine: 3,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/config.ts:stripe-access-token:3",
+          },
+        ],
+        {
+          actionlint: {
+            exitCode: 1,
+            stdout: JSON.stringify([
+              {
+                Message: 'property "branches" is not defined',
+                Kind: "workflow-syntax",
+                Filepath: ".github/workflows/ci.yml",
+                Line: 7,
+              },
+            ]),
+            stderr: "",
+          },
+        },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const promptByTitle = new Map(
+      outcome.assessment.rankedActions.map((action) => [
+        action.remediation.title,
+        action.remediation.agentPrompt,
+      ]),
+    );
+    expect(promptByTitle.get("Remove the committed secret")).toContain("stripe-access-token");
+    expect(promptByTitle.get("Remove the committed secret")).not.toContain("workflow-syntax");
+    expect(promptByTitle.get("Harden the GitHub Actions workflow")).toContain("workflow-syntax");
+    expect(promptByTitle.get("Harden the GitHub Actions workflow")).not.toContain(
+      "stripe-access-token",
+    );
+  });
+
   it("blocks a green verdict when required scanner coverage is lost", async () => {
     const source = await writeLocalFixture(dir);
     const sandbox = new FakeSandboxRuntime({
