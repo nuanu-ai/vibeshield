@@ -100,10 +100,6 @@ Status:
   build/validate the DAG, run, record attempts/events. Out: the DAG drives the
   thread. Done: stage list comes from the registry and every stage attempt is
   persisted.
-- [ ] **Minimal resume.** In: a run id or run directory. Do: re-run
-  missing/failed/stale stages and mark descendants stale on forced rerun. Out:
-  resume reuses durable state instead of starting from scratch. Done: resume
-  re-runs only stale/failed/missing work.
 - [x] **Source acquisition.** In: GitHub URL or local folder. Do: GitHub →
   `git clone --depth 1` inside the sandbox; local → copy in; `.git` present → drop
   ignored files and read the commit SHA, else a default ignore set. Out: a source
@@ -135,7 +131,7 @@ Status:
 Closes when: a fixture matrix touching every check shows a coverage table and a
 still-useful Fix Pack when one check is killed.
 
-- [ ] **Inventory.detect.** In: manifest. Do: detect languages, manifests,
+- [x] **Inventory.detect.** In: manifest. Do: detect languages, manifests,
   workflows, IaC to gate which checks apply. Out: a scan plan. Done: a repo with
   no workflows skips the Actions checks with a recorded reason.
 - [ ] **Remaining check adapters.** In: source dir. Do: thin adapters
@@ -167,6 +163,10 @@ vs off; the AI only makes the explanations and prompts read better.
 - [ ] **CLI look + README.** Keep the `run-cli.ts` palette/spinner; rewire the
   content to the new flow; rewrite the README to this product. Done: owner
   confirms the output keeps the tuned look and the README matches `scan`.
+- [ ] **Minimal resume.** In: a run id or run directory. Do: re-run
+  missing/failed/stale stages and mark descendants stale on forced rerun. Out:
+  resume reuses durable state instead of starting from scratch. Done: resume
+  re-runs only stale/failed/missing work.
 - [ ] **Remove old MVP** as each replacement lands: Daytona, Pi mapping
   collectors, `attack-hypotheses`, evaluator loops, repo-map-as-truth, duplicate
   stage arrays, mutable-path overwrite, in-memory registry. Keep Pi + OpenRouter

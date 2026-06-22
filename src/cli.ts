@@ -121,6 +121,11 @@ function renderTerminalOutcome(outcome: Awaited<ReturnType<typeof runScan>>): vo
   process.stdout.write(`Findings: ${assessment.findingSummary.total}\n`);
   process.stdout.write(`Reports: ${outcome.reportPaths.json}\n`);
   process.stdout.write(`${assessment.limitation}\n`);
+  process.stdout.write("\nCoverage:\n");
+  for (const entry of assessment.coverage) {
+    const reason = entry.reason !== undefined ? ` - ${entry.reason}` : "";
+    process.stdout.write(`- ${entry.check}: ${entry.status}${reason}\n`);
+  }
 
   for (const ranked of assessment.rankedActions) {
     process.stdout.write("\n");

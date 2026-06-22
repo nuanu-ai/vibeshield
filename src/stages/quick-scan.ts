@@ -3,8 +3,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ActionCandidate, RemediationAction } from "../domain/action.js";
 import { type Verdict, verdictLabel } from "../domain/assessment.js";
+import type { CoverageEntry } from "../domain/coverage-summary.js";
 import type { Evidence, RedactedRawArtifact } from "../domain/evidence.js";
 import type { Finding } from "../domain/finding.js";
+import type { PlannedCheck, RepositoryInventory, ScanPlan } from "../domain/inventory.js";
 import type { Manifest } from "../domain/manifest.js";
 import { summarizeManifest, summarizeToolchain } from "../domain/manifest-summary.js";
 import type { ArtifactRef, SourceInput } from "../domain/run.js";
@@ -30,6 +32,7 @@ export function quickScanStages(): StageDefinition[] {
   return [
     sourceResolveStage(),
     snapshotManifestStage(),
+    inventoryDetectStage(),
     gitleaksStage(),
     normalizeStage(),
     actionsStage(),
@@ -45,6 +48,11 @@ interface SourceResolveData {
 interface ManifestData {
   readonly manifest: Manifest;
   readonly manifestArtifact: ArtifactRef;
+}
+
+interface InventoryData {
+  readonly inventory: RepositoryInventory;
+  readonly scanPlan: ScanPlan;
 }
 
 interface GitleaksData {
@@ -175,15 +183,36 @@ function snapshotManifestStage(): StageDefinition {
   };
 }
 
+function inventoryDetectStage(): StageDefinition {
+  return {
+    id: "inventory.detect",
+    version: "1",
+    dependencies: ["snapshot.manifest"],
+    inputs: ["manifest"],
+    outputs: [],
+    required: true,
+    run: async (ctx) => {
+      const { manifest } = readInput<ManifestData>(ctx, "snapshot.manifest");
+      const inventory = inventoryFromManifest(manifest);
+      return success({
+        inventory,
+        scanPlan: scanPlanFromInventory(inventory),
+      } satisfies InventoryData);
+    },
+  };
+}
+
 function gitleaksStage(): StageDefinition {
   return {
     id: "scan.secrets.gitleaks",
     version: "1",
-    dependencies: ["snapshot.manifest"],
+    dependencies: ["inventory.detect"],
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
     run: async (ctx) => {
+      const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
+      assertApplicableCheck(scanPlan, "secrets.gitleaks");
       const result = await ctx.session.exec([
         "gitleaks",
         "detect",
@@ -293,12 +322,13 @@ function actionsStage(): StageDefinition {
   return {
     id: "actions.rank",
     version: "1",
-    dependencies: ["findings.normalize"],
+    dependencies: ["findings.normalize", "inventory.detect"],
     inputs: [],
     outputs: [],
     required: true,
     run: async (ctx) => {
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
+      const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
       const candidates: ActionCandidate[] = [];
       if (findings.length > 0) {
         candidates.push({
@@ -311,7 +341,7 @@ function actionsStage(): StageDefinition {
           verdictImpact: "blocks-deploy",
         });
       }
-      const verdict: Verdict = findings.length > 0 ? "critical-fix-needed" : "looks-ok-for-now";
+      const verdict = verdictFor(findings, scanPlan, new Set(["secrets.gitleaks"]));
       return success({ candidates, verdict } satisfies ActionsData);
     },
   };
@@ -343,6 +373,7 @@ function reportStage(): StageDefinition {
     version: "1",
     dependencies: [
       "snapshot.manifest",
+      "inventory.detect",
       "findings.normalize",
       "actions.rank",
       "remediation.catalog",
@@ -352,6 +383,7 @@ function reportStage(): StageDefinition {
     required: true,
     run: async (ctx) => {
       const { manifest } = readInput<ManifestData>(ctx, "snapshot.manifest");
+      const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { verdict } = readInput<ActionsData>(ctx, "actions.rank");
       const { rankedActions } = readInput<RemediationData>(ctx, "remediation.catalog");
@@ -360,7 +392,7 @@ function reportStage(): StageDefinition {
         manifest: summarizeManifest(manifest),
         toolchain: summarizeToolchain(manifest.toolchain),
         verdict,
-        coverage: [{ check: "secrets.gitleaks", status: "checked" }],
+        coverage: coverageFromScanPlan(scanPlan, new Set(["secrets.gitleaks"])),
         findingSummary: summarizeFindings(findings),
         evidence,
         findings,
@@ -444,6 +476,156 @@ function formatExecFailure(result: ExecResult): string {
   return `exit ${result.exitCode}${stderr ? `; stderr: ${stderr}` : ""}${
     stdout ? `; stdout: ${stdout}` : ""
   }`;
+}
+
+function inventoryFromManifest(manifest: Manifest): RepositoryInventory {
+  const languages = new Set<string>();
+  const packageManifests: string[] = [];
+  const workflows: string[] = [];
+  const iacFiles: string[] = [];
+  let codeFileCount = 0;
+
+  for (const file of manifest.files) {
+    const language = languageForPath(file.path);
+    if (language !== null) {
+      languages.add(language);
+      codeFileCount += 1;
+    }
+    if (isPackageManifest(file.path)) {
+      packageManifests.push(file.path);
+    }
+    if (isGithubActionsWorkflow(file.path)) {
+      workflows.push(file.path);
+    }
+    if (isIacFile(file.path)) {
+      iacFiles.push(file.path);
+    }
+  }
+
+  return {
+    languages: [...languages].sort(),
+    packageManifests: packageManifests.sort(),
+    workflows: workflows.sort(),
+    iacFiles: iacFiles.sort(),
+    codeFileCount,
+  };
+}
+
+function scanPlanFromInventory(inventory: RepositoryInventory): ScanPlan {
+  const hasCode = inventory.codeFileCount > 0;
+  const hasPackageManifests = inventory.packageManifests.length > 0;
+  const hasWorkflows = inventory.workflows.length > 0;
+  const hasIac = inventory.iacFiles.length > 0;
+  const checks: PlannedCheck[] = [
+    {
+      check: "secrets.gitleaks",
+      tool: "gitleaks",
+      applicable: true,
+      required: true,
+      implemented: true,
+    },
+    {
+      check: "code-patterns.opengrep",
+      tool: "opengrep",
+      applicable: hasCode,
+      required: true,
+      implemented: false,
+      ...(!hasCode ? { reason: "no supported source code files found" } : {}),
+    },
+    {
+      check: "sbom.syft",
+      tool: "syft",
+      applicable: hasPackageManifests,
+      required: true,
+      implemented: false,
+      ...(!hasPackageManifests ? { reason: "no dependency manifests found" } : {}),
+    },
+    {
+      check: "dependencies.trivy",
+      tool: "trivy",
+      applicable: hasPackageManifests,
+      required: true,
+      implemented: false,
+      ...(!hasPackageManifests ? { reason: "no dependency manifests found" } : {}),
+    },
+    {
+      check: "github-actions.actionlint",
+      tool: "actionlint",
+      applicable: hasWorkflows,
+      required: true,
+      implemented: false,
+      ...(!hasWorkflows ? { reason: "no GitHub Actions workflows found" } : {}),
+    },
+    {
+      check: "github-actions.zizmor",
+      tool: "zizmor",
+      applicable: hasWorkflows,
+      required: true,
+      implemented: false,
+      ...(!hasWorkflows ? { reason: "no GitHub Actions workflows found" } : {}),
+    },
+    {
+      check: "iac.trivy-config",
+      tool: "trivy",
+      applicable: hasIac,
+      required: true,
+      implemented: false,
+      ...(!hasIac ? { reason: "no IaC files found" } : {}),
+    },
+  ];
+  return { checks };
+}
+
+function coverageFromScanPlan(
+  scanPlan: ScanPlan,
+  completedChecks: ReadonlySet<string>,
+): CoverageEntry[] {
+  return scanPlan.checks.map((check) => {
+    if (completedChecks.has(check.check)) {
+      return { check: check.check, status: "checked" };
+    }
+    if (!check.applicable) {
+      return {
+        check: check.check,
+        status: "skipped",
+        reason: check.reason ?? "not applicable to this snapshot",
+      };
+    }
+    return {
+      check: check.check,
+      status: check.implemented ? "failed" : "degraded",
+      reason: check.implemented
+        ? "applicable check did not complete"
+        : "adapter not implemented yet",
+    };
+  });
+}
+
+function verdictFor(
+  findings: ReadonlyArray<Finding>,
+  scanPlan: ScanPlan,
+  completedChecks: ReadonlySet<string>,
+): Verdict {
+  if (findings.some((finding) => finding.severity === "critical")) {
+    return "critical-fix-needed";
+  }
+  if (findings.length > 0) {
+    return "not-ready-to-deploy";
+  }
+  const lostRequiredCoverage = scanPlan.checks.some(
+    (check) => check.required && check.applicable && !completedChecks.has(check.check),
+  );
+  return lostRequiredCoverage ? "scan-incomplete" : "looks-ok-for-now";
+}
+
+function assertApplicableCheck(scanPlan: ScanPlan, checkId: string): void {
+  const check = scanPlan.checks.find((planned) => planned.check === checkId);
+  if (check === undefined) {
+    throw new Error(`Scan plan is missing required check: ${checkId}`);
+  }
+  if (!check.applicable) {
+    throw new Error(`Check ${checkId} is not applicable: ${check.reason ?? "no reason recorded"}`);
+  }
 }
 
 async function readReportBytes(ctx: StageContext, result: ExecResult): Promise<Uint8Array> {
@@ -585,6 +767,127 @@ function summarizeFindings(findings: ReadonlyArray<Finding>) {
   return { total: findings.length, bySeverity, byCategory };
 }
 
+function languageForPath(filePath: string): string | null {
+  const ext = path.posix.extname(filePath).toLowerCase();
+  switch (ext) {
+    case ".ts":
+    case ".tsx":
+      return "typescript";
+    case ".js":
+    case ".jsx":
+    case ".mjs":
+    case ".cjs":
+      return "javascript";
+    case ".py":
+      return "python";
+    case ".go":
+      return "go";
+    case ".rs":
+      return "rust";
+    case ".java":
+      return "java";
+    case ".kt":
+    case ".kts":
+      return "kotlin";
+    case ".cs":
+      return "csharp";
+    case ".php":
+      return "php";
+    case ".rb":
+      return "ruby";
+    case ".swift":
+      return "swift";
+    case ".c":
+    case ".h":
+      return "c";
+    case ".cc":
+    case ".cpp":
+    case ".cxx":
+    case ".hpp":
+    case ".hh":
+      return "cpp";
+    case ".vue":
+      return "vue";
+    case ".svelte":
+      return "svelte";
+    default:
+      return null;
+  }
+}
+
+function isPackageManifest(filePath: string): boolean {
+  const base = path.posix.basename(filePath);
+  if (
+    [
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "bun.lock",
+      "bun.lockb",
+      "requirements.txt",
+      "pyproject.toml",
+      "poetry.lock",
+      "Pipfile",
+      "Pipfile.lock",
+      "setup.py",
+      "setup.cfg",
+      "go.mod",
+      "go.sum",
+      "Cargo.toml",
+      "Cargo.lock",
+      "pom.xml",
+      "composer.json",
+      "composer.lock",
+      "Gemfile",
+      "Gemfile.lock",
+      "mix.exs",
+      "mix.lock",
+      "pubspec.yaml",
+      "pubspec.lock",
+      "Package.swift",
+    ].includes(base)
+  ) {
+    return true;
+  }
+  return (
+    /^requirements[-\w]*\.txt$/i.test(base) ||
+    /^build\.gradle(\.kts)?$/i.test(base) ||
+    /\.csproj$/i.test(base)
+  );
+}
+
+function isGithubActionsWorkflow(filePath: string): boolean {
+  return /^\.github\/workflows\/[^/]+\.ya?ml$/i.test(filePath);
+}
+
+function isIacFile(filePath: string): boolean {
+  if (isGithubActionsWorkflow(filePath)) {
+    return false;
+  }
+  const base = path.posix.basename(filePath);
+  const lowerPath = filePath.toLowerCase();
+  if (/^dockerfile([.-].*)?$/i.test(base)) {
+    return true;
+  }
+  if (/^(docker-)?compose([.-].*)?\.ya?ml$/i.test(base)) {
+    return true;
+  }
+  if (/\.(tf|tfvars)$/i.test(base)) {
+    return true;
+  }
+  if (base === "Chart.yaml" || /^values([.-].*)?\.ya?ml$/i.test(base)) {
+    return lowerPath.includes("/helm/") || lowerPath.includes("/charts/");
+  }
+  return (
+    /\.(ya?ml|json)$/i.test(base) &&
+    (lowerPath.startsWith("k8s/") ||
+      lowerPath.startsWith("kubernetes/") ||
+      lowerPath.includes("/k8s/") ||
+      lowerPath.includes("/kubernetes/"))
+  );
+}
+
 function renderMarkdown(runId: string, assessment: ReturnType<typeof buildAssessment>): string {
   const lines = [
     "# VibeShield Quick Scan",
@@ -596,6 +899,15 @@ function renderMarkdown(runId: string, assessment: ReturnType<typeof buildAssess
     "",
     assessment.limitation,
     "",
+    "## Coverage",
+    "",
+    "| Check | Status | Reason |",
+    "| --- | --- | --- |",
+    ...assessment.coverage.map(
+      (entry) =>
+        `| ${entry.check} | ${entry.status} | ${entry.reason !== undefined ? entry.reason : ""} |`,
+    ),
+    "",
   ];
   for (const ranked of assessment.rankedActions) {
     lines.push(`## ${ranked.remediation.title}`, "", ranked.remediation.risk, "");
@@ -605,6 +917,14 @@ function renderMarkdown(runId: string, assessment: ReturnType<typeof buildAssess
 }
 
 function renderHtml(runId: string, assessment: ReturnType<typeof buildAssessment>): string {
+  const coverageRows = assessment.coverage
+    .map(
+      (entry) =>
+        `<tr><td>${escapeHtml(entry.check)}</td><td>${escapeHtml(entry.status)}</td><td>${escapeHtml(
+          entry.reason ?? "",
+        )}</td></tr>`,
+    )
+    .join("");
   const actions = assessment.rankedActions
     .map(
       (ranked) =>
@@ -624,6 +944,9 @@ function renderHtml(runId: string, assessment: ReturnType<typeof buildAssessment
     `<p>Files scanned: ${assessment.manifest.fileCount}</p>`,
     `<p>Findings: ${assessment.findingSummary.total}</p>`,
     `<p>${escapeHtml(assessment.limitation)}</p>`,
+    "<h2>Coverage</h2>",
+    "<table><thead><tr><th>Check</th><th>Status</th><th>Reason</th></tr></thead>",
+    `<tbody>${coverageRows}</tbody></table>`,
     actions,
     "</body></html>",
   ].join("");

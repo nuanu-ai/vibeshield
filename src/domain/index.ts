@@ -8,6 +8,7 @@ export * from "./assessment.js";
 export * from "./coverage-summary.js";
 export * from "./evidence.js";
 export * from "./finding.js";
+export * from "./inventory.js";
 export * from "./manifest.js";
 export * from "./manifest-summary.js";
 export * from "./run.js";

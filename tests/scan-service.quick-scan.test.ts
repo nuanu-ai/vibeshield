@@ -69,6 +69,16 @@ describe("runScan quick scan vertical slice", () => {
     expect(outcome.assessment.rankedActions[0]?.remediation.agentPrompt).not.toContain(
       PLANTED_SECRET,
     );
+    expect(coverageByCheck(outcome.assessment.coverage).get("github-actions.actionlint")).toEqual({
+      check: "github-actions.actionlint",
+      status: "skipped",
+      reason: "no GitHub Actions workflows found",
+    });
+    expect(coverageByCheck(outcome.assessment.coverage).get("github-actions.zizmor")).toEqual({
+      check: "github-actions.zizmor",
+      status: "skipped",
+      reason: "no GitHub Actions workflows found",
+    });
 
     const rawHash = outcome.assessment.evidence[0]?.rawArtifactBlobSha256;
     expect(rawHash).toBeDefined();
@@ -79,10 +89,19 @@ describe("runScan quick scan vertical slice", () => {
     const reportPath = outcome.reportPaths.json;
     expect(reportPath).toBeDefined();
     const report = JSON.parse(await readFile(reportPath ?? "", "utf8")) as {
-      assessment: { verdict: string; rankedActions: unknown[] };
+      assessment: {
+        verdict: string;
+        rankedActions: unknown[];
+        coverage: Array<{ check: string; status: string; reason?: string }>;
+      };
     };
     expect(report.assessment.verdict).toBe("critical-fix-needed");
     expect(report.assessment.rankedActions).toHaveLength(1);
+    expect(coverageByCheck(report.assessment.coverage).get("github-actions.actionlint")).toEqual({
+      check: "github-actions.actionlint",
+      status: "skipped",
+      reason: "no GitHub Actions workflows found",
+    });
 
     expect(sandbox.invocations.map((i) => i.command)).toContainEqual([
       "gitleaks",
@@ -121,6 +140,42 @@ describe("runScan quick scan vertical slice", () => {
         toolchainImage: "test-toolchain:latest",
       }),
     ).rejects.toThrow("outside the snapshot");
+  });
+
+  it("marks applicable workflow checks as degraded until their adapters run", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "README.md", size: 10, sha256: "readme-sha" },
+          { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+        ]),
+        [],
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const coverage = coverageByCheck(outcome.assessment.coverage);
+    expect(outcome.assessment.verdict).toBe("scan-incomplete");
+    expect(coverage.get("secrets.gitleaks")).toEqual({
+      check: "secrets.gitleaks",
+      status: "checked",
+    });
+    expect(coverage.get("github-actions.actionlint")).toEqual({
+      check: "github-actions.actionlint",
+      status: "degraded",
+      reason: "adapter not implemented yet",
+    });
+    expect(coverage.get("github-actions.zizmor")).toEqual({
+      check: "github-actions.zizmor",
+      status: "degraded",
+      reason: "adapter not implemented yet",
+    });
   });
 
   it("fails before sandbox creation when the runtime is unavailable", async () => {
@@ -182,15 +237,12 @@ async function writeLocalFixture(root: string) {
   return { kind: "local" as const, path: sourcePath };
 }
 
-function manifestFor(localPath: string): Manifest {
+function manifestFor(localPath: string, files = defaultManifestFiles()): Manifest {
   return {
     origin: { kind: "local", path: localPath },
     commitSha: null,
     sourceHash: "fixture-source-hash",
-    files: [
-      { path: "README.md", size: 10, sha256: "readme-sha" },
-      { path: "src/config.ts", size: 80, sha256: "config-sha" },
-    ],
+    files,
     exclusions: [],
     toolchain: {
       imageTag: "test-toolchain:latest",
@@ -200,8 +252,19 @@ function manifestFor(localPath: string): Manifest {
   };
 }
 
+function defaultManifestFiles(): Manifest["files"] {
+  return [
+    { path: "README.md", size: 10, sha256: "readme-sha" },
+    { path: "src/config.ts", size: 80, sha256: "config-sha" },
+  ];
+}
+
 function jsonBytes(value: unknown): Uint8Array {
   return encoder.encode(JSON.stringify(value, null, 2));
+}
+
+function coverageByCheck<T extends { check: string }>(coverage: ReadonlyArray<T>): Map<string, T> {
+  return new Map(coverage.map((entry) => [entry.check, entry]));
 }
 
 class CollectingEvents {
