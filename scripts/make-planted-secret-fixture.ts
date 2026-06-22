@@ -1,7 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Generate the Stage 1 Gate 1 acceptance fixture: a tiny git repo with a
- * planted, gitleaks-proven fake credential.
+ * Generate a fixture git repo with a planted, gitleaks-proven fake credential.
  *
  * Run:
  *   pnpm exec tsx scripts/make-planted-secret-fixture.ts [dest-dir]
