@@ -2248,10 +2248,17 @@ function renderMarkdown(runId: string, assessment: ReturnType<typeof buildAssess
     "",
     `Run: ${runId}`,
     `Verdict: ${verdictLabel(assessment.verdict)}`,
+    `Fix Pack: ${assessment.rankedActions.length} ${assessment.rankedActions.length === 1 ? "fix" : "fixes"}`,
     `Files scanned: ${assessment.manifest.fileCount}`,
     `Findings: ${assessment.findingSummary.total}`,
     "",
     assessment.limitation,
+    "",
+    "## What To Do",
+    "",
+    assessment.rankedActions.length > 0
+      ? "Work through the fixes below in order. Each fix has a prompt you can paste into your coding agent."
+      : "No blocking fixes were produced by the checks that completed.",
     "",
     "## Coverage",
     "",
@@ -2263,9 +2270,24 @@ function renderMarkdown(runId: string, assessment: ReturnType<typeof buildAssess
     ),
     "",
   ];
-  for (const ranked of assessment.rankedActions) {
-    lines.push(`## ${ranked.remediation.title}`, "", ranked.remediation.risk, "");
-    lines.push("```text", ranked.remediation.agentPrompt, "```", "");
+  assessment.rankedActions.forEach((ranked, index) => {
+    const { remediation } = ranked;
+    lines.push(`## ${index + 1}. ${remediation.title}`, "");
+    lines.push(
+      `**Source:** ${remediation.fromCatalog ? "Catalog fallback" : "OpenRouter enhanced"}`,
+    );
+    lines.push(`**Where:** ${markdownList(actionLocationsForReport(ranked, assessment))}`);
+    lines.push("", "### What This Means", "", remediation.risk, "");
+    lines.push("### Why Fix This Now", "", remediation.whyFixNow, "");
+    appendMarkdownList(lines, "What To Change", remediation.fixSteps);
+    appendMarkdownList(lines, "Operational Steps", remediation.operationalSteps);
+    lines.push("### Prompt For Your Coding Agent", "");
+    lines.push("Copy this whole block into your coding agent:");
+    lines.push("", "```text", remediation.agentPrompt, "```", "");
+    appendMarkdownList(lines, "How To Check It Worked", remediation.verifySteps);
+  });
+  if (assessment.rankedActions.length === 0) {
+    lines.push("## Agent Fix Pack", "", "No fixes to show.", "");
   }
   return `${lines.join("\n")}\n`;
 }
@@ -2280,30 +2302,119 @@ function renderHtml(runId: string, assessment: ReturnType<typeof buildAssessment
     )
     .join("");
   const actions = assessment.rankedActions
-    .map(
-      (ranked) =>
-        `<section><h2>${escapeHtml(ranked.remediation.title)}</h2><p>${escapeHtml(
-          ranked.remediation.risk,
-        )}</p><pre>${escapeHtml(ranked.remediation.agentPrompt)}</pre></section>`,
-    )
+    .map((ranked, index) => renderActionHtml(index + 1, ranked, assessment))
     .join("");
+  const actionSummary =
+    assessment.rankedActions.length > 0
+      ? `<p>Work through these fixes in order. Each card has a clearly labeled prompt to paste into your coding agent.</p>`
+      : "<p>No blocking fixes were produced by the checks that completed.</p>";
   return [
     "<!doctype html>",
     '<html lang="en">',
-    '<head><meta charset="utf-8"><title>VibeShield Quick Scan</title></head>',
+    '<head><meta charset="utf-8"><title>VibeShield Quick Scan</title>',
+    "<style>",
+    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.5;margin:0;color:#171717;background:#fafafa}",
+    "main{max-width:960px;margin:0 auto;padding:32px 20px 56px}",
+    "h1,h2,h3{line-height:1.2}",
+    ".summary{border-left:4px solid #111;padding:12px 16px;background:#fff;margin:20px 0}",
+    ".action{background:#fff;border:1px solid #ddd;border-radius:8px;padding:20px;margin:18px 0}",
+    ".agent-prompt{border:2px solid #111;border-radius:8px;padding:16px;background:#f4f4f5}",
+    ".agent-prompt h3{margin-top:0}",
+    "pre{white-space:pre-wrap;word-break:break-word;background:#111;color:#fff;padding:14px;border-radius:6px}",
+    "table{border-collapse:collapse;width:100%;background:#fff}",
+    "th,td{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}",
+    "code{background:#eee;padding:1px 4px;border-radius:4px}",
+    "</style></head>",
     "<body>",
+    "<main>",
     "<h1>VibeShield Quick Scan</h1>",
-    `<p>Run: ${escapeHtml(runId)}</p>`,
-    `<p>Verdict: ${escapeHtml(verdictLabel(assessment.verdict))}</p>`,
-    `<p>Files scanned: ${assessment.manifest.fileCount}</p>`,
-    `<p>Findings: ${assessment.findingSummary.total}</p>`,
+    '<section class="summary">',
+    `<p><strong>Verdict:</strong> ${escapeHtml(verdictLabel(assessment.verdict))}</p>`,
+    `<p><strong>Fix Pack:</strong> ${assessment.rankedActions.length} ${assessment.rankedActions.length === 1 ? "fix" : "fixes"}</p>`,
+    `<p><strong>Run:</strong> ${escapeHtml(runId)}</p>`,
+    `<p><strong>Files scanned:</strong> ${assessment.manifest.fileCount}; <strong>findings:</strong> ${assessment.findingSummary.total}</p>`,
+    "</section>",
     `<p>${escapeHtml(assessment.limitation)}</p>`,
+    "<h2>What To Do</h2>",
+    actionSummary,
+    "<h2>Agent Fix Pack</h2>",
+    actions.length > 0 ? actions : "<p>No fixes to show.</p>",
     "<h2>Coverage</h2>",
     "<table><thead><tr><th>Check</th><th>Status</th><th>Reason</th></tr></thead>",
     `<tbody>${coverageRows}</tbody></table>`,
-    actions,
+    "</main>",
     "</body></html>",
   ].join("");
+}
+
+function renderActionHtml(
+  rank: number,
+  ranked: RankedAction,
+  assessment: ReturnType<typeof buildAssessment>,
+): string {
+  const { remediation } = ranked;
+  return [
+    '<section class="action">',
+    `<h2>${rank}. ${escapeHtml(remediation.title)}</h2>`,
+    `<p><strong>Source:</strong> ${remediation.fromCatalog ? "Catalog fallback" : "OpenRouter enhanced"}</p>`,
+    `<p><strong>Where we saw it:</strong> ${escapeHtml(actionLocationsForReport(ranked, assessment).join(", ") || "Repository")}</p>`,
+    "<h3>What This Means</h3>",
+    `<p>${escapeHtml(remediation.risk)}</p>`,
+    "<h3>Why Fix This Now</h3>",
+    `<p>${escapeHtml(remediation.whyFixNow)}</p>`,
+    renderHtmlList("What To Change", remediation.fixSteps),
+    renderHtmlList("Operational Steps", remediation.operationalSteps),
+    '<section class="agent-prompt">',
+    "<h3>Prompt For Your Coding Agent</h3>",
+    "<p>Copy this whole block into your coding agent.</p>",
+    `<pre>${escapeHtml(remediation.agentPrompt)}</pre>`,
+    "</section>",
+    renderHtmlList("How To Check It Worked", remediation.verifySteps),
+    "</section>",
+  ].join("");
+}
+
+function actionLocationsForReport(
+  ranked: RankedAction,
+  assessment: ReturnType<typeof buildAssessment>,
+): string[] {
+  const findingsById = new Map(assessment.findings.map((finding) => [finding.id, finding]));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const findingId of ranked.candidate.findingIds) {
+    const finding = findingsById.get(findingId);
+    for (const location of finding?.locations ?? []) {
+      const value = `${location.filePath}:${location.startLine}`;
+      if (!seen.has(value)) {
+        seen.add(value);
+        out.push(value);
+      }
+    }
+  }
+  return out;
+}
+
+function appendMarkdownList(lines: string[], heading: string, values: ReadonlyArray<string>): void {
+  if (values.length === 0) {
+    return;
+  }
+  lines.push(`### ${heading}`, "");
+  for (const value of values) {
+    lines.push(`- ${value}`);
+  }
+  lines.push("");
+}
+
+function markdownList(values: ReadonlyArray<string>): string {
+  return values.length > 0 ? values.join(", ") : "Repository";
+}
+
+function renderHtmlList(heading: string, values: ReadonlyArray<string>): string {
+  if (values.length === 0) {
+    return "";
+  }
+  const items = values.map((value) => `<li>${escapeHtml(value)}</li>`).join("");
+  return `<h3>${escapeHtml(heading)}</h3><ul>${items}</ul>`;
 }
 
 function opengrepRules(): string {

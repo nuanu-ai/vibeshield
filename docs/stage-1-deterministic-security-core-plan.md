@@ -183,10 +183,11 @@ vs off; the AI only makes the explanations and prompts read better.
 
 - [x] **CLI look + README.** Keep the terminal palette/progress feel; rewire the
   content to the new Quick Scan flow; rewrite the README to this product. Done:
-  terminal output shows verdict, coverage, report paths, and Agent Fix Pack
-  source (OpenRouter vs catalog); README matches the actual `scan` command,
-  local Git-root input contract, one-command Microsandbox toolchain setup, and
-  `.env` with only `OPENROUTER_API_KEY` on the happy path.
+  terminal output is a short receipt with verdict, check summary, top fixes, and
+  report paths; HTML/Markdown clearly separate human explanation from the
+  "Prompt For Your Coding Agent" block; README matches the actual `scan`
+  command, local Git-root input contract, one-command Microsandbox toolchain
+  setup, and `.env` with only `OPENROUTER_API_KEY` on the happy path.
   Acceptance: `pnpm exec tsx src/cli.ts --help` shows the current command and
   env; a non-Git local path fails before sandbox creation; live Microsandbox
   planted-secret scan with `OPENROUTER_API_KEY=` showed `Critical fix needed`,
@@ -368,8 +369,8 @@ The default path is now the deterministic Quick Scan through
 `MicrosandboxRuntime`, `ScanService`, SQLite state, blob storage, scanner stages,
 OpenRouter remediation enhancement, and catalog fallback.
 
-- Keep the terminal presentation owner-facing: progress on stderr; verdict,
-  coverage, report paths, and Agent Fix Pack on stdout.
+- Keep the terminal presentation owner-facing: progress on stderr; short verdict
+  receipt and report paths on stdout. Full Fix Pack details live in HTML/Markdown.
 - Keep README aligned to the runnable product path: Quick Scan, Agent Fix Pack,
   GitHub URL or local Git-root input, `pnpm toolchain:prepare`, optional
   `OPENROUTER_API_KEY`, verdicts, and the no-runtime-validation limitation.

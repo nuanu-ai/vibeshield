@@ -122,24 +122,26 @@ image and loads it into Microsandbox.
 
 ## What you get back
 
-The terminal output is the owner-facing result:
+The terminal output is a short receipt, not the whole report:
 
 ```text
 VibeShield Quick Scan
 Verdict: Critical fix needed
 Fix Pack: 1 action (catalog fallback; deterministic verdict/actions; 1 critical)
+Checks: checked 2, degraded 0, failed 0, skipped 5
 
-Coverage
-  [ok] secrets.gitleaks
-  [ok] code-patterns.opengrep
-  [skipped] dependencies.trivy - no dependency manifests found
+What to do next
+  Open the HTML report and fix the top fix in order.
+  Each fix has a clearly labeled prompt to paste into your coding agent.
 
-Agent Fix Pack
-1. Remove the committed secret
-   Evidence: src/config.ts:4
-   Agent prompt:
-     Replace the committed credential with environment-based configuration.
+Reports
+  Human report: ~/.vibeshield/runs/<run-id>/report.html
+  Markdown: ~/.vibeshield/runs/<run-id>/report.md
+  JSON: ~/.vibeshield/runs/<run-id>/report.json
 ```
+
+The HTML report is the human-readable Fix Pack. Each fix has a clearly marked
+**Prompt For Your Coding Agent** block to copy and paste.
 
 The inspectable run artifacts live under `~/.vibeshield/runs/<run-id>/`:
 

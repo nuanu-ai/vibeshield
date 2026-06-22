@@ -26,8 +26,6 @@ interface Palette {
 
 const STATUS_ORDER: ReadonlyArray<CoverageStatus> = ["checked", "degraded", "failed", "skipped"];
 
-const REPORT_ORDER = ["json", "markdown", "md", "html"] as const;
-
 const STAGE_PROGRESS_LABELS: Readonly<Record<string, string>> = {
   "source.resolve": "Preparing the repository",
   "toolchain.refresh": "Updating scanner data",
@@ -113,38 +111,37 @@ export function renderScanOutcome(outcome: ScanOutcome, opts: RenderOptions = {}
   lines.push(`Repository: ${repositoryLine(assessment)}`);
   lines.push(`Verdict: ${verdictText(assessment.verdict, palette)}`);
   lines.push(`Fix Pack: ${fixPackSummary(assessment)}`);
-  lines.push(
-    `Snapshot: ${assessment.manifest.fileCount} files, ${formatBytes(
-      assessment.manifest.totalBytes,
-    )}, ${assessment.manifest.exclusionCount} exclusions, source ${shortHash(
-      assessment.manifest.sourceHash,
-    )}`,
-  );
-  lines.push(`Toolchain: ${assessment.toolchain.imageTag}`);
+  lines.push(`Checks: ${coverageSummary(assessment.coverage)}`);
+  lines.push(`Snapshot: ${assessment.manifest.fileCount} files scanned`);
   lines.push("");
-  lines.push(palette.bold("Coverage"));
-  lines.push(`Summary: ${coverageSummary(assessment.coverage)}`);
-  for (const entry of assessment.coverage) {
-    lines.push(`  ${coverageStatusLabel(entry.status, palette)} ${entry.check}${reason(entry)}`);
+  lines.push(palette.bold("What to do next"));
+  if (assessment.rankedActions.length === 0) {
+    lines.push("  No blocking fixes from the checks that completed.");
+  } else {
+    lines.push(`  Open the HTML report and fix the ${topActionNoun(assessment)} in order.`);
+    lines.push("  Each fix has a clearly labeled prompt to paste into your coding agent.");
   }
   lines.push("");
   lines.push(palette.bold("Reports"));
-  for (const line of reportPathLines(outcome.reportPaths)) {
-    lines.push(`  ${line}`);
-  }
+  lines.push(`  Human report: ${reportPath(outcome.reportPaths, "html") ?? "not written"}`);
+  lines.push(`  Markdown: ${reportPath(outcome.reportPaths, "markdown") ?? "not written"}`);
+  lines.push(`  JSON: ${reportPath(outcome.reportPaths, "json") ?? "not written"}`);
   lines.push("");
-  lines.push(palette.bold("Agent Fix Pack"));
+  lines.push(palette.bold("Top fixes"));
   if (assessment.rankedActions.length === 0) {
-    lines.push("  No blocking actions from the checks that completed.");
+    lines.push("  None.");
   } else {
-    assessment.rankedActions.forEach((ranked, index) => {
-      if (index > 0) {
-        lines.push("");
-      }
-      lines.push(...renderAction(index + 1, ranked, assessment, palette));
-    });
+    for (const line of topActionLines(assessment, palette)) {
+      lines.push(`  ${line}`);
+    }
   }
   lines.push("");
+  lines.push(palette.dim(`Toolchain: ${assessment.toolchain.imageTag}`));
+  lines.push(
+    palette.dim(
+      `Source snapshot: ${shortHash(assessment.manifest.sourceHash)}; ${assessment.manifest.exclusionCount} exclusions`,
+    ),
+  );
   lines.push(palette.dim(assessment.limitation));
 
   return `${lines.join("\n")}\n`;
@@ -154,47 +151,17 @@ export function supportsAnsiColor(stream: TerminalStream): boolean {
   return Boolean(stream.isTTY) && process.env.NO_COLOR === undefined;
 }
 
-function renderAction(
-  rank: number,
-  ranked: SecurityAssessment["rankedActions"][number],
-  assessment: SecurityAssessment,
-  palette: Palette,
-): string[] {
-  const { candidate, remediation } = ranked;
-  const lines = [
-    `${rank}. ${palette.bold(remediation.title)}`,
-    `   Source: ${remediation.fromCatalog ? "catalog fallback" : "OpenRouter enhanced"}; impact: ${
-      candidate.verdictImpact
-    }; priority: ${candidate.priorityScore}`,
-  ];
-  const locations = actionLocations(candidate.findingIds, assessment);
-  if (locations.length > 0) {
-    lines.push(`   Evidence: ${locations.slice(0, 5).join(", ")}`);
-  } else if (candidate.affectedFiles.length > 0) {
-    lines.push(`   Files: ${candidate.affectedFiles.join(", ")}`);
-  }
-  lines.push(`   Risk: ${remediation.risk}`);
-  lines.push(`   Why now: ${remediation.whyFixNow}`);
-  appendList(lines, "Fix", remediation.fixSteps);
-  appendList(lines, "Operations", remediation.operationalSteps);
-  lines.push("   Agent prompt:");
-  lines.push(...indentBlock(remediation.agentPrompt, "     "));
-  appendList(lines, "Verify", remediation.verifySteps);
-  return lines;
+function topActionLines(assessment: SecurityAssessment, palette: Palette): string[] {
+  return assessment.rankedActions.slice(0, 3).map((ranked, index) => {
+    const locations = actionLocations(ranked.candidate.findingIds, assessment);
+    const where = locations.length > 0 ? ` at ${locations.slice(0, 2).join(", ")}` : "";
+    return `${index + 1}. ${palette.bold(ranked.remediation.title)}${where}`;
+  });
 }
 
-function appendList(lines: string[], label: string, values: ReadonlyArray<string>): void {
-  if (values.length === 0) {
-    return;
-  }
-  lines.push(`   ${label}:`);
-  for (const value of values) {
-    lines.push(`     - ${value}`);
-  }
-}
-
-function indentBlock(text: string, prefix: string): string[] {
-  return text.split(/\r?\n/).map((line) => `${prefix}${line}`);
+function topActionNoun(assessment: SecurityAssessment): string {
+  const count = assessment.rankedActions.length;
+  return count === 1 ? "top fix" : `${count} fixes`;
 }
 
 function actionLocations(
@@ -288,51 +255,11 @@ function coverageSummary(coverage: ReadonlyArray<CoverageEntry>): string {
   return STATUS_ORDER.map((status) => `${status} ${counts.get(status) ?? 0}`).join(", ");
 }
 
-function coverageStatusLabel(status: CoverageStatus, palette: Palette): string {
-  switch (status) {
-    case "checked":
-      return palette.green("[ok]");
-    case "degraded":
-      return palette.yellow("[degraded]");
-    case "failed":
-      return palette.red("[failed]");
-    case "skipped":
-      return palette.dim("[skipped]");
-  }
-}
-
-function reason(entry: CoverageEntry): string {
-  return entry.reason === undefined ? "" : ` - ${entry.reason}`;
-}
-
-function reportPathLines(reportPaths: ScanOutcome["reportPaths"]): string[] {
-  const lines: string[] = [];
-  for (const key of REPORT_ORDER) {
-    const value = reportPaths[key];
-    if (value !== undefined) {
-      lines.push(`${reportLabel(key)}: ${value}`);
-    }
-  }
-  for (const [key, value] of Object.entries(reportPaths)) {
-    if (!REPORT_ORDER.includes(key as (typeof REPORT_ORDER)[number])) {
-      lines.push(`${reportLabel(key)}: ${value}`);
-    }
-  }
-  return lines;
-}
-
-function reportLabel(key: string): string {
-  return key === "markdown" ? "md" : key;
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KiB`;
-  }
-  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+function reportPath(
+  reportPaths: ScanOutcome["reportPaths"],
+  key: "html" | "json" | "markdown",
+): string | undefined {
+  return reportPaths[key] ?? (key === "markdown" ? reportPaths.md : undefined);
 }
 
 function shortHash(value: string): string {

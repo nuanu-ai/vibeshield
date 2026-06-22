@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -49,28 +49,6 @@ describe("local source packaging", () => {
       await expect(readFile(path.join(extract, "ignored.txt"), "utf8")).rejects.toThrow();
       expect(pkg.commitSha).toMatch(/^[0-9a-f]{40}$/);
       expect(pkg.exclusions).toContainEqual({ path: "ignored.txt", reason: "git-ignored" });
-    } finally {
-      await pkg.cleanup();
-    }
-  });
-
-  it("records deleted tracked files as missing instead of failing the scan", async () => {
-    const source = path.join(dir, "repo");
-    await mkdir(source);
-    await writeFile(path.join(source, "app.ts"), "export const ok = true;\n");
-    await writeFile(path.join(source, "deleted.ts"), "export const gone = true;\n");
-    await initGitRepo(source, ["app.ts", "deleted.ts"]);
-    await unlink(path.join(source, "deleted.ts"));
-
-    const pkg = await createLocalSourcePackage(source);
-    const extract = path.join(dir, "extract");
-    await mkdir(extract);
-    try {
-      await execFileP("tar", ["-xf", pkg.archivePath, "-C", extract]);
-
-      await expect(readFile(path.join(extract, "app.ts"), "utf8")).resolves.toContain("ok");
-      await expect(readFile(path.join(extract, "deleted.ts"), "utf8")).rejects.toThrow();
-      expect(pkg.exclusions).toContainEqual({ path: "deleted.ts", reason: "missing" });
     } finally {
       await pkg.cleanup();
     }

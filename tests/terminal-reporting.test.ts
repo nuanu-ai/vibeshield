@@ -12,11 +12,14 @@ describe("terminal reporting", () => {
     expect(text).toContain(
       "Fix Pack: 1 action (OpenRouter enhanced; deterministic verdict/actions; 1 critical)",
     );
-    expect(text).toContain("Summary: checked 1, degraded 1, failed 1, skipped 1");
-    expect(text).toContain("[failed] dependencies.trivy - trivy db stale");
-    expect(text).toContain("Evidence: src/config.ts:4");
-    expect(text).toContain("Agent prompt:");
-    expect(text).toContain("json: /tmp/run/report.json");
+    expect(text).toContain("Checks: checked 1, degraded 1, failed 1, skipped 1");
+    expect(text).toContain("Open the HTML report");
+    expect(text).toContain("Human report: /tmp/run/report.html");
+    expect(text).toContain("1. Remove the committed Stripe secret at src/config.ts:4");
+    expect(text).toContain("JSON: /tmp/run/report.json");
+    expect(text).not.toContain("Agent prompt:");
+    expect(text).not.toContain("Remove the committed Stripe key and use process.env");
+    expect(text).not.toContain("A live payment key is present in source code.");
     expect(text).not.toContain("\u001b[");
   });
 
@@ -26,7 +29,9 @@ describe("terminal reporting", () => {
     expect(text).toContain(
       "Fix Pack: 1 action (catalog fallback; deterministic verdict/actions; 1 critical)",
     );
-    expect(text).toContain("Source: catalog fallback; impact: blocks-deploy; priority: 100");
+    expect(text).toContain(
+      "Each fix has a clearly labeled prompt to paste into your coding agent.",
+    );
   });
 
   it("prints owner-facing progress events without requiring a live scan", () => {
