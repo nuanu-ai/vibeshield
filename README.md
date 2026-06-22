@@ -1,131 +1,190 @@
+<div align="center">
+
 # VibeShield
 
-VibeShield is an early-stage Quick Scan for AI-built and beginner-built web
-projects. Point it at a public GitHub repository or a local Git worktree root
-before deploy and it returns a small Agent Fix Pack: the few issues that matter,
-file/line evidence, a plain-language risk explanation, and a ready-to-paste
-prompt for a coding agent.
+### Security autopilot for AI-generated code
 
-The current slice proves the deterministic security core. Scanners run inside
-Microsandbox, the host records truthful coverage and reports, and the verdict,
-finding set, priority, and action candidates are computed by rules before any
-model call. OpenRouter can improve the wording of the Fix Pack, but the catalog
-fallback produces the same actions when the key is absent or the model response
-is invalid.
+**Point it at a repo. Get a short, inspectable Fix Pack — not a 200-alert dashboard.**
 
-## What Works
+[![status](https://img.shields.io/badge/status-experimental-orange.svg)](#-status--roadmap)
+[![stage](https://img.shields.io/badge/stage-deterministic%20quick%20scan-blue.svg)](#-how-it-works)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Node%20%E2%89%A5%2024-3178C6.svg?logo=typescript&logoColor=white)](package.json)
+[![pnpm](https://img.shields.io/badge/pnpm-10-F69220.svg?logo=pnpm&logoColor=white)](package.json)
+[![runtime](https://img.shields.io/badge/runtime-Microsandbox-111111.svg)](docs/architecture.md)
+[![models](https://img.shields.io/badge/models-optional%20via%20OpenRouter-6566F1.svg)](docs/architecture.md)
 
-- `vibeshield scan <github-url-or-local-git-root>` through the local CLI.
-- Public GitHub repositories are cloned inside Microsandbox.
-- Local input must be the Git worktree root; VibeShield packages a Git-filtered
-  snapshot and includes `.env` files so secret checks can catch local leaks.
-- `gitleaks`, `opengrep`, `syft`, `trivy`, `actionlint`, and `zizmor` run in the
-  sandbox when inventory says they apply.
-- Vulnerability databases refresh on each run. Stale or failed required coverage
-  is shown as degraded/failed and cannot produce a green verdict.
-- Raw scanner output is redacted before it enters the blob store.
-- Reports are written as terminal output, `report.json`, `report.md`, and
-  `report.html`.
-- The OpenRouter remediation enhancer uses `OPENROUTER_API_KEY` and
-  `VIBESHIELD_REMEDIATION_MODEL`; missing or invalid model output falls back to
-  deterministic catalog copy.
+</div>
 
-Not done yet: resume, private repositories, zip upload, runtime validation, PDF
-reports, and SaaS isolation hardening.
+---
+
+> **The promise:** repo in -> a small Agent Fix Pack out.
+>
+> You shipped something an agent wrote. VibeShield helps you answer the only
+> question that matters before you deploy it: **"Is there a real problem in here
+> right now, and what should my coding agent fix first?"**
+
+## Who this is for
+
+A new wave of builders ship real web apps without reading most of the code their
+AI agent wrote. They push to GitHub, wire up a database and a few API keys, and
+hit deploy. They will not configure five AppSec tools or triage 40 findings, and
+they should not have to.
+
+VibeShield is built for them: **a security autopilot for beginner,
+AI-generated web projects.** Not an enterprise AppSec platform. Not another
+scanner wall. A tool that does the boring security legwork and hands back
+something a non-expert, or their coding agent, can actually act on.
+
+## What makes it different
+
+- **Low noise is the product** — the goal is a few useful, prioritized actions,
+  not a dashboard full of raw scanner output.
+- **Facts before wording** — scanners, severity, priority, and verdict are
+  deterministic. The model can improve the explanation, but it cannot change the
+  result.
+- **Untrusted code is treated as hostile** — repositories are scanned inside a
+  fresh Microsandbox environment, then the sandbox is destroyed.
+- **Everything is inspectable** — coverage, manifest, findings, and reports are
+  plain files on disk.
+- **Agent-ready output** — each action includes file/line evidence, why it
+  matters, and a ready-to-paste prompt for your coding agent.
+
+## What it is today
+
+VibeShield is early-stage. The current product slice proves the deterministic
+Quick Scan end to end.
+
+| Today | Not yet |
+| --- | --- |
+| Local CLI: `vibeshield scan <repo>` | GitHub App / one-click install |
+| Public GitHub URL or local Git worktree root | Private repos / zip upload |
+| Secrets, dependency, workflow, IaC, SBOM, and code-pattern checks | Runtime validation |
+| Truthful coverage: checked / skipped / failed / degraded | Continuous monitoring |
+| Terminal + JSON + Markdown + HTML reports | PDF / web dashboard |
+| Optional OpenRouter wording pass | Auto-fix or PR generation |
+
+> [!IMPORTANT]
+> VibeShield does not run your app. Authorization logic and runtime behavior are
+> not checked yet. A green result means "looks OK for now from the checks that
+> completed", not "secure".
+
+## How it works
+
+```mermaid
+flowchart TD
+    A(["vibeshield scan <github-url-or-local-git-root>"]) --> S[Resolve source]
+    S --> M[Snapshot manifest]
+    M --> I[Inventory]
+    I --> C["Sandboxed checks<br/>gitleaks · opengrep · syft · trivy · actionlint · zizmor"]
+    C --> F[Normalize findings]
+    F --> R[Rank actions + compute verdict]
+    R --> P["Agent Fix Pack<br/>OpenRouter enhancement or catalog fallback"]
+    P --> O["Terminal · report.json · report.md · report.html"]
+```
+
+1. **Intake** — clone a public GitHub repo inside Microsandbox, or package a
+   local Git worktree root with Git filtering and upload it into the sandbox.
+2. **Snapshot** — record a small manifest: origin, commit SHA when available,
+   file hashes, exclusions, source hash, tool versions, and DB freshness.
+3. **Checks** — run the scanner toolchain inside the sandbox. If a check is not
+   applicable, skipped, failed, or degraded, the report says so.
+4. **Deterministic triage** — normalize evidence, group findings, rank actions,
+   and compute the verdict before any model call.
+5. **Fix Pack** — one optional OpenRouter call improves the explanation and
+   prompt. If it is unavailable or invalid, the deterministic catalog fallback
+   is used.
 
 ## Quickstart
 
-Requirements:
-
-- Node 24+
-- pnpm 10+
-- Docker or a compatible image builder
-- Microsandbox installed locally
-
-Install dependencies:
+**Requirements:** Node >= 24, pnpm 10, Docker or Podman, and
+[Microsandbox](https://github.com/microsandbox/microsandbox).
 
 ```bash
+# 1. Install
 pnpm install
-```
 
-Build and load the scanner toolchain image:
+# 2. Optional: enable model-polished Fix Pack wording
+cp .env.example .env
+# set OPENROUTER_API_KEY in .env
+# without it, VibeShield still runs with the catalog fallback
 
-```bash
-docker build -t vibeshield-toolchain:latest -f toolchain/Dockerfile toolchain
-docker save vibeshield-toolchain:latest -o /tmp/vibeshield-toolchain.tar
-~/.microsandbox/bin/msb load -t vibeshield-toolchain:latest -i /tmp/vibeshield-toolchain.tar
-```
+# 3. Build and load the scanner toolchain
+pnpm toolchain:prepare
 
-Optional `.env` values:
-
-```bash
-OPENROUTER_API_KEY=
-VIBESHIELD_REMEDIATION_MODEL=anthropic/claude-sonnet-4.6
-VIBESHIELD_STATE_ROOT=
-VIBESHIELD_TOOLCHAIN_TAG=vibeshield-toolchain:latest
-```
-
-Run a scan:
-
-```bash
+# 4. Scan a repo
 pnpm scan https://github.com/owner/repo
+# or
 pnpm scan /path/to/local/git-worktree-root
 ```
 
-## Output
+That is the intended setup path. The toolchain command builds the local scanner
+image and loads it into Microsandbox.
+
+## What you get back
 
 The terminal output is the owner-facing result:
 
 ```text
 VibeShield Quick Scan
 Verdict: Critical fix needed
-Fix Pack: 3 actions (OpenRouter enhanced; deterministic verdict/actions; 1 critical, 2 high)
+Fix Pack: 1 action (catalog fallback; deterministic verdict/actions; 1 critical)
 
 Coverage
   [ok] secrets.gitleaks
-  [ok] dependencies.trivy
-  [skipped] github-actions.actionlint - no GitHub Actions workflows found
+  [ok] code-patterns.opengrep
+  [skipped] dependencies.trivy - no dependency manifests found
 
 Agent Fix Pack
-1. Remove the committed Stripe secret
+1. Remove the committed secret
    Evidence: src/config.ts:4
    Agent prompt:
-     Remove the committed Stripe key and load it from environment instead.
+     Replace the committed credential with environment-based configuration.
 ```
 
-State and blobs live under `~/.vibeshield` by default:
+The inspectable run artifacts live under `~/.vibeshield/runs/<run-id>/`:
 
 ```text
-~/.vibeshield/
-├── state.sqlite
-├── blobs/sha256/<prefix>/<hash>
-└── runs/<run-id>/
-    ├── manifest.json
-    ├── report.json
-    ├── report.md
-    └── report.html
+manifest.json
+report.json
+report.md
+report.html
 ```
 
-The source tree is not stored as an artifact. The manifest records source
-origin, commit SHA when available, file hashes, exclusions, source hash,
-toolchain image tag, tool versions, and vulnerability DB freshness where known.
+## Tech stack
 
-Every report includes the static-scan limitation: VibeShield does not run the
-app, so authorization logic and runtime behavior are not checked.
+- **Language / runtime:** TypeScript on Node >= 24, ESM.
+- **Sandbox:** Microsandbox.
+- **Models:** optional remediation wording via OpenRouter.
+- **Scanners:** gitleaks, opengrep, syft, trivy, actionlint, zizmor.
+- **Tooling:** pnpm · tsx · vitest · Biome.
 
-## Development
+Design philosophy: **boring, inspectable code over clever orchestration**. See
+[AGENTS.md](AGENTS.md) for repo conventions.
+
+## Status & roadmap
+
+This is an experimental MVP focused on proving the detection core.
+
+- **Now** — deterministic Quick Scan, truthful coverage, Agent Fix Pack,
+  inspectable local artifacts.
+- **Next** — minimal resume from durable run state.
+- **Later** — private repos, validated findings, PDF/web report, GitHub
+  integration, and eventually low-friction continuous monitoring.
+
+## Local development
 
 ```bash
+pnpm install
+pnpm toolchain:prepare
 pnpm lint
 pnpm typecheck
 pnpm test
-pnpm build
-pnpm exec tsx scripts/make-planted-secret-fixture.ts
+pnpm exec tsx src/cli.ts --help
 ```
 
 The default test suite uses `FakeSandboxRuntime`; it does not boot a VM. The
 live Microsandbox smoke test is skipped by default and can be run explicitly
-after the toolchain image is loaded:
+after the toolchain image is ready:
 
 ```bash
 pnpm exec vitest run tests/microsandbox-runtime.smoke.test.ts
@@ -133,9 +192,16 @@ pnpm exec vitest run tests/microsandbox-runtime.smoke.test.ts
 
 ## Documentation
 
-- [Architecture notes](docs/architecture.md)
-- [Stage 1 plan](docs/stage-1-deterministic-security-core-plan.md)
-- [Agent guidance](AGENTS.md)
+| Doc | What's inside |
+| --- | --- |
+| [docs/architecture.md](docs/architecture.md) | Architecture notes |
+| [docs/stage-1-deterministic-security-core-plan.md](docs/stage-1-deterministic-security-core-plan.md) | Current Stage 1 implementation plan |
+| [AGENTS.md](AGENTS.md) | Repository conventions for humans and coding agents |
 
-When documents disagree, prefer the most recent implementation-oriented
-decision document in `docs/`.
+---
+
+<div align="center">
+
+**VibeShield** · early-stage · built with care for people who ship faster than they can review.
+
+</div>

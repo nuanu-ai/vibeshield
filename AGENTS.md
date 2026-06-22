@@ -77,6 +77,7 @@ Project tooling:
 - lint: `pnpm lint`;
 - typecheck: `pnpm typecheck`;
 - test: `pnpm test`;
+- build/load the local scanner image: `pnpm toolchain:prepare`;
 - run the local CLI in dev: `pnpm scan <github-url-or-local-path>`;
 - resume a failed run from durable artifacts: `pnpm resume /path/to/run-directory`;
 - run the live Microsandbox smoke:

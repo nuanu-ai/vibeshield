@@ -15,6 +15,7 @@
     "cli": "tsx src/cli.ts",
     "scan": "tsx src/cli.ts scan",
     "resume": "tsx src/cli.ts resume",
+    "toolchain:prepare": "tsx scripts/prepare-toolchain.ts",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

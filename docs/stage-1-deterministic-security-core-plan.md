@@ -185,7 +185,8 @@ vs off; the AI only makes the explanations and prompts read better.
   content to the new Quick Scan flow; rewrite the README to this product. Done:
   terminal output shows verdict, coverage, report paths, and Agent Fix Pack
   source (OpenRouter vs catalog); README matches the actual `scan` command,
-  local Git-root input contract, `.env`, and Microsandbox toolchain setup.
+  local Git-root input contract, one-command Microsandbox toolchain setup, and
+  `.env` with only `OPENROUTER_API_KEY` on the happy path.
   Acceptance: `pnpm exec tsx src/cli.ts --help` shows the current command and
   env; a non-Git local path fails before sandbox creation; live Microsandbox
   planted-secret scan with `OPENROUTER_API_KEY=` showed `Critical fix needed`,
@@ -370,8 +371,8 @@ OpenRouter remediation enhancement, and catalog fallback.
 - Keep the terminal presentation owner-facing: progress on stderr; verdict,
   coverage, report paths, and Agent Fix Pack on stdout.
 - Keep README aligned to the runnable product path: Quick Scan, Agent Fix Pack,
-  GitHub URL or local Git-root input, Microsandbox toolchain image, `.env`
-  configuration, verdicts, and the no-runtime-validation limitation.
+  GitHub URL or local Git-root input, `pnpm toolchain:prepare`, optional
+  `OPENROUTER_API_KEY`, verdicts, and the no-runtime-validation limitation.
 - Remove any remaining old-MVP surfaces as the new path lands: Daytona; Pi
   section/mapping collectors and per-area agent loops; `attack-hypotheses`;
   evaluator/self-reflection loops; repository-map-as-pipeline-truth; duplicate

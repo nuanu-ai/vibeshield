@@ -126,10 +126,7 @@ function printHelp(): void {
       "  report.json / report.md / report.html under the state root",
       "",
       "Environment:",
-      "  VIBESHIELD_STATE_ROOT          override ~/.vibeshield",
-      "  VIBESHIELD_TOOLCHAIN_TAG       override vibeshield-toolchain:latest",
-      "  OPENROUTER_API_KEY             enable one-call remediation enhancement",
-      "  VIBESHIELD_REMEDIATION_MODEL   override the OpenRouter remediation model",
+      "  OPENROUTER_API_KEY   optional; enables model-polished Fix Pack wording",
       "",
     ].join("\n"),
   );
