@@ -27,6 +27,8 @@ export interface StageAttempt {
   readonly error?: string;
   /** Blob refs for output artifacts produced by this attempt. */
   readonly outputs: ReadonlyArray<ArtifactRef>;
+  /** Arbitrary JSON persisted alongside the attempt; handed back as input to downstream stages. */
+  readonly data?: Readonly<Record<string, unknown>>;
   /** Stage ids that this attempt invalidated (became stale) when it ran. */
   readonly markedStale?: ReadonlyArray<StageId>;
 }
