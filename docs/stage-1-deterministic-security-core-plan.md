@@ -30,9 +30,10 @@ follows from them.
 - Iteration 1 ships the **full check set** (secrets, code patterns, SBOM,
   dependencies, GitHub Actions, IaC). Internally it is proven one check first,
   then widened.
-- The one AI call uses **Claude Opus 4.8 (high reasoning effort)** via Pi, runs
-  **on the host** (it needs the findings, not the repo), and is **enhancement
-  only** — the deterministic result is complete without it.
+- The one AI call uses **Claude Opus 4.8 (high reasoning effort)** via Pi over
+  **OpenRouter** (the model gateway, as in the current codebase), **on the host**
+  (it needs the findings, not the repo). It is **enhancement only** — the
+  deterministic result is complete without any model.
 - If the AI call is unavailable, invalid, or over budget, a deterministic
   **catalog template** produces the same actions and prompts.
 - Reports: terminal + `report.json` + `report.md` + `report.html`. **PDF later.**
@@ -59,25 +60,106 @@ Every stage runs from a single `StageRegistry` and records its attempt and its
 output artifacts in SQLite + the blob store. Re-running marks downstream stages
 stale and keeps old attempts.
 
-## Build order
+## Implementation tasks
 
-Iteration 1 is done when all three gates are closed. Each gate is closed by the
-owner running the real command on a real repo — not by a passing test suite.
+Grouped by gate. Each task is meant to be opened alone — Inputs / Do / Outputs /
+Done. Contracts referenced here are defined in "Contracts" below. A gate closes
+when the owner runs the real command on a real repo and sees its result — not
+when tests pass. Iteration 1 is done when all three gates close.
 
-- **Gate 1 — the machine end to end, secrets only.**
-  `vibeshield scan <repo>` on a real repo with a real planted secret runs the
-  full thread with one check (secrets). The owner sees a verdict and one action
-  naming the file/line, why it matters, and a copy-paste prompt (from the catalog
-  template at this gate). Raw scanner output is saved as proof a real tool ran.
-  Reliable structure (sandbox, registry/DAG, SQLite + blobs, resume) is real, not
-  stubbed.
-- **Gate 2 — all checks.** Add code patterns, SBOM, dependencies, GitHub Actions,
-  and IaC behind the same registry/sandbox. Inapplicable checks are recorded as
-  explicit skips. One check failing still yields a useful Fix Pack; lost required
-  coverage yields `Scan incomplete`, never a green verdict.
-- **Gate 3 — the AI fix-pack call.** Wire the one Opus 4.8 call to enrich the
-  explanations and prompts, with the catalog fallback. The deterministic verdict,
-  priority, and finding set must be identical whether the AI ran or not.
+### Gate 1 — the whole machine end to end, secrets check only
+
+Closes when: `vibeshield scan <real-repo-with-a-planted-secret>` shows a verdict
+and one usable action (file/line, why, paste-ready prompt from the catalog), with
+the raw scanner output saved as proof a real tool ran.
+
+- [ ] **Backbone + ports.** In: current TS package. Do: add `domain` contracts
+  (Run, Stage, Artifact, Evidence, Finding, ActionCandidate, RemediationAction,
+  SecurityAssessment), a `ScanService`, and the ports (sandbox-runtime,
+  state-store, artifact-store, model-provider, event-sink); domain imports no
+  adapter. Out: a typed skeleton the thread flows through. Done: a scan call goes
+  CLI → ScanService → registry → ports with no domain→adapter import.
+- [ ] **MicrosandboxRuntime.** In: the SandboxRuntime port. Do: implement
+  create/upload/exec/download/destroy with network on; a fake runtime for tests.
+  Out: production adapter + fake. Done: a trusted command runs in a real sandbox,
+  writes a file, downloads it, sandbox destroyed; unsupported host fails clearly.
+- [ ] **State store (SQLite) + blob store.** In: state root (default
+  `~/.vibeshield`, test-overridable). Do: the tables and `blobs/sha256/...`;
+  identical bytes reuse one blob; rerun adds a new attempt, never overwrites. Out:
+  persisted state + regeneratable `runs/<id>/` export. Done: one run shows rows +
+  blob refs; rerun adds an attempt.
+- [ ] **Stage registry + runner + minimal resume.** In: stage definitions. Do:
+  register, build/validate the DAG, run, record attempts/events, mark descendants
+  stale on rerun; `resume` runs missing/failed/stale. Out: the DAG drives the
+  thread. Done: stage list comes from the registry; resume re-runs only
+  stale/failed.
+- [ ] **Source acquisition.** In: GitHub URL or local folder. Do: GitHub →
+  `git clone --depth 1` inside the sandbox; local → copy in; `.git` present → drop
+  ignored files and read the commit SHA, else a default ignore set. Out: a source
+  dir in the sandbox. Done: ignored files excluded; URL and folder both reach a
+  source dir.
+- [ ] **Snapshot manifest.** In: the source dir. Do: write the manifest (commit
+  SHA, file list+hashes, exclusions, source hash, tool+DB versions). Out:
+  `manifest.json`. Done: same input → same source hash; no source tarball stored.
+- [ ] **Secrets check adapter (gitleaks).** In: source dir in the sandbox. Do: run
+  gitleaks (argv, fixed config, timeout); redact secret values; store the redacted
+  raw output as a blob. Out: `RedactedRawArtifact` + finding candidates. Done: a
+  planted secret is
+  found; raw output present and redacted.
+- [ ] **Normalize → Evidence → Finding.** In: candidates. Do: build Evidence and
+  Finding per the data model; run semantic validators; collapse duplicates. Out:
+  findings + evidence in SQLite. Done: a finding pointing outside the snapshot is
+  rejected.
+- [ ] **Actions + ranking + verdict (deterministic).** In: findings. Do: group by
+  remediation key, score with the ranking signals, compute the verdict — all
+  before any AI. Out: `ActionCandidate`s + verdict. Done: rank order is
+  explainable from visible fields; a live secret → `Critical fix needed`.
+- [ ] **Catalog remediation + report.** In: candidates + catalog. Do: fill catalog
+  templates into `RemediationAction`s; compose one `SecurityAssessment`; render
+  terminal/json/md/html through the kept CLI look. Out: `report.json/.md/.html`.
+  Done: closes Gate 1.
+
+### Gate 2 — all checks
+
+Closes when: a fixture matrix touching every check shows a coverage table and a
+still-useful Fix Pack when one check is killed.
+
+- [ ] **Inventory.detect.** In: manifest. Do: detect languages, manifests,
+  workflows, IaC to gate which checks apply. Out: a scan plan. Done: a repo with
+  no workflows skips the Actions checks with a recorded reason.
+- [ ] **Remaining check adapters.** In: source dir. Do: thin adapters
+  (argv/config/parse) for code patterns (opengrep), SBOM (syft), dependencies
+  (trivy), GitHub Actions (actionlint + zizmor), IaC (trivy config); vuln DBs
+  refresh at run start. Out: raw artifacts + candidates per tool. Done: each
+  applicable check runs or records a skip reason.
+- [ ] **Correlate + degradation.** In: findings from all checks. Do: cluster
+  same-root-cause findings; one failing check still yields a Fix Pack; lost
+  required coverage → `Scan incomplete`. Out: clusters + truthful coverage. Done:
+  killing one check keeps other findings; required-coverage loss blocks green.
+
+### Gate 3 — the one AI fix-pack call
+
+Closes when: the verdict, priority, and finding set are identical with the AI on
+vs off; the AI only makes the explanations and prompts read better.
+
+- [ ] **Model provider (OpenRouter / Opus 4.8).** In: model-provider port. Do:
+  OpenRouter adapter calling Claude Opus 4.8 (high effort); key from env; absent
+  key → catalog fallback, not a crash. Out: a model client. Done: a call returns
+  structured output; missing key degrades cleanly.
+- [ ] **remediation.generate + fallback.** In: ≤10 candidates + findings +
+  redacted snippets + catalog + inventory. Do: **one** Opus 4.8 call producing
+  per-candidate explanation/steps/prompt/verify; validate ids/paths; invalid →
+  catalog (no repair). Out: enriched `RemediationAction`s. Done: closes Gate 3.
+
+### Cross-cutting (alongside the gates)
+
+- [ ] **CLI look + README.** Keep the `run-cli.ts` palette/spinner; rewire the
+  content to the new flow; rewrite the README to this product. Done: owner
+  confirms the output keeps the tuned look and the README matches `scan`.
+- [ ] **Remove old MVP** as each replacement lands: Daytona, Pi mapping
+  collectors, `attack-hypotheses`, evaluator loops, repo-map-as-truth, duplicate
+  stage arrays, mutable-path overwrite, in-memory registry. Keep Pi + OpenRouter
+  as the harness/gateway for the one remediation call.
 
 ## Runtime
 
@@ -88,11 +170,22 @@ owner running the real command on a real repo — not by a passing test suite.
 - GitHub: `git clone --depth 1` inside the sandbox. Local: copy the folder in.
   The scanned app, package managers, build scripts, and git hooks are never
   executed — the checks only read the source.
-- Scanners live in a plain Dockerfile-built image. Vulnerability databases update
-  at the start of each run; the manifest records each tool's version and DB date.
-  If an update fails (offline), the cached DB is used and freshness is marked
+- **Toolchain image.** A `toolchain/Dockerfile` installs the scanners. Build it
+  **once** into a local image tagged `vibeshield-toolchain` (a documented build
+  command; or `scan` builds it the first time if it is missing, with Docker or
+  podman). Microsandbox boots that image by tag. Scanners never run on the host;
+  if the image is missing and cannot be built, `scan` stops with a clear message.
+  Updating tool versions and rebuild policy are decided later. The image tag is
+  recorded in the manifest.
+- **Order inside the sandbox:** create → acquire source (clone/copy) → refresh
+  vulnerability DBs → run checks → collect outputs → destroy. The DB updaters are
+  fixed trusted commands that do not read repository content, so updater traffic
+  and untrusted repo data never mix. The manifest records each tool's version and
+  DB date; a failed update falls back to the cached DB and marks freshness
   degraded — a stale DB cannot support a green verdict.
-- Offline / no-egress / pinned-image hardening is deferred (see "Later").
+- **Egress (iteration 1):** the sandbox has unrestricted network — accepted per
+  the locked decisions. An egress allowlist and an offline pinned image are the
+  isolation/SaaS hardening track, not iteration 1.
 
 ## Storage
 
@@ -127,7 +220,7 @@ src/
   tools/         one thin adapter per scanner (argv, config, parse)
   agents/        pi remediation call
   ports/         sandbox-runtime, state-store, artifact-store, model-provider, event-sink
-  adapters/      microsandbox, sqlite, filesystem-blobs, anthropic-model
+  adapters/      microsandbox, sqlite, filesystem-blobs, openrouter-model
   interfaces/    cli
   reporting/     terminal, markdown, html, json
 ```
@@ -146,11 +239,20 @@ Minimal on purpose — enough to keep stages coherent.
   (`path`, `size`, `sha256`), `exclusions` (`path`, `reason`), `tool versions`,
   `db dates`. Paths are POSIX-relative inside the repo; no absolute paths, `..`,
   NUL, or backslashes reach a check.
+- **Source filtering** (what reaches a check): with `.git`, exclude git-ignored
+  files; without `.git`, apply a built-in ignore set (`.git`, `node_modules`,
+  `dist`, `build`, `.next`, `out`, `target`, `vendor`, `.venv`/`venv`,
+  `__pycache__`, `.cache`, coverage/output dirs). Exception: `.env` / `.env.*` are
+  always included even if ignored — finding a real key is the point. Limits: skip
+  files over 5 MB, stop past 50k files or 500 MB total, each recorded as a
+  `too_large` / `truncated` exclusion. Never follow a symlink resolving outside
+  the source root. Every exclusion is in the manifest with a reason.
 - **Data model**, separate levels so raw stays inspectable and the result stays
   clean:
-  - `RawArtifact` — unmodified (redacted) tool output in the blob store.
-  - `Evidence` — `id`, raw artifact ref, file path, line range, snippet (redacted),
-    snippet hash, tool ref.
+  - `RedactedRawArtifact` — the tool's own output, format preserved, secret values
+    masked, nothing else changed; stored in the blob store.
+  - `Evidence` — `id`, redacted-raw-artifact ref, file path, line range, snippet
+    (redacted), snippet hash, tool ref.
   - `Finding` — `id`, source tool, rule id, category, severity, confidence,
     locations, evidence ids, `fingerprint`, optional `remediation key`.
   - `FindingCluster` — same root cause: id, category, finding ids, max severity.
@@ -176,17 +278,21 @@ Minimal on purpose — enough to keep stages coherent.
   steps, coding-agent prompt template. Unknown findings use a clearly-weaker
   generic template. The catalog is the deterministic fallback and the primary UX
   when the AI is off.
-- **The one AI call** (`remediation.generate`, Claude Opus 4.8, high effort, via
-  Pi, on the host):
+- **The one AI call** (`remediation.generate`): Claude Opus 4.8, high reasoning
+  effort, via Pi over OpenRouter, on the host. The OpenRouter key comes from an
+  env var; if it is missing, the call is skipped and the catalog is used.
   - Input: up to ten `ActionCandidate`s with their findings, redacted evidence
     snippets, affected files, the matching catalog entries, and the repo
     inventory.
-  - Output per candidate: plain-language risk, why-fix-now, fix steps,
-    operational steps, coding-agent prompt, verification.
+  - Output (structured JSON against the `RemediationAction` schema) per candidate:
+    plain-language risk, why-fix-now, fix steps, operational steps, coding-agent
+    prompt, verification.
   - Rules: use only the given finding/evidence ids; never change priority,
-    severity, or verdict; return structured output; separate code changes from
-    operational steps. One generation pass, one repair pass, then catalog
-    fallback. Secret values are redacted out of the input.
+    severity, or verdict; separate code changes from operational steps. Secret
+    values are redacted out of the input.
+  - **Exactly one model call.** Its output is validated (schema + semantic
+    validators). Anything that fails validation falls back to the catalog for that
+    candidate — no repair step.
 - **Semantic validators** on stage outputs: referenced files exist in the
   snapshot, line ranges are in range, hashes match, ids resolve, paths stay
   inside the repo.
@@ -200,8 +306,11 @@ Minimal on purpose — enough to keep stages coherent.
 re-runs that stage and recomputes everything after it. `--only <stage>` re-runs
 just that stage and marks everything after it stale. Old attempts are kept. State
 is computed from SQLite, not from files on disk. Re-running a check re-acquires
-the source (the sandbox is gone); if the commit moved, it is treated as a new
-snapshot.
+the source (the sandbox is gone) and recomputes the source hash. Equal to the
+recorded manifest hash → the run continues on the same snapshot. Different — a
+moved GitHub commit, or edited local files — → it is a **new snapshot**: a fresh
+run starts and the owner is told the source changed, so resume never silently
+scans different bytes under the old run's identity.
 
 ## Build discipline
 
@@ -223,11 +332,12 @@ stage running through Daytona). Iteration 1 replaces that default path.
   reuse the visual primitives; the help/summary content changes to the new flow.
 - Update the README to this product (Quick Scan, Agent Fix Pack, GitHub-URL or
   local-folder input, the verdicts, the no-runtime-validation limitation).
-- Remove as the new path lands: Daytona; OpenRouter as a required dependency; Pi
-  section/mapping collectors and per-area agent loops; `attack-hypotheses`;
-  evaluator/self-reflection loops; repository-map-as-pipeline-truth; duplicate
-  stage-order arrays; mutable-path artifact overwrite; the in-memory artifact
-  registry. Keep Pi only as the harness for the one remediation call.
+- Remove as the new path lands: Daytona; Pi section/mapping collectors and
+  per-area agent loops; `attack-hypotheses`; evaluator/self-reflection loops;
+  repository-map-as-pipeline-truth; duplicate stage-order arrays; mutable-path
+  artifact overwrite; the in-memory artifact registry. Keep Pi and OpenRouter as
+  the harness/gateway for the one remediation call — no model is required for the
+  deterministic result.
 
 ## Later — named, not dropped
 
