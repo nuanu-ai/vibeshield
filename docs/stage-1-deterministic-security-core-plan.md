@@ -133,10 +133,12 @@ still-useful Fix Pack when one check is killed.
 
 Status:
 
-- [ ] **Gate 2 acceptance.** Owner-visible fixture matrix has not been run yet.
-  Needs one run where all checks are applicable and checked, plus one run where a
-  killed check records failed coverage while other findings still produce a Fix
-  Pack.
+- [x] **Gate 2 acceptance.** Live Microsandbox fixture matrix ran. Run
+  `20260622131315-4a83541f` used `vibeshield-toolchain:gate2-check` and showed
+  all checks `checked` with an IaC Fix Pack action for `Dockerfile:1`. Run
+  `20260622131504-b50e4eef` used a derived image without `actionlint`, recorded
+  `github-actions.actionlint: failed`, kept `Critical fix needed`, and produced
+  separate Fix Pack actions for `src/config.ts:2` and `Dockerfile:1`.
 
 - [x] **Inventory.detect.** In: manifest. Do: detect languages, manifests,
   workflows, IaC to gate which checks apply. Out: a scan plan. Done: a repo with
