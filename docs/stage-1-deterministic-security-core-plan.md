@@ -138,7 +138,11 @@ Status:
   all checks `checked` with an IaC Fix Pack action for `Dockerfile:1`. Run
   `20260622131504-b50e4eef` used a derived image without `actionlint`, recorded
   `github-actions.actionlint: failed`, kept `Critical fix needed`, and produced
-  separate Fix Pack actions for `src/config.ts:2` and `Dockerfile:1`.
+  separate Fix Pack actions for `src/config.ts:2` and `Dockerfile:1`. Follow-up
+  run `20260622133434-84911c56` verified the hardened runtime contract: manifest
+  image tag `vibeshield-toolchain:gate2-check`, Trivy DB date recorded with
+  `dbStale: false`, all applicable checks `checked`, and separate Fix Pack
+  actions for secret, dependency, and IaC findings.
 
 - [x] **Inventory.detect.** In: manifest. Do: detect languages, manifests,
   workflows, IaC to gate which checks apply. Out: a scan plan. Done: a repo with

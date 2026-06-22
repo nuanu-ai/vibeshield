@@ -8,7 +8,8 @@ coding agent.
 
 The current implementation is a deterministic Quick Scan slice. It runs the
 sandboxed scanner toolchain, records truthful coverage, and turns detected
-secrets into a deterministic Fix Pack action.
+secrets, dependency issues, workflow issues, IaC findings, and code-pattern
+hits into deterministic Fix Pack actions.
 
 ## What Works Now
 
@@ -20,21 +21,18 @@ secrets into a deterministic Fix Pack action.
 - `gitleaks`, `opengrep`, `syft`, `trivy`, `actionlint`, and `zizmor` run in
   the sandbox when the inventory says they apply. Non-applicable checks are
   skipped with a recorded reason.
-- Raw gitleaks JSON is redacted before it enters the blob store.
+- Raw scanner JSON is redacted before it enters the blob store.
 - Findings outside the snapshot manifest are rejected.
 - Reports include a coverage table showing checked, skipped, failed, or
   degraded checks.
 - Reports are written under `~/.vibeshield/runs/<run-id>/` as
   `manifest.json`, `report.json`, `report.md`, and `report.html`.
-- With a detected secret, the deterministic verdict is `Critical fix needed`
-  and the catalog produces a coding-agent prompt.
+- With detected blocking findings, the deterministic verdict and catalog
+  produce prioritized coding-agent prompts.
 
 Still not done:
 
 - Resume is intentionally not implemented yet.
-- Fix Pack actions are still normalized from secrets findings only. Other
-  scanner outputs are captured as raw artifacts and extracted candidates for the
-  next normalization pass.
 - The one OpenRouter/Opus remediation enhancement call is not wired yet; the
   current slice uses the deterministic catalog fallback.
 - The live Microsandbox acceptance run still requires a local toolchain image.
@@ -92,7 +90,8 @@ State and blobs live under `~/.vibeshield` by default:
 ```
 
 The source tree is not stored as an artifact. The manifest records the source
-hash, file list, exclusions, commit SHA when available, and tool versions.
+hash, file list, exclusions, commit SHA when available, toolchain image tag,
+tool versions, and vulnerability DB freshness when the tool exposes it.
 
 ## Development
 
