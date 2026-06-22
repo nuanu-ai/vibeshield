@@ -8,8 +8,10 @@ import { FilesystemBlobs } from "../src/adapters/filesystem-blobs.js";
 import { NullModelProvider } from "../src/adapters/null-model-provider.js";
 import { SqliteStateStore } from "../src/adapters/sqlite-state-store.js";
 import { runScan } from "../src/application/scan-service.js";
+import type { RemediationAction } from "../src/domain/action.js";
 import type { Manifest } from "../src/domain/manifest.js";
 import type { ScanEvent } from "../src/ports/event-sink.js";
+import type { ModelEnhanceBatchInput, ModelProvider } from "../src/ports/model-provider.js";
 import {
   GITLEAKS_REPORT_PATH,
   MANIFEST_PATH,
@@ -496,6 +498,151 @@ describe("runScan quick scan vertical slice", () => {
     );
   });
 
+  it("enhances remediation copy without changing deterministic verdict, findings, or candidates", async () => {
+    const source = await writeLocalFixture(dir);
+    const manifest = manifestFor(source.path, [
+      { path: "src/config.ts", size: 80, sha256: "config-sha" },
+      { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+    ]);
+    const baselineSandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifest,
+        [
+          {
+            RuleID: "stripe-access-token",
+            File: "src/config.ts",
+            StartLine: 3,
+            EndLine: 3,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/config.ts:stripe-access-token:3",
+          },
+        ],
+        {
+          actionlint: {
+            exitCode: 1,
+            stdout: JSON.stringify([
+              {
+                Message: 'property "branches" is not defined',
+                Kind: "workflow-syntax",
+                Filepath: ".github/workflows/ci.yml",
+                Line: 7,
+              },
+            ]),
+            stderr: "",
+          },
+        },
+      ),
+    });
+    const enhancedModel = new FakeModelProvider((input) =>
+      input.actions.map((action) => ({
+        ...action.catalogRemediation,
+        title: `AI: ${action.catalogRemediation.title}`,
+        risk: `Clearer risk: ${action.catalogRemediation.risk}`,
+        whyFixNow: `Clearer urgency: ${action.catalogRemediation.whyFixNow}`,
+        agentPrompt: [
+          `AI prompt for ${action.candidateId}`,
+          ...action.affectedFiles.map((file) => `Allowed file: ${file}.`),
+        ].join("\n"),
+        fromCatalog: false,
+      })),
+    );
+    const enhancedSandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifest,
+        [
+          {
+            RuleID: "stripe-access-token",
+            File: "src/config.ts",
+            StartLine: 3,
+            EndLine: 3,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/config.ts:stripe-access-token:3",
+          },
+        ],
+        {
+          actionlint: {
+            exitCode: 1,
+            stdout: JSON.stringify([
+              {
+                Message: 'property "branches" is not defined',
+                Kind: "workflow-syntax",
+                Filepath: ".github/workflows/ci.yml",
+                Line: 7,
+              },
+            ]),
+            stderr: "",
+          },
+        },
+      ),
+    });
+
+    const baseline = await runScan(deps(baselineSandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+    const enhanced = await runScan(deps(enhancedSandbox, new FilesystemBlobs(dir), enhancedModel), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    expect(enhancedModel.inputs).toHaveLength(1);
+    expect(enhancedModel.inputs[0]?.actions).toHaveLength(2);
+    expect(enhanced.assessment.verdict).toBe(baseline.assessment.verdict);
+    expect(enhanced.assessment.findings.map((finding) => finding.id)).toEqual(
+      baseline.assessment.findings.map((finding) => finding.id),
+    );
+    expect(enhanced.assessment.rankedActions.map((action) => action.candidate)).toEqual(
+      baseline.assessment.rankedActions.map((action) => action.candidate),
+    );
+    expect(
+      enhanced.assessment.rankedActions.every((action) => !action.remediation.fromCatalog),
+    ).toBe(true);
+    expect(enhanced.assessment.rankedActions[0]?.remediation.title).toMatch(/^AI:/);
+  });
+
+  it("falls back to catalog remediation when the model returns invalid ids or paths", async () => {
+    const source = await writeLocalFixture(dir);
+    const badModel = new FakeModelProvider((input) =>
+      input.actions.map((action, index) => ({
+        ...action.catalogRemediation,
+        candidateId: index === 0 ? "unknown-candidate" : action.candidateId,
+        agentPrompt: "Edit /tmp/host-secret.txt",
+        fromCatalog: false,
+      })),
+    );
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(manifestFor(source.path), [
+        {
+          RuleID: "stripe-access-token",
+          File: "src/config.ts",
+          StartLine: 3,
+          EndLine: 3,
+          Secret: PLANTED_SECRET,
+          Match: `stripeSecret: "${PLANTED_SECRET}"`,
+          Fingerprint: "src/config.ts:stripe-access-token:3",
+        },
+      ]),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir), badModel), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    expect(badModel.inputs).toHaveLength(1);
+    expect(outcome.assessment.verdict).toBe("critical-fix-needed");
+    expect(outcome.assessment.rankedActions[0]?.remediation).toMatchObject({
+      title: "Remove the committed secret",
+      fromCatalog: true,
+    });
+    expect(outcome.assessment.rankedActions[0]?.remediation.agentPrompt).not.toContain("/tmp");
+  });
+
   it("blocks a green verdict when required scanner coverage is lost", async () => {
     const source = await writeLocalFixture(dir);
     const sandbox = new FakeSandboxRuntime({
@@ -541,13 +688,17 @@ describe("runScan quick scan vertical slice", () => {
   });
 });
 
-function deps(sandbox: FakeSandboxRuntime, blobs: FilesystemBlobs) {
+function deps(
+  sandbox: FakeSandboxRuntime,
+  blobs: FilesystemBlobs,
+  model: ModelProvider = new NullModelProvider(),
+) {
   return {
     sandbox,
     state: new SqliteStateStore(db),
     artifacts: blobs,
     events: new CollectingEvents(),
-    model: new NullModelProvider(),
+    model,
   };
 }
 
@@ -711,5 +862,24 @@ class CollectingEvents {
 
   emit(event: ScanEvent): void {
     this.events.push(event);
+  }
+}
+
+class FakeModelProvider implements ModelProvider {
+  readonly inputs: ModelEnhanceBatchInput[] = [];
+
+  constructor(
+    private readonly responder: (
+      input: ModelEnhanceBatchInput,
+    ) => ReadonlyArray<RemediationAction> | null,
+  ) {}
+
+  async isAvailable(): Promise<boolean> {
+    return true;
+  }
+
+  async enhance(input: ModelEnhanceBatchInput): Promise<ReadonlyArray<RemediationAction> | null> {
+    this.inputs.push(input);
+    return this.responder(input);
   }
 }

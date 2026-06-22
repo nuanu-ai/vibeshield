@@ -5,7 +5,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { FilesystemBlobs } from "./adapters/filesystem-blobs.js";
 import { MicrosandboxRuntime } from "./adapters/microsandbox/runtime.js";
-import { NullModelProvider } from "./adapters/null-model-provider.js";
+import {
+  DEFAULT_REMEDIATION_MODEL,
+  OpenRouterModelProvider,
+} from "./adapters/openrouter-model-provider.js";
 import { SqliteStateStore } from "./adapters/sqlite-state-store.js";
 import { ensureStateRoot, resolveStateRoot, stateDbPath } from "./adapters/state-root.js";
 import { runScan } from "./application/scan-service.js";
@@ -54,6 +57,7 @@ async function scan(args: string[]): Promise<void> {
   const stateRoot = resolveStateRoot();
   await ensureStateRoot(stateRoot);
   const toolchainImage = process.env.VIBESHIELD_TOOLCHAIN_TAG ?? DEFAULT_TOOLCHAIN_IMAGE;
+  const remediationModel = process.env.VIBESHIELD_REMEDIATION_MODEL ?? DEFAULT_REMEDIATION_MODEL;
 
   const db = new DatabaseSync(stateDbPath(stateRoot));
   try {
@@ -63,7 +67,12 @@ async function scan(args: string[]): Promise<void> {
         state: new SqliteStateStore(db),
         artifacts: new FilesystemBlobs(stateRoot),
         events: new TerminalEventSink(),
-        model: new NullModelProvider(),
+        model: new OpenRouterModelProvider({
+          model: remediationModel,
+          ...(process.env.OPENROUTER_API_KEY !== undefined
+            ? { apiKey: process.env.OPENROUTER_API_KEY }
+            : {}),
+        }),
       },
       {
         source,
@@ -148,6 +157,8 @@ function printHelp(): void {
       "Environment:",
       "  VIBESHIELD_STATE_ROOT     override ~/.vibeshield",
       "  VIBESHIELD_TOOLCHAIN_TAG  override vibeshield-toolchain:latest",
+      "  OPENROUTER_API_KEY        enable one-call remediation enhancement",
+      "  VIBESHIELD_REMEDIATION_MODEL override the OpenRouter remediation model",
       "",
     ].join("\n"),
   );

@@ -1,5 +1,5 @@
 import type { RemediationAction } from "../domain/action.js";
-import type { ModelEnhanceInput, ModelProvider } from "../ports/model-provider.js";
+import type { ModelEnhanceBatchInput, ModelProvider } from "../ports/model-provider.js";
 
 /** Current Quick Scan model adapter: deliberately unavailable so catalog remediation is used. */
 export class NullModelProvider implements ModelProvider {
@@ -7,7 +7,7 @@ export class NullModelProvider implements ModelProvider {
     return false;
   }
 
-  async enhance(_input: ModelEnhanceInput): Promise<RemediationAction | null> {
+  async enhance(_input: ModelEnhanceBatchInput): Promise<ReadonlyArray<RemediationAction> | null> {
     return null;
   }
 }

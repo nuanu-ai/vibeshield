@@ -4,7 +4,7 @@ import { runStages } from "../src/pipeline/runner.js";
 import type { StageDefinition } from "../src/pipeline/stage-definition.js";
 import type { StoredBlob } from "../src/ports/artifact-store.js";
 import type { ScanEvent } from "../src/ports/event-sink.js";
-import type { ModelEnhanceInput } from "../src/ports/model-provider.js";
+import type { ModelEnhanceBatchInput } from "../src/ports/model-provider.js";
 import type { ExecResult } from "../src/ports/sandbox-runtime.js";
 
 describe("runStages", () => {
@@ -134,7 +134,7 @@ class NoopModel {
     return false;
   }
 
-  async enhance(_input: ModelEnhanceInput): Promise<null> {
+  async enhance(_input: ModelEnhanceBatchInput): Promise<null> {
     return null;
   }
 }

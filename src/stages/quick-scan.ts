@@ -13,6 +13,7 @@ import { summarizeManifest, summarizeToolchain } from "../domain/manifest-summar
 import type { ArtifactRef, SourceInput } from "../domain/run.js";
 import { buildAssessment, type RankedAction } from "../domain/security-assessment.js";
 import type { StageContext, StageDefinition, StageResult } from "../pipeline/stage-definition.js";
+import type { ModelEnhanceBatchInput } from "../ports/model-provider.js";
 import type { ExecResult } from "../ports/sandbox-runtime.js";
 import { createLocalSourcePackage } from "./local-source-package.js";
 import {
@@ -745,7 +746,7 @@ function actionsStage(): StageDefinition {
 
 function remediationStage(): StageDefinition {
   return {
-    id: "remediation.catalog",
+    id: "remediation.generate",
     version: "1",
     dependencies: ["findings.normalize", "actions.rank"],
     inputs: [],
@@ -754,7 +755,7 @@ function remediationStage(): StageDefinition {
     run: async (ctx) => {
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { candidates } = readInput<ActionsData>(ctx, "actions.rank");
-      const rankedActions = candidates.map((candidate) => {
+      const catalogActions = candidates.map((candidate) => {
         const candidateFindings = findings.filter((finding) =>
           candidate.findingIds.includes(finding.id),
         );
@@ -764,6 +765,7 @@ function remediationStage(): StageDefinition {
           remediation: catalogRemediation(candidate, candidateFindings, candidateEvidence),
         };
       });
+      const rankedActions = await enhanceRemediations(ctx, catalogActions, findings, evidence);
       return success({ rankedActions } satisfies RemediationData);
     },
   };
@@ -780,7 +782,7 @@ function reportStage(): StageDefinition {
       "findings.normalize",
       "findings.correlate",
       "actions.rank",
-      "remediation.catalog",
+      "remediation.generate",
     ],
     inputs: [],
     outputs: ["report.json", "report.md", "report.html"],
@@ -796,7 +798,7 @@ function reportStage(): StageDefinition {
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { clusters } = readInput<CorrelateData>(ctx, "findings.correlate");
       const { verdict } = readInput<ActionsData>(ctx, "actions.rank");
-      const { rankedActions } = readInput<RemediationData>(ctx, "remediation.catalog");
+      const { rankedActions } = readInput<RemediationData>(ctx, "remediation.generate");
       const assessment = buildAssessment({
         repository: repositorySummary(ctx.source, manifest),
         manifest: summarizeManifest(manifest),
@@ -1653,6 +1655,139 @@ function redactedSnippet(record: GitleaksRecord): string {
     return record.Match;
   }
   return `${stringOr(record.RuleID, "secret")} detected`;
+}
+
+async function enhanceRemediations(
+  ctx: StageContext,
+  catalogActions: ReadonlyArray<RankedAction>,
+  findings: ReadonlyArray<Finding>,
+  evidence: ReadonlyArray<Evidence>,
+): Promise<RankedAction[]> {
+  const available = await ctx.model.isAvailable().catch(() => false);
+  if (!available || catalogActions.length === 0) {
+    return [...catalogActions];
+  }
+
+  const modelActions = catalogActions.slice(0, 10);
+  const enhanced = await ctx.model
+    .enhance(modelEnhanceInput(ctx.source, modelActions, findings, evidence))
+    .catch(() => null);
+  if (enhanced === null) {
+    return [...catalogActions];
+  }
+
+  const enhancedById = validateEnhancedRemediations(enhanced, modelActions);
+  if (enhancedById === null) {
+    return [...catalogActions];
+  }
+
+  return catalogActions.map((ranked) => {
+    const remediation = enhancedById.get(ranked.candidate.id);
+    return remediation === undefined ? ranked : { candidate: ranked.candidate, remediation };
+  });
+}
+
+function modelEnhanceInput(
+  source: SourceInput,
+  rankedActions: ReadonlyArray<RankedAction>,
+  findings: ReadonlyArray<Finding>,
+  evidence: ReadonlyArray<Evidence>,
+): ModelEnhanceBatchInput {
+  const findingsById = new Map(findings.map((finding) => [finding.id, finding]));
+  const evidenceById = new Map(evidence.map((ev) => [ev.id, ev]));
+  return {
+    repositoryName:
+      source.kind === "github" ? repoNameFromUrl(source.url) : path.basename(source.path),
+    actions: rankedActions.map(({ candidate, remediation }) => ({
+      candidateId: candidate.id,
+      remediationKey: candidate.remediationKey,
+      priorityScore: candidate.priorityScore,
+      verdictImpact: candidate.verdictImpact,
+      affectedFiles: candidate.affectedFiles,
+      catalogRemediation: remediation,
+      findings: candidate.findingIds.flatMap((findingId) => {
+        const finding = findingsById.get(findingId);
+        if (finding === undefined) {
+          return [];
+        }
+        const location = finding.locations[0];
+        if (location === undefined) {
+          return [];
+        }
+        const snippet = finding.evidenceIds
+          .map((evidenceId) => evidenceById.get(evidenceId)?.snippet)
+          .find((value): value is string => value !== undefined);
+        return [
+          {
+            findingId: finding.id,
+            sourceTool: finding.sourceTool,
+            ruleId: finding.ruleId,
+            category: finding.category,
+            severity: finding.severity,
+            filePath: location.filePath,
+            startLine: location.startLine,
+            snippet: redactSecrets(snippet ?? `${finding.ruleId} detected`),
+          },
+        ];
+      }),
+    })),
+  };
+}
+
+function validateEnhancedRemediations(
+  enhanced: ReadonlyArray<RemediationAction>,
+  modelActions: ReadonlyArray<RankedAction>,
+): Map<string, RemediationAction> | null {
+  if (enhanced.length !== modelActions.length) {
+    return null;
+  }
+  const expectedIds = new Set(modelActions.map((ranked) => ranked.candidate.id));
+  const out = new Map<string, RemediationAction>();
+  for (const remediation of enhanced) {
+    if (!expectedIds.has(remediation.candidateId) || out.has(remediation.candidateId)) {
+      return null;
+    }
+    const ranked = modelActions.find((action) => action.candidate.id === remediation.candidateId);
+    if (ranked === undefined) {
+      return null;
+    }
+    const sanitized = sanitizeModelRemediation(remediation);
+    if (!remediationTextAvoidsUnsafePaths(sanitized)) {
+      return null;
+    }
+    out.set(remediation.candidateId, sanitized);
+  }
+  return out;
+}
+
+function sanitizeModelRemediation(remediation: RemediationAction): RemediationAction {
+  return {
+    candidateId: remediation.candidateId,
+    title: redactSecrets(remediation.title),
+    risk: redactSecrets(remediation.risk),
+    whyFixNow: redactSecrets(remediation.whyFixNow),
+    fixSteps: remediation.fixSteps.map(redactSecrets),
+    operationalSteps: remediation.operationalSteps.map(redactSecrets),
+    agentPrompt: redactSecrets(remediation.agentPrompt),
+    verifySteps: remediation.verifySteps.map(redactSecrets),
+    fromCatalog: false,
+  };
+}
+
+function remediationTextAvoidsUnsafePaths(remediation: RemediationAction): boolean {
+  const text = [
+    remediation.title,
+    remediation.risk,
+    remediation.whyFixNow,
+    remediation.agentPrompt,
+    ...remediation.fixSteps,
+    ...remediation.operationalSteps,
+    ...remediation.verifySteps,
+  ].join("\n");
+  if (/(^|[\s"'`(])(?:\/(?:tmp|work|Users|home|root|etc|var)\b|[A-Za-z]:\\|\.\.)/.test(text)) {
+    return false;
+  }
+  return true;
 }
 
 function catalogRemediation(
