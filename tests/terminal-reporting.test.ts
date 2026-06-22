@@ -29,7 +29,7 @@ describe("terminal reporting", () => {
     expect(text).toContain("Source: catalog fallback; impact: blocks-deploy; priority: 100");
   });
 
-  it("prints progress events without requiring a live scan", () => {
+  it("prints owner-facing progress events without requiring a live scan", () => {
     let output = "";
     const sink = new TerminalEventSink(
       {
@@ -44,8 +44,20 @@ describe("terminal reporting", () => {
 
     sink.emit({
       type: "stage-started",
-      stageId: "scan.secrets",
-      message: "running secrets",
+      stageId: "source.resolve",
+      message: "source.resolve",
+      timestamp: "2026-06-22T00:00:00.000Z",
+    });
+    sink.emit({
+      type: "stage-started",
+      stageId: "scan.secrets.gitleaks",
+      message: "scan.secrets.gitleaks",
+      timestamp: "2026-06-22T00:00:00.000Z",
+    });
+    sink.emit({
+      type: "stage-started",
+      stageId: "scan.code.opengrep",
+      message: "scan.code.opengrep",
       timestamp: "2026-06-22T00:00:00.000Z",
     });
     sink.emit({
@@ -53,9 +65,21 @@ describe("terminal reporting", () => {
       message: "sandbox unavailable",
       timestamp: "2026-06-22T00:00:00.000Z",
     });
+    sink.emit({
+      type: "run-finished",
+      message: "sandbox unavailable",
+      details: { status: "failed" },
+      timestamp: "2026-06-22T00:00:00.000Z",
+    });
 
-    expect(output).toContain("[scan] scan.secrets");
+    expect(output).toContain("[scan] Preparing the repository");
+    expect(output).toContain("[scan] Running security checks");
     expect(output).toContain("[fail] sandbox unavailable");
+    expect(output).not.toContain("source.resolve");
+    expect(output).not.toContain("scan.secrets.gitleaks");
+    expect(output).not.toContain("scan.code.opengrep");
+    expect(output.match(/Running security checks/g)).toHaveLength(1);
+    expect(output).not.toContain("[done] sandbox unavailable");
   });
 });
 

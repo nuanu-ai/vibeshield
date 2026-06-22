@@ -28,8 +28,28 @@ const STATUS_ORDER: ReadonlyArray<CoverageStatus> = ["checked", "degraded", "fai
 
 const REPORT_ORDER = ["json", "markdown", "md", "html"] as const;
 
+const STAGE_PROGRESS_LABELS: Readonly<Record<string, string>> = {
+  "source.resolve": "Preparing the repository",
+  "toolchain.refresh": "Updating scanner data",
+  "snapshot.manifest": "Understanding the project",
+  "inventory.detect": "Understanding the project",
+  "scan.secrets.gitleaks": "Running security checks",
+  "scan.code.opengrep": "Running security checks",
+  "scan.sbom.syft": "Running security checks",
+  "scan.dependencies.trivy": "Running security checks",
+  "scan.github-actions.actionlint": "Running security checks",
+  "scan.github-actions.zizmor": "Running security checks",
+  "scan.iac.trivy-config": "Running security checks",
+  "findings.normalize": "Prioritizing findings",
+  "findings.correlate": "Prioritizing findings",
+  "actions.rank": "Prioritizing findings",
+  "remediation.generate": "Writing the Agent Fix Pack",
+  "report.compose": "Rendering reports",
+};
+
 export class TerminalEventSink implements EventSink {
   private readonly palette: Palette;
+  private readonly printedProgressLabels = new Set<string>();
 
   constructor(
     private readonly stream: TerminalStream = process.stderr,
@@ -40,11 +60,15 @@ export class TerminalEventSink implements EventSink {
 
   emit(event: ScanEvent): void {
     if (event.type === "run-started") {
-      this.write(`${this.palette.bold("VibeShield")} ${this.palette.dim("starting quick scan")}`);
+      this.write(`${this.palette.bold("VibeShield")} ${this.palette.dim("quick scan started")}`);
       return;
     }
     if (event.type === "stage-started") {
-      this.write(`${this.palette.cyan("[scan]")} ${event.stageId ?? event.message}`);
+      const label = progressLabel(event);
+      if (!this.printedProgressLabels.has(label)) {
+        this.printedProgressLabels.add(label);
+        this.write(`${this.palette.cyan("[scan]")} ${label}`);
+      }
       return;
     }
     if (event.type === "stage-failed" || event.type === "error") {
@@ -52,13 +76,31 @@ export class TerminalEventSink implements EventSink {
       return;
     }
     if (event.type === "run-finished") {
-      this.write(`${this.palette.green("[done]")} ${event.message}`);
+      if (event.details?.status === "failed") {
+        return;
+      }
+      this.write(`${this.palette.green("[done]")} Quick scan finished`);
     }
   }
 
   private write(line: string): void {
     this.stream.write(`${line}\n`);
   }
+}
+
+function progressLabel(event: ScanEvent): string {
+  if (event.stageId !== undefined) {
+    return STAGE_PROGRESS_LABELS[event.stageId] ?? humanizeStageId(event.stageId);
+  }
+  return event.message;
+}
+
+function humanizeStageId(stageId: string): string {
+  return stageId
+    .split(".")
+    .filter((part) => part.length > 0)
+    .map((part) => part.replaceAll("-", " "))
+    .join(" ");
 }
 
 export function renderScanOutcome(outcome: ScanOutcome, opts: RenderOptions = {}): string {
