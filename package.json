@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
+    "jsonrepair": "^3.14.0",
     "microsandbox": "^0.5.7"
   }
 }

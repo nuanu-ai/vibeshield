@@ -16,11 +16,13 @@ import {
   MANIFEST_SCRIPT_PATH,
   OPENGREP_REPORT_PATH,
   SOURCE_DIR,
+  TRIVY_CACHE_DIR,
 } from "../src/stages/paths.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const PLANTED_SECRET = ["sk", "live", "26SGeL0ZOrD23wxj6X4Q5np2Ua0eJZ7m"].join("_");
+const TRIVY_DB_UPDATED_AT = "2026-06-22T09:00:00.000Z";
 let db: DatabaseSync;
 
 describe("runScan quick scan vertical slice", () => {
@@ -248,6 +250,12 @@ describe("runScan quick scan vertical slice", () => {
 
     const coverage = coverageByCheck(outcome.assessment.coverage);
     expect(outcome.assessment.verdict).toBe("looks-ok-for-now");
+    expect(outcome.assessment.toolchain.imageTag).toBe("test-toolchain:latest");
+    expect(outcome.assessment.toolchain.tools.find((tool) => tool.tool === "trivy")).toMatchObject({
+      tool: "trivy",
+      dbDate: TRIVY_DB_UPDATED_AT,
+      dbStale: false,
+    });
     for (const check of [
       "secrets.gitleaks",
       "code-patterns.opengrep",
@@ -262,7 +270,45 @@ describe("runScan quick scan vertical slice", () => {
     expect(sandbox.invocations.map((i) => i.command[0])).toEqual(
       expect.arrayContaining(["gitleaks", "opengrep", "syft", "trivy", "actionlint", "zizmor"]),
     );
-    expect(sandbox.invocations.filter((i) => i.command[0] === "trivy")).toHaveLength(2);
+    expect(sandbox.invocations.filter((i) => i.command[0] === "trivy")).toHaveLength(3);
+    expect(
+      sandbox.invocations.findIndex((i) => i.command[0] === "trivy" && i.command[1] === "image"),
+    ).toBeLessThan(
+      sandbox.invocations.findIndex((i) => i.command[0] === "trivy" && i.command[1] === "fs"),
+    );
+  });
+
+  it("blocks a green verdict when the Trivy DB refresh cannot prove freshness", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "README.md", size: 10, sha256: "readme-sha" },
+          { path: "package.json", size: 40, sha256: "package-sha" },
+        ]),
+        [],
+        {
+          trivyRefresh: { exitCode: 1, stdout: "", stderr: "network unavailable", metadata: null },
+        },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    expect(outcome.assessment.verdict).toBe("scan-incomplete");
+    expect(outcome.assessment.toolchain.tools.find((tool) => tool.tool === "trivy")).toMatchObject({
+      tool: "trivy",
+      dbStale: true,
+    });
+    expect(coverageByCheck(outcome.assessment.coverage).get("dependencies.trivy")).toEqual({
+      check: "dependencies.trivy",
+      status: "degraded",
+      reason: "trivy database freshness is stale; refresh failed before scan",
+    });
   });
 
   it("keeps a useful fix pack when one applicable scanner fails", async () => {
@@ -305,6 +351,93 @@ describe("runScan quick scan vertical slice", () => {
       status: "failed",
       reason: "exit 2; stderr: invalid workflow syntax",
     });
+  });
+
+  it("repairs malformed scanner JSON and redacts raw output before normalization", async () => {
+    const source = await writeLocalFixture(dir);
+    const blobs = new FilesystemBlobs(dir);
+    const leakedToken = ["sk", "live", "repairBoundaryToken123456789"].join("_");
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "README.md", size: 10, sha256: "readme-sha" },
+          { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+        ]),
+        [],
+        {
+          actionlint: {
+            exitCode: 1,
+            stdout: `[{Message:'uses token ${leakedToken}', Kind:'secret-leak', Filepath:'.github/workflows/ci.yml', Line:7,}]`,
+            stderr: "",
+          },
+        },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, blobs), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const finding = outcome.assessment.findings.find(
+      (item) => item.sourceTool === "actionlint" && item.ruleId === "secret-leak",
+    );
+    const evidence = outcome.assessment.evidence.find((ev) => ev.tool === "actionlint");
+    expect(outcome.assessment.verdict).toBe("not-ready-to-deploy");
+    expect(finding).toBeDefined();
+    expect(evidence?.snippet).toContain("***REDACTED***");
+    expect(outcome.assessment.rankedActions[0]?.remediation.agentPrompt).not.toContain(leakedToken);
+    const rawHash = evidence?.rawArtifactBlobSha256;
+    expect(rawHash).toBeDefined();
+    const raw = decoder.decode(await blobs.read(rawHash ?? ""));
+    expect(raw).toContain("***REDACTED***");
+    expect(raw).not.toContain(leakedToken);
+  });
+
+  it("turns unrepairable scanner JSON into failed coverage without losing other actions", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "README.md", size: 10, sha256: "readme-sha" },
+          { path: "src/config.ts", size: 80, sha256: "config-sha" },
+          { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+        ]),
+        [
+          {
+            RuleID: "stripe-access-token",
+            File: "src/config.ts",
+            StartLine: 3,
+            EndLine: 3,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/config.ts:stripe-access-token:3",
+          },
+        ],
+        { actionlint: { exitCode: 0, stdout: "not json at all", stderr: "" } },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    expect(outcome.assessment.verdict).toBe("critical-fix-needed");
+    expect(outcome.assessment.rankedActions[0]?.remediation.title).toBe(
+      "Remove the committed secret",
+    );
+    expect(
+      coverageByCheck(outcome.assessment.coverage).get("github-actions.actionlint"),
+    ).toMatchObject({
+      check: "github-actions.actionlint",
+      status: "failed",
+    });
+    expect(
+      coverageByCheck(outcome.assessment.coverage).get("github-actions.actionlint")?.reason,
+    ).toContain("scanner JSON root is not an array or object");
   });
 
   it("keeps remediation prompts scoped to each action's own findings", async () => {
@@ -425,6 +558,12 @@ interface FakeScannerOverrides {
     readonly stderr: string;
   };
   readonly zizmor?: { readonly exitCode: number; readonly stdout: string; readonly stderr: string };
+  readonly trivyRefresh?: {
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly metadata?: Record<string, unknown> | null;
+  };
 }
 
 function fakeQuickScanExec(
@@ -438,7 +577,10 @@ function fakeQuickScanExec(
       return { exitCode: 0, stdout: "", stderr: "" };
     }
     if (bin === "node" && command[1] === MANIFEST_SCRIPT_PATH) {
-      session.files.set(MANIFEST_PATH, jsonBytes(manifest));
+      session.files.set(
+        MANIFEST_PATH,
+        jsonBytes(manifestWithToolchainArgs(manifest, command, session)),
+      );
       return { exitCode: 0, stdout: "", stderr: "" };
     }
     if (bin === "gitleaks" && command[1] === "version") {
@@ -455,6 +597,15 @@ function fakeQuickScanExec(
       );
       return { exitCode: 0, stdout: "", stderr: "" };
     }
+    if (bin === "trivy" && command[1] === "image") {
+      const override = overrides.trivyRefresh;
+      const metadata =
+        override?.metadata === undefined ? { UpdatedAt: TRIVY_DB_UPDATED_AT } : override.metadata;
+      if (metadata !== null) {
+        session.files.set(`${TRIVY_CACHE_DIR}/db/metadata.json`, jsonBytes(metadata));
+      }
+      return override ?? { exitCode: 0, stdout: "", stderr: "" };
+    }
     if (bin === "actionlint" && command[1] !== "-version") {
       return overrides.actionlint ?? { exitCode: 0, stdout: "[]", stderr: "" };
     }
@@ -463,6 +614,48 @@ function fakeQuickScanExec(
     }
     return { exitCode: 0, stdout: "", stderr: "" };
   };
+}
+
+function manifestWithToolchainArgs(
+  manifest: Manifest,
+  command: string[],
+  session: Parameters<FakeExecHandler>[1],
+): Manifest {
+  const imageTag = command[6] ?? manifest.toolchain.imageTag;
+  const freshness = readFakeJson<ToolchainFreshness>(session, command[7]);
+  const freshnessByTool = new Map((freshness?.tools ?? []).map((tool) => [tool.tool, tool]));
+  const tools = manifest.toolchain.tools.map((tool) => ({
+    ...tool,
+    ...freshnessByTool.get(tool.tool),
+  }));
+  for (const tool of freshness?.tools ?? []) {
+    if (!tools.some((existing) => existing.tool === tool.tool)) {
+      tools.push({ version: "unknown", ...tool });
+    }
+  }
+  return { ...manifest, toolchain: { imageTag, tools } };
+}
+
+interface ToolchainFreshness {
+  readonly tools: ReadonlyArray<{
+    readonly tool: string;
+    readonly dbDate?: string;
+    readonly dbStale?: boolean;
+  }>;
+}
+
+function readFakeJson<T>(
+  session: Parameters<FakeExecHandler>[1],
+  path: string | undefined,
+): T | undefined {
+  if (path === undefined) {
+    return undefined;
+  }
+  const bytes = session.files.get(path);
+  if (bytes === undefined) {
+    return undefined;
+  }
+  return JSON.parse(decoder.decode(bytes)) as T;
 }
 
 async function writeLocalFixture(root: string) {
@@ -485,7 +678,14 @@ function manifestFor(localPath: string, files = defaultManifestFiles()): Manifes
     exclusions: [],
     toolchain: {
       imageTag: "test-toolchain:latest",
-      tools: [{ tool: "gitleaks", version: "8.30.1" }],
+      tools: [
+        { tool: "gitleaks", version: "8.30.1" },
+        { tool: "opengrep", version: "1.23.0" },
+        { tool: "syft", version: "1.38.0" },
+        { tool: "trivy", version: "0.71.2" },
+        { tool: "actionlint", version: "1.7.12" },
+        { tool: "zizmor", version: "1.26.1" },
+      ],
     },
     createdAt: "2026-01-01T00:00:00.000Z",
   };

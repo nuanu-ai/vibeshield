@@ -84,6 +84,7 @@ export async function runScan(deps: ScanDeps, request: ScanRequest): Promise<Sca
       runId,
       runDir,
       source: request.source,
+      toolchainImageTag: imageTag,
       stages: quickScanStages(),
       session,
       state: deps.state,

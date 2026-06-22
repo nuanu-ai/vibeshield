@@ -35,6 +35,7 @@ export interface StageContext {
   readonly runId: string;
   readonly runDir: string;
   readonly source: SourceInput;
+  readonly toolchainImageTag: string;
   readonly inputs: ReadonlyMap<StageId, Readonly<Record<string, unknown>>>;
   readonly session: SandboxSession;
   readonly state: StateStore;

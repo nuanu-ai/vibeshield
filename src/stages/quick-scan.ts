@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { jsonrepair } from "jsonrepair";
 import type { ActionCandidate, RemediationAction } from "../domain/action.js";
 import { type Verdict, verdictLabel } from "../domain/assessment.js";
 import type { CoverageEntry } from "../domain/coverage-summary.js";
@@ -25,6 +26,8 @@ import {
   SOURCE_DIR,
   SOURCE_FILTER_PATH,
   SYFT_SBOM_PATH,
+  TOOLCHAIN_FRESHNESS_PATH,
+  TRIVY_CACHE_DIR,
   TRIVY_CONFIG_REPORT_PATH,
   TRIVY_VULN_REPORT_PATH,
   WORK_DIR,
@@ -32,6 +35,9 @@ import {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const SOURCE_TIMEOUT_MS = 5 * 60 * 1000;
+const TOOLCHAIN_REFRESH_TIMEOUT_MS = 5 * 60 * 1000;
+const SCANNER_TIMEOUT_MS = 2 * 60 * 1000;
 
 const SCANNER_STAGE_IDS = [
   "scan.secrets.gitleaks",
@@ -48,6 +54,7 @@ type ScannerStageId = (typeof SCANNER_STAGE_IDS)[number];
 export function quickScanStages(): StageDefinition[] {
   return [
     sourceResolveStage(),
+    toolchainRefreshStage(),
     snapshotManifestStage(),
     inventoryDetectStage(),
     gitleaksStage(),
@@ -67,6 +74,16 @@ export function quickScanStages(): StageDefinition[] {
 
 interface SourceResolveData {
   readonly sourceDir: string;
+}
+
+interface ToolchainFreshnessData {
+  readonly tools: ReadonlyArray<ToolchainFreshnessRecord>;
+}
+
+interface ToolchainFreshnessRecord {
+  readonly tool: string;
+  readonly dbDate?: string;
+  readonly dbStale?: boolean;
 }
 
 interface ManifestData {
@@ -158,6 +175,7 @@ function sourceResolveStage(): StageDefinition {
     inputs: [],
     outputs: [],
     required: true,
+    timeoutMs: SOURCE_TIMEOUT_MS,
     run: async (ctx) => {
       await execRequired(ctx, ["node", "--version"], "toolchain preflight: node");
       await execRequired(ctx, ["git", "--version"], "toolchain preflight: git");
@@ -200,11 +218,53 @@ function sourceResolveStage(): StageDefinition {
   };
 }
 
+function toolchainRefreshStage(): StageDefinition {
+  return {
+    id: "toolchain.refresh",
+    version: "1",
+    dependencies: ["source.resolve"],
+    inputs: [],
+    outputs: [],
+    required: true,
+    timeoutMs: TOOLCHAIN_REFRESH_TIMEOUT_MS,
+    run: async (ctx) => {
+      let refreshResult: ExecResult | undefined;
+      let refreshError: string | undefined;
+      try {
+        refreshResult = await ctx.session.exec([
+          "trivy",
+          "image",
+          "--download-db-only",
+          "--cache-dir",
+          TRIVY_CACHE_DIR,
+        ]);
+      } catch (error) {
+        refreshError = errorMessage(error);
+      }
+
+      const dbDate = await readTrivyDbDate(ctx);
+      const refreshFailed =
+        refreshError !== undefined || refreshResult === undefined || refreshResult.exitCode !== 0;
+      const freshness: ToolchainFreshnessData = {
+        tools: [
+          {
+            tool: "trivy",
+            ...(dbDate !== undefined ? { dbDate } : {}),
+            dbStale: refreshFailed || dbDate === undefined,
+          },
+        ],
+      };
+      await ctx.session.uploadBytes(TOOLCHAIN_FRESHNESS_PATH, jsonBytes(freshness));
+      return success({ tools: freshness.tools });
+    },
+  };
+}
+
 function snapshotManifestStage(): StageDefinition {
   return {
     id: "snapshot.manifest",
     version: "1",
-    dependencies: ["source.resolve"],
+    dependencies: ["source.resolve", "toolchain.refresh"],
     inputs: [],
     outputs: ["manifest"],
     required: true,
@@ -220,6 +280,8 @@ function snapshotManifestStage(): StageDefinition {
           ORIGIN_PATH,
           SOURCE_FILTER_PATH,
           MANIFEST_PATH,
+          ctx.toolchainImageTag,
+          TOOLCHAIN_FRESHNESS_PATH,
         ],
         "write snapshot manifest",
       );
@@ -267,6 +329,7 @@ function gitleaksStage(): StageDefinition {
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
+    timeoutMs: SCANNER_TIMEOUT_MS,
     run: async (ctx) => {
       const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
       assertApplicableCheck(scanPlan, "secrets.gitleaks");
@@ -288,9 +351,8 @@ function gitleaksStage(): StageDefinition {
       }
 
       const rawBytes = await readReportBytes(ctx, result);
-      const parsed = parseGitleaks(rawBytes);
-      const redactedRecords = redactGitleaksRecords(parsed);
-      const redactedBytes = jsonBytes(redactedRecords);
+      const redactedResult = redactGitleaksReport(rawBytes);
+      const redactedBytes = redactedResult.bytes;
       const stored = await ctx.artifacts.store(redactedBytes);
       const rawArtifact: RedactedRawArtifact = {
         blobSha256: stored.sha256,
@@ -300,12 +362,27 @@ function gitleaksStage(): StageDefinition {
         redacted: true,
       };
       const artifact = artifactRef(stored.sha256, "scanner.raw", stored.bytes);
+      if (redactedResult.error !== undefined) {
+        return success(
+          {
+            check: "secrets.gitleaks",
+            coverage: {
+              check: "secrets.gitleaks",
+              status: "failed",
+              reason: redactedResult.error,
+            },
+            rawArtifact,
+            records: [],
+          } satisfies GitleaksData,
+          [artifact],
+        );
+      }
       return success(
         {
           check: "secrets.gitleaks",
           coverage: { check: "secrets.gitleaks", status: "checked" },
           rawArtifact,
-          records: redactedRecords,
+          records: redactedResult.records,
         } satisfies GitleaksData,
         [artifact],
       );
@@ -321,6 +398,7 @@ function opengrepStage(): StageDefinition {
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
+    timeoutMs: SCANNER_TIMEOUT_MS,
     run: async (ctx) => {
       await ctx.session.uploadBytes(OPENGREP_RULES_PATH, encoder.encode(opengrepRules()));
       return runJsonScanner(ctx, {
@@ -353,6 +431,7 @@ function syftStage(): StageDefinition {
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
+    timeoutMs: SCANNER_TIMEOUT_MS,
     run: (ctx) =>
       runJsonScanner(ctx, {
         check: "sbom.syft",
@@ -375,6 +454,7 @@ function trivyDependencyStage(): StageDefinition {
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
+    timeoutMs: SCANNER_TIMEOUT_MS,
     run: (ctx) =>
       runJsonScanner(ctx, {
         check: "dependencies.trivy",
@@ -389,7 +469,7 @@ function trivyDependencyStage(): StageDefinition {
           "--output",
           TRIVY_VULN_REPORT_PATH,
           "--cache-dir",
-          `${WORK_DIR}/trivy-cache`,
+          TRIVY_CACHE_DIR,
           SOURCE_DIR,
         ],
         outputPath: TRIVY_VULN_REPORT_PATH,
@@ -409,6 +489,7 @@ function actionlintStage(): StageDefinition {
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
+    timeoutMs: SCANNER_TIMEOUT_MS,
     run: (ctx) => {
       const { inventory } = readInput<InventoryData>(ctx, "inventory.detect");
       return runJsonScanner(ctx, {
@@ -439,6 +520,7 @@ function zizmorStage(): StageDefinition {
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
+    timeoutMs: SCANNER_TIMEOUT_MS,
     run: (ctx) =>
       runJsonScanner(ctx, {
         check: "github-actions.zizmor",
@@ -460,6 +542,7 @@ function trivyConfigStage(): StageDefinition {
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
+    timeoutMs: SCANNER_TIMEOUT_MS,
     run: (ctx) =>
       runJsonScanner(ctx, {
         check: "iac.trivy-config",
@@ -472,7 +555,7 @@ function trivyConfigStage(): StageDefinition {
           "--output",
           TRIVY_CONFIG_REPORT_PATH,
           "--cache-dir",
-          `${WORK_DIR}/trivy-cache`,
+          TRIVY_CACHE_DIR,
           SOURCE_DIR,
         ],
         outputPath: TRIVY_CONFIG_REPORT_PATH,
@@ -635,6 +718,7 @@ function actionsStage(): StageDefinition {
     id: "actions.rank",
     version: "1",
     dependencies: [
+      "snapshot.manifest",
       "findings.normalize",
       "findings.correlate",
       "inventory.detect",
@@ -646,7 +730,12 @@ function actionsStage(): StageDefinition {
     run: async (ctx) => {
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
-      const coverage = coverageFromScanPlan(scanPlan, scannerRunsFromInputs(ctx));
+      const { manifest } = readInput<ManifestData>(ctx, "snapshot.manifest");
+      const coverage = coverageFromScanPlan(
+        scanPlan,
+        scannerRunsFromInputs(ctx),
+        manifest.toolchain,
+      );
       const candidates = actionCandidatesFromFindings(findings, evidence);
       const verdict = verdictFor(findings, coverage);
       return success({ candidates, verdict } satisfies ActionsData);
@@ -699,7 +788,11 @@ function reportStage(): StageDefinition {
     run: async (ctx) => {
       const { manifest } = readInput<ManifestData>(ctx, "snapshot.manifest");
       const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
-      const coverage = coverageFromScanPlan(scanPlan, scannerRunsFromInputs(ctx));
+      const coverage = coverageFromScanPlan(
+        scanPlan,
+        scannerRunsFromInputs(ctx),
+        manifest.toolchain,
+      );
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { clusters } = readInput<CorrelateData>(ctx, "findings.correlate");
       const { verdict } = readInput<ActionsData>(ctx, "actions.rank");
@@ -941,14 +1034,14 @@ async function runJsonScanner(ctx: StageContext, opts: JsonScannerOptions): Prom
     result = await ctx.session.exec(opts.command);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const rawBytes = jsonBytes({ error: message });
-    const stored = await ctx.artifacts.store(rawBytes);
+    const redactedBytes = redactScannerBytes(jsonBytes({ error: message }));
+    const stored = await ctx.artifacts.store(redactedBytes);
     const rawArtifact: RedactedRawArtifact = {
       blobSha256: stored.sha256,
       tool: opts.tool,
       format: opts.format,
       bytes: stored.bytes,
-      redacted: false,
+      redacted: true,
     };
     const artifact = artifactRef(stored.sha256, "scanner.raw", stored.bytes);
     return success(
@@ -969,13 +1062,14 @@ async function runJsonScanner(ctx: StageContext, opts: JsonScannerOptions): Prom
   }
   const acceptable = opts.successfulExitCodes.includes(result.exitCode);
   const rawBytes = await readScannerBytes(ctx, opts.outputPath, result, opts.defaultOutput);
-  const stored = await ctx.artifacts.store(rawBytes);
+  const redactedBytes = redactScannerBytes(rawBytes);
+  const stored = await ctx.artifacts.store(redactedBytes);
   const rawArtifact: RedactedRawArtifact = {
     blobSha256: stored.sha256,
     tool: opts.tool,
     format: opts.format,
     bytes: stored.bytes,
-    redacted: opts.tool === "gitleaks",
+    redacted: true,
   };
   const artifact = artifactRef(stored.sha256, "scanner.raw", stored.bytes);
   if (!acceptable) {
@@ -996,7 +1090,26 @@ async function runJsonScanner(ctx: StageContext, opts: JsonScannerOptions): Prom
     );
   }
 
-  const records = recordsFromJson(rawBytes);
+  let records: unknown[];
+  try {
+    records = recordsFromJson(redactedBytes);
+  } catch (error) {
+    return success(
+      {
+        check: opts.check,
+        tool: opts.tool,
+        coverage: {
+          check: opts.check,
+          status: "failed",
+          reason: errorMessage(error),
+        },
+        rawArtifact,
+        recordCount: 0,
+        candidates: [],
+      } satisfies ScannerRunData,
+      [artifact],
+    );
+  }
   return success(
     {
       check: opts.check,
@@ -1037,12 +1150,33 @@ function readScannerRun(ctx: StageContext, stageId: ScannerStageId): ScannerRunD
   return readInput<ScannerRunData>(ctx, stageId);
 }
 
+async function readTrivyDbDate(ctx: StageContext): Promise<string | undefined> {
+  try {
+    const bytes = await ctx.session.read(`${TRIVY_CACHE_DIR}/db/metadata.json`);
+    const parsed = parseJson<unknown>(bytes, "trivy db metadata");
+    if (!isRecord(parsed)) {
+      return undefined;
+    }
+    const raw =
+      stringFrom(parsed.UpdatedAt) ??
+      stringFrom(parsed.DownloadedAt) ??
+      stringFrom(parsed.updatedAt) ??
+      stringFrom(parsed.downloadedAt) ??
+      stringFrom(parsed.updated_at) ??
+      stringFrom(parsed.downloaded_at);
+    return normalizeIsoTimestamp(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 function coverageFromScanPlan(
   scanPlan: ScanPlan,
   scannerRuns: ReadonlyArray<ScannerRunData>,
+  toolchain: Manifest["toolchain"],
 ): CoverageEntry[] {
   const byCheck = new Map(scannerRuns.map((run) => [run.check, run.coverage]));
-  return scanPlan.checks.map((check) => {
+  const coverage: CoverageEntry[] = scanPlan.checks.map((check) => {
     const reported = byCheck.get(check.check);
     if (reported !== undefined) {
       return reported;
@@ -1062,6 +1196,55 @@ function coverageFromScanPlan(
         : "adapter not implemented yet",
     };
   });
+  return degradeCoverageForStaleToolchain(coverage, toolchain);
+}
+
+function degradeCoverageForStaleToolchain(
+  coverage: ReadonlyArray<CoverageEntry>,
+  toolchain: Manifest["toolchain"],
+): CoverageEntry[] {
+  const staleTools = new Set(
+    toolchain.tools.filter((tool) => tool.dbStale === true).map((tool) => tool.tool),
+  );
+  if (staleTools.size === 0) {
+    return [...coverage];
+  }
+  return coverage.map((entry) => {
+    if (entry.status !== "checked") {
+      return entry;
+    }
+    const tool = toolForCheck(entry.check);
+    if (tool === undefined || !staleTools.has(tool)) {
+      return entry;
+    }
+    return {
+      check: entry.check,
+      status: "degraded",
+      reason: `${tool} database freshness is stale; refresh failed before scan`,
+    };
+  });
+}
+
+function toolForCheck(check: string): string | undefined {
+  if (check === "dependencies.trivy" || check === "iac.trivy-config") {
+    return "trivy";
+  }
+  if (check === "secrets.gitleaks") {
+    return "gitleaks";
+  }
+  if (check === "code-patterns.opengrep") {
+    return "opengrep";
+  }
+  if (check === "sbom.syft") {
+    return "syft";
+  }
+  if (check === "github-actions.actionlint") {
+    return "actionlint";
+  }
+  if (check === "github-actions.zizmor") {
+    return "zizmor";
+  }
+  return undefined;
 }
 
 function verdictFor(
@@ -1111,7 +1294,7 @@ function recordsFromJson(bytes: Uint8Array): unknown[] {
   if (text.length === 0) {
     return [];
   }
-  const parsed = JSON.parse(text) as unknown;
+  const parsed = parseJsonValueWithRepair(text, "scanner JSON").value;
   if (Array.isArray(parsed)) {
     return parsed;
   }
@@ -1148,8 +1331,9 @@ function recordsFromJson(bytes: Uint8Array): unknown[] {
     if (Array.isArray(bomRefs)) {
       return bomRefs;
     }
+    return [];
   }
-  return [];
+  throw new Error("scanner JSON root is not an array or object");
 }
 
 function recordsWithTarget(value: unknown, target: string | undefined): unknown[] {
@@ -1321,7 +1505,7 @@ function parseGitleaks(bytes: Uint8Array): GitleaksRecord[] {
   if (text.length === 0) {
     return [];
   }
-  const parsed = JSON.parse(text) as unknown;
+  const parsed = parseJsonValueWithRepair(text, "gitleaks JSON report").value;
   if (!Array.isArray(parsed)) {
     throw new Error("gitleaks JSON report is not an array");
   }
@@ -1334,6 +1518,78 @@ function parseJson<T>(bytes: Uint8Array, label: string): T {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not parse ${label}: ${message}`);
+  }
+}
+
+interface ParsedJsonValue {
+  readonly value: unknown;
+  readonly repaired: boolean;
+}
+
+function parseJsonValueWithRepair(text: string, label: string): ParsedJsonValue {
+  const body = text.trim();
+  try {
+    return { value: JSON.parse(body) as unknown, repaired: false };
+  } catch (strictError) {
+    const candidates = jsonRepairCandidates(body);
+    const repairErrors: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        return { value: JSON.parse(candidate) as unknown, repaired: false };
+      } catch {
+        // Repair below handles common scanner/LLM JSON damage.
+      }
+      try {
+        return { value: JSON.parse(jsonrepair(candidate)) as unknown, repaired: true };
+      } catch (repairError) {
+        repairErrors.push(errorMessage(repairError));
+      }
+    }
+    throw new Error(
+      `${label} was not valid JSON and could not be repaired: ${errorMessage(strictError)}; repair: ${
+        repairErrors[0] ?? "no repair candidate"
+      }`,
+    );
+  }
+}
+
+function jsonRepairCandidates(body: string): string[] {
+  const candidates: string[] = [];
+  candidates.push(...markdownFenceBodies(body));
+  const firstJson = body.search(/[[{]/);
+  const lastObject = body.lastIndexOf("}");
+  const lastArray = body.lastIndexOf("]");
+  const lastJson = Math.max(lastObject, lastArray);
+  if (firstJson >= 0 && lastJson > firstJson) {
+    candidates.push(body.slice(firstJson, lastJson + 1).trim());
+  }
+  candidates.push(body);
+  return unique(candidates.filter((candidate) => candidate.length > 0));
+}
+
+function markdownFenceBodies(body: string): string[] {
+  const matches = body.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```/gi);
+  return [...matches]
+    .map((match) => match[1]?.trim())
+    .filter((match): match is string => match !== undefined && match !== "");
+}
+
+interface RedactedGitleaksReport {
+  readonly bytes: Uint8Array;
+  readonly records: GitleaksRecord[];
+  readonly error?: string;
+}
+
+function redactGitleaksReport(bytes: Uint8Array): RedactedGitleaksReport {
+  try {
+    const records = redactGitleaksRecords(parseGitleaks(bytes));
+    return { bytes: jsonBytes(records), records };
+  } catch (error) {
+    return {
+      bytes: redactScannerBytes(bytes),
+      records: [],
+      error: errorMessage(error),
+    };
   }
 }
 
@@ -1350,6 +1606,26 @@ function redactGitleaksRecords(records: ReadonlyArray<GitleaksRecord>): Gitleaks
     }
     return out as GitleaksRecord;
   });
+}
+
+function redactScannerBytes(bytes: Uint8Array): Uint8Array {
+  return encoder.encode(redactSecrets(decoder.decode(bytes)));
+}
+
+function redactSecrets(text: string): string {
+  return text
+    .replace(
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+      "-----BEGIN REDACTED PRIVATE KEY-----\n***REDACTED***\n-----END REDACTED PRIVATE KEY-----",
+    )
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "***REDACTED***")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g, "***REDACTED***")
+    .replace(/\bsk_(?:live|test)_[A-Za-z0-9A-Za-z_=-]{10,}\b/g, "***REDACTED***")
+    .replace(/\b(Authorization\s*:\s*Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1***REDACTED***")
+    .replace(
+      /\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|passwd|pwd)\s*[:=]\s*["']?)[^"',\s\\]{8,}/gi,
+      "$1***REDACTED***",
+    );
 }
 
 function normalizeScannerPath(raw: string): string {
@@ -1895,6 +2171,8 @@ const sourceDir = process.argv[2];
 const originPath = process.argv[3];
 const filterPath = process.argv[4];
 const outPath = process.argv[5];
+const imageTag = process.argv[6] ?? "vibeshield-toolchain:latest";
+const toolchainFreshnessPath = process.argv[7];
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 50_000;
@@ -1918,6 +2196,16 @@ const BUILTIN_IGNORED_DIRS = new Set([
 
 const origin = JSON.parse(await readFile(originPath, "utf8"));
 const filter = await readOptionalJson(filterPath);
+const toolchainFreshness = await readOptionalJson(toolchainFreshnessPath);
+const freshnessByTool = new Map();
+for (const item of Array.isArray(toolchainFreshness?.tools) ? toolchainFreshness.tools : []) {
+  if (item && typeof item.tool === "string") {
+    freshnessByTool.set(item.tool, {
+      dbDate: typeof item.dbDate === "string" ? item.dbDate : undefined,
+      dbStale: item.dbStale === true,
+    });
+  }
+}
 const exclusions = [...(filter?.exclusions ?? [])];
 const preFiltered = filter?.mode === "pre-filtered";
 
@@ -1963,14 +2251,14 @@ const manifest = {
   files,
   exclusions,
   toolchain: {
-    imageTag: process.env.VIBESHIELD_TOOLCHAIN_TAG ?? "vibeshield-toolchain:latest",
+    imageTag,
     tools: [
-      { tool: "gitleaks", version: toolVersion("gitleaks", ["version"]) },
-      { tool: "opengrep", version: toolVersion("opengrep", ["--version"]) },
-      { tool: "syft", version: toolVersion("syft", ["version"]) },
-      { tool: "trivy", version: toolVersion("trivy", ["--version"]) },
-      { tool: "actionlint", version: toolVersion("actionlint", ["-version"]) },
-      { tool: "zizmor", version: toolVersion("zizmor", ["--version"]) },
+      toolRecord("gitleaks", ["version"]),
+      toolRecord("opengrep", ["--version"]),
+      toolRecord("syft", ["version"]),
+      toolRecord("trivy", ["--version"]),
+      toolRecord("actionlint", ["-version"]),
+      toolRecord("zizmor", ["--version"]),
     ],
   },
   createdAt: new Date().toISOString(),
@@ -2040,6 +2328,9 @@ async function exists(p) {
 }
 
 async function readOptionalJson(p) {
+  if (typeof p !== "string" || p.length === 0) {
+    return null;
+  }
   try {
     return JSON.parse(await readFile(p, "utf8"));
   } catch {
@@ -2053,10 +2344,25 @@ function git(args) {
 
 function toolVersion(bin, args) {
   try {
-    return execFileSync(bin, args, { encoding: "utf8" }).trim().split("\n")[0];
+    return normalizeToolVersion(execFileSync(bin, args, { encoding: "utf8" }));
   } catch {
     return "unknown";
   }
+}
+
+function toolRecord(bin, args) {
+  const freshness = freshnessByTool.get(bin);
+  const out = { tool: bin, version: toolVersion(bin, args) };
+  if (freshness?.dbDate) out.dbDate = freshness.dbDate;
+  if (freshness?.dbStale !== undefined) out.dbStale = freshness.dbStale;
+  return out;
+}
+
+function normalizeToolVersion(output) {
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const line = lines.find((candidate) => /\b\d+\.\d+(?:\.\d+)?/.test(candidate)) ?? lines[0] ?? "unknown";
+  const match = line.match(/\bv?(\d+\.\d+(?:\.\d+)?(?:[-+][^\s]+)?)\b/);
+  return match?.[1] ?? line;
 }
 
 function toPosixPath(p) {
@@ -2101,6 +2407,21 @@ function stringFrom(value: unknown): string | undefined {
 
 function stringOr(value: unknown, fallback: string): string {
   return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function normalizeIsoTimestamp(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return value;
+  }
+  return parsed.toISOString();
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function sha256Text(text: string): string {

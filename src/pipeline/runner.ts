@@ -11,6 +11,7 @@ export interface RunStagesOptions {
   readonly runId: string;
   readonly runDir: string;
   readonly source: SourceInput;
+  readonly toolchainImageTag: string;
   readonly stages: ReadonlyArray<StageDefinition>;
   readonly session: SandboxSession;
   readonly state: StateStore;
@@ -42,7 +43,7 @@ export async function runStages(
     });
 
     try {
-      const result = await stage.run(ctx);
+      const result = await runStageWithTimeout(stage, ctx);
       await validate(stage, result, ctx);
       const finishedAt = now();
       const attempt = toAttempt(stage, result, previousAttempt + 1, startedAt, finishedAt);
@@ -117,6 +118,7 @@ function contextFor(
     runId: opts.runId,
     runDir: opts.runDir,
     source: opts.source,
+    toolchainImageTag: opts.toolchainImageTag,
     inputs,
     session: opts.session,
     state: opts.state,
@@ -124,6 +126,32 @@ function contextFor(
     events: opts.events,
     model: opts.model,
   };
+}
+
+async function runStageWithTimeout(
+  stage: StageDefinition,
+  ctx: StageContext,
+): Promise<StageResult> {
+  if (stage.timeoutMs === undefined) {
+    return await stage.run(ctx);
+  }
+
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      stage.run(ctx),
+      new Promise<StageResult>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`Stage ${stage.id} timed out after ${stage.timeoutMs}ms`));
+        }, stage.timeoutMs);
+        timeout.unref();
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 async function validate(
