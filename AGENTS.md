@@ -79,17 +79,16 @@ Project tooling:
 - test: `pnpm test`;
 - run the local CLI in dev: `pnpm scan <github-url-or-local-path>`;
 - resume a failed run from durable artifacts: `pnpm resume /path/to/run-directory`;
-- run the live Daytona smoke scan:
-  `pnpm smoke:daytona https://github.com/octocat/Hello-World`;
-- run the experimental Pi-in-Daytona smoke:
-  `pnpm smoke:pi-daytona https://github.com/xor777/ai-spam-detector`;
+- run the live Microsandbox smoke:
+  `pnpm exec vitest run tests/microsandbox-runtime.smoke.test.ts`;
 - build package output: `pnpm build`.
 
-The current default CLI path uses the real `@daytona/sdk` adapter. Live scans
-need `DAYTONA_API_KEY` and `OPENROUTER_API_KEY`; `DAYTONA_API_URL` and
-`DAYTONA_TARGET` are optional SDK overrides. If credentials are missing, the CLI
-must fail clearly rather than cloning an untrusted repo on the host.
-`FakeDaytonaSandboxProvider` is only a local test double.
+The current default CLI path uses `MicrosandboxRuntime` with the local
+`vibeshield-toolchain` image. OpenRouter is optional and only enhances Fix Pack
+wording; if `OPENROUTER_API_KEY` is missing or invalid, the deterministic catalog
+fallback is used. If the sandbox/toolchain is unavailable, the CLI must fail
+clearly rather than running scanners on the host. `FakeSandboxRuntime` is only a
+local test double.
 
 ## Commit Hygiene
 

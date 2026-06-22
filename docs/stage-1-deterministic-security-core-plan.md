@@ -19,21 +19,24 @@ These were decided with the owner. They are the frame; the rest of the plan
 follows from them.
 
 - Runtime: **Microsandbox, network on**, one sandbox per run. GitHub input is
-  cloned inside the sandbox; a local folder is copied in. Daytona is removed.
+  cloned inside the sandbox; a local Git-root snapshot is packaged on the host,
+  uploaded, and extracted in the sandbox. Daytona is removed.
 - Scanners are not a pinned/published image. They come from a **simple,
   rebuildable Dockerfile** — nothing precious to maintain, lose, or recover.
 - **Vulnerability databases are refreshed on every run** over the network.
 - The source tree is **not stored** as an artifact. Only a small manifest is
   kept (commit SHA, file list with hashes, exclusions, tool + DB versions).
-- Input is a **public GitHub URL or a local folder**. No "must be a git repo
-  root". Private repos and zip upload come later.
+- Input is a **public GitHub URL or a local Git worktree root**. Local scans use
+  Git-filtered packaging with an explicit `.env` exception for secret detection.
+  Private repos and zip upload come later.
 - Iteration 1 ships the **full check set** (secrets, code patterns, SBOM,
   dependencies, GitHub Actions, IaC). Internally it is proven one check first,
   then widened.
-- The one AI call uses **Claude Opus 4.8 (high reasoning effort)** via Pi over
-  **OpenRouter** (the model gateway, as in the current codebase), **on the host**
-  (it needs the findings, not the repo). It is **enhancement only** — the
-  deterministic result is complete without any model.
+- The one AI call uses a configured **Sonnet-class model** over **OpenRouter**,
+  **on the host** (it needs the findings, not the repo). The model comes from
+  `.env` via `VIBESHIELD_REMEDIATION_MODEL`, with default
+  `anthropic/claude-sonnet-4.6`. It is **enhancement only** — the deterministic
+  result is complete without any model.
 - If the AI call is unavailable, invalid, or over budget, a deterministic
   **catalog template** produces the same actions and prompts.
 - Reports: terminal + `report.json` + `report.md` + `report.html`. **PDF later.**
@@ -42,8 +45,8 @@ follows from them.
 ## The thread
 
 ```
-vibeshield scan <github-url | local-folder>
-  source.resolve        clone into sandbox  |  copy local folder in
+vibeshield scan <github-url | local-git-root>
+  source.resolve        clone into sandbox  |  upload Git-filtered local snapshot
   snapshot.manifest     small manifest: commit SHA, file list+hashes, exclusions, tool/DB versions
   inventory.detect      what's here (languages, manifests, workflows, IaC) — gates which checks run
   scan.*                run the checks inside the sandbox over the source:
@@ -100,11 +103,11 @@ Status:
   build/validate the DAG, run, record attempts/events. Out: the DAG drives the
   thread. Done: stage list comes from the registry and every stage attempt is
   persisted.
-- [x] **Source acquisition.** In: GitHub URL or local folder. Do: GitHub →
-  `git clone --depth 1` inside the sandbox; local → copy in; `.git` present → drop
-  ignored files and read the commit SHA, else a default ignore set. Out: a source
-  dir in the sandbox. Done: ignored files excluded; URL and folder both reach a
-  source dir.
+- [x] **Source acquisition.** In: GitHub URL or local Git worktree root. Do:
+  GitHub → `git clone --depth 1` inside the sandbox; local → Git-filtered package
+  on the host, upload, extract in the sandbox; read commit SHA when available.
+  Out: a source dir in the sandbox. Done: ignored files excluded; URL and local
+  Git root both reach a source dir.
 - [x] **Snapshot manifest.** In: the source dir. Do: write the manifest (commit
   SHA, file list+hashes, exclusions, source hash, tool+DB versions). Out:
   `manifest.json`. Done: same input → same source hash; no source tarball stored.
@@ -178,17 +181,24 @@ vs off; the AI only makes the explanations and prompts read better.
 
 ### Cross-cutting (alongside the gates)
 
-- [ ] **CLI look + README.** Keep the `run-cli.ts` palette/spinner; rewire the
-  content to the new flow; rewrite the README to this product. Done: owner
-  confirms the output keeps the tuned look and the README matches `scan`.
+- [x] **CLI look + README.** Keep the terminal palette/progress feel; rewire the
+  content to the new Quick Scan flow; rewrite the README to this product. Done:
+  terminal output shows verdict, coverage, report paths, and Agent Fix Pack
+  source (OpenRouter vs catalog); README matches the actual `scan` command,
+  local Git-root input contract, `.env`, and Microsandbox toolchain setup.
+  Acceptance: `pnpm exec tsx src/cli.ts --help` shows the current command and
+  env; a non-Git local path fails before sandbox creation; live Microsandbox
+  planted-secret scan with `OPENROUTER_API_KEY=` showed `Critical fix needed`,
+  catalog fallback, `src/config.ts:4`, coverage, and `report.json/.md/.html`;
+  `pnpm typecheck`, `pnpm test`, and `pnpm lint` pass.
 - [ ] **Minimal resume.** In: a run id or run directory. Do: re-run
   missing/failed/stale stages and mark descendants stale on forced rerun. Out:
   resume reuses durable state instead of starting from scratch. Done: resume
   re-runs only stale/failed/missing work.
 - [ ] **Remove old MVP** as each replacement lands: Daytona, Pi mapping
   collectors, `attack-hypotheses`, evaluator loops, repo-map-as-truth, duplicate
-  stage arrays, mutable-path overwrite, in-memory registry. Keep Pi + OpenRouter
-  as the harness/gateway for the one remediation call.
+  stage arrays, mutable-path overwrite, in-memory registry. Keep OpenRouter as
+  the gateway for the one remediation call.
 
 ## Runtime
 
@@ -196,16 +206,16 @@ vs off; the AI only makes the explanations and prompts read better.
   network policy. The only adapter is `MicrosandboxRuntime`.
 - One sandbox per run, created at source acquisition, reused across `scan.*`
   stages, destroyed at the end. Network is on.
-- GitHub: `git clone --depth 1` inside the sandbox. Local: copy the folder in.
-  The scanned app, package managers, build scripts, and git hooks are never
-  executed — the checks only read the source.
+- GitHub: `git clone --depth 1` inside the sandbox. Local: package the Git
+  worktree root on the host with Git filtering, upload it, and extract it inside
+  the sandbox. The scanned app, package managers, build scripts, and git hooks
+  are never executed — the checks only read the source.
 - **Toolchain image.** A `toolchain/Dockerfile` installs the scanners. Build it
-  **once** into a local image tagged `vibeshield-toolchain` (a documented build
-  command; or `scan` builds it the first time if it is missing, with Docker or
-  podman). Microsandbox boots that image by tag. Scanners never run on the host;
-  if the image is missing and cannot be built, `scan` stops with a clear message.
-  Updating tool versions and rebuild policy are decided later. The image tag is
-  recorded in the manifest.
+  **once** into a local image tagged `vibeshield-toolchain` using the README
+  command, then load it into Microsandbox. Microsandbox boots that image by tag.
+  Scanners never run on the host; if the image is missing, `scan` stops with a
+  clear message. Updating tool versions and rebuild policy are decided later.
+  The image tag is recorded in the manifest.
 - **Order inside the sandbox:** create → acquire source (clone/copy) → refresh
   vulnerability DBs → run checks → collect outputs → destroy. The DB updaters are
   fixed trusted commands that do not read repository content, so updater traffic
@@ -247,7 +257,6 @@ src/
   pipeline/      registry, planner, runner, validation
   stages/        source-resolve, snapshot, inventory, scanners, normalize, correlate, actions, remediation, report
   tools/         one thin adapter per scanner (argv, config, parse)
-  agents/        pi remediation call
   ports/         sandbox-runtime, state-store, artifact-store, model-provider, event-sink
   adapters/      microsandbox, sqlite, filesystem-blobs, openrouter-model
   interfaces/    cli
@@ -268,14 +277,13 @@ Minimal on purpose — enough to keep stages coherent.
   (`path`, `size`, `sha256`), `exclusions` (`path`, `reason`), `tool versions`,
   `db dates`. Paths are POSIX-relative inside the repo; no absolute paths, `..`,
   NUL, or backslashes reach a check.
-- **Source filtering** (what reaches a check): with `.git`, exclude git-ignored
-  files; without `.git`, apply a built-in ignore set (`.git`, `node_modules`,
-  `dist`, `build`, `.next`, `out`, `target`, `vendor`, `.venv`/`venv`,
-  `__pycache__`, `.cache`, coverage/output dirs). Exception: `.env` / `.env.*` are
-  always included even if ignored — finding a real key is the point. Limits: skip
-  files over 5 MB, stop past 50k files or 500 MB total, each recorded as a
-  `too_large` / `truncated` exclusion. Never follow a symlink resolving outside
-  the source root. Every exclusion is in the manifest with a reason.
+- **Source filtering** (what reaches a check): local scans require the Git
+  worktree root and use `git ls-files -c -o --exclude-standard`; ignored files
+  are excluded and recorded. Exception: `.env` / `.env.*` are always included
+  even if ignored — finding a real key is the point. Limits: skip files over
+  5 MB, stop past 50k files or 500 MB total, each recorded as a `too_large` /
+  `truncated` exclusion. Never follow a symlink resolving outside the source
+  root. Every exclusion is in the manifest with a reason.
 - **Data model**, separate levels so raw stays inspectable and the result stays
   clean:
   - `RedactedRawArtifact` — the tool's own output, format preserved, secret values
@@ -355,19 +363,21 @@ Forward rules; a reviewer rejects work that breaks one.
 
 ## Current codebase
 
-The working tree is the old MVP (Pi mapping agents and an `attack-hypotheses`
-stage running through Daytona). Iteration 1 replaces that default path.
+The default path is now the deterministic Quick Scan through
+`MicrosandboxRuntime`, `ScanService`, SQLite state, blob storage, scanner stages,
+OpenRouter remediation enhancement, and catalog fallback.
 
-- Keep the CLI presentation in `src/cli/run-cli.ts` (palette, spinner, layout) —
-  reuse the visual primitives; the help/summary content changes to the new flow.
-- Update the README to this product (Quick Scan, Agent Fix Pack, GitHub-URL or
-  local-folder input, the verdicts, the no-runtime-validation limitation).
-- Remove as the new path lands: Daytona; Pi section/mapping collectors and
-  per-area agent loops; `attack-hypotheses`; evaluator/self-reflection loops;
-  repository-map-as-pipeline-truth; duplicate stage-order arrays; mutable-path
-  artifact overwrite; the in-memory artifact registry. Keep Pi and OpenRouter as
-  the harness/gateway for the one remediation call — no model is required for the
-  deterministic result.
+- Keep the terminal presentation owner-facing: progress on stderr; verdict,
+  coverage, report paths, and Agent Fix Pack on stdout.
+- Keep README aligned to the runnable product path: Quick Scan, Agent Fix Pack,
+  GitHub URL or local Git-root input, Microsandbox toolchain image, `.env`
+  configuration, verdicts, and the no-runtime-validation limitation.
+- Remove any remaining old-MVP surfaces as the new path lands: Daytona; Pi
+  section/mapping collectors and per-area agent loops; `attack-hypotheses`;
+  evaluator/self-reflection loops; repository-map-as-pipeline-truth; duplicate
+  stage-order arrays; mutable-path artifact overwrite; the in-memory artifact
+  registry. OpenRouter remains the gateway for the one remediation call — no
+  model is required for the deterministic result.
 
 ## Later — named, not dropped
 
