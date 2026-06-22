@@ -53,12 +53,13 @@ async function scan(args: string[]): Promise<void> {
   const source = await parseSource(sourceArg);
   const stateRoot = resolveStateRoot();
   await ensureStateRoot(stateRoot);
+  const toolchainImage = process.env.VIBESHIELD_TOOLCHAIN_TAG ?? DEFAULT_TOOLCHAIN_IMAGE;
 
   const db = new DatabaseSync(stateDbPath(stateRoot));
   try {
     const outcome = await runScan(
       {
-        sandbox: new MicrosandboxRuntime({ imageTag: DEFAULT_TOOLCHAIN_IMAGE }),
+        sandbox: new MicrosandboxRuntime({ imageTag: toolchainImage }),
         state: new SqliteStateStore(db),
         artifacts: new FilesystemBlobs(stateRoot),
         events: new TerminalEventSink(),
@@ -67,7 +68,7 @@ async function scan(args: string[]): Promise<void> {
       {
         source,
         runRoot: path.join(stateRoot, "runs"),
-        toolchainImage: process.env.VIBESHIELD_TOOLCHAIN_TAG ?? DEFAULT_TOOLCHAIN_IMAGE,
+        toolchainImage,
       },
     );
     renderTerminalOutcome(outcome);
