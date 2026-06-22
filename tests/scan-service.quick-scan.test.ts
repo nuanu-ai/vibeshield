@@ -202,7 +202,7 @@ describe("runScan quick scan vertical slice", () => {
               {
                 Message: 'property "branches" is not defined',
                 Kind: "syntax-check",
-                Filepath: ".github/workflows/ci.yml",
+                Filepath: "source/.github/workflows/ci.yml",
                 Line: 7,
               },
             ]),
@@ -231,6 +231,43 @@ describe("runScan quick scan vertical slice", () => {
     expect(outcome.assessment.rankedActions[0]?.remediation.agentPrompt).toContain(
       ".github/workflows/ci.yml:7",
     );
+  });
+
+  it("maps scanner file URIs back to manifest paths", async () => {
+    const source = await writeLocalFixture(dir);
+    const workflowPath = ".github/workflows/ci workflow.yml";
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [{ path: workflowPath, size: 80, sha256: "workflow-sha" }]),
+        [],
+        {
+          actionlint: {
+            exitCode: 1,
+            stdout: JSON.stringify([
+              {
+                Message: "workflow warning",
+                Kind: "syntax-check",
+                Filepath: "file:///work/source/.github/workflows/ci%20workflow.yml",
+                Line: 9,
+              },
+            ]),
+            stderr: "",
+          },
+        },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    expect(outcome.assessment.findings[0]?.locations[0]).toEqual({
+      filePath: workflowPath,
+      startLine: 9,
+      endLine: 9,
+    });
   });
 
   it("runs every applicable scanner from the inventory plan", async () => {

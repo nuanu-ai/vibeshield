@@ -59,11 +59,20 @@ export async function createLocalSourcePackage(sourceRoot: string): Promise<Loca
   await mkdir(staging, { recursive: true });
 
   const { files, exclusions, commitSha } = await collectLocalFiles(root);
+  const mutableExclusions = [...exclusions];
   for (const rel of files) {
     const from = path.join(root, rel);
     const to = path.join(staging, rel);
     await mkdir(path.dirname(to), { recursive: true });
-    await copyFile(from, to);
+    try {
+      await copyFile(from, to);
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        mutableExclusions.push({ path: rel, reason: "missing" });
+        continue;
+      }
+      throw error;
+    }
   }
 
   await execFileP("tar", ["-cf", archivePath, "-C", staging, "."], {
@@ -73,7 +82,7 @@ export async function createLocalSourcePackage(sourceRoot: string): Promise<Loca
   return {
     archivePath,
     commitSha,
-    exclusions,
+    exclusions: mutableExclusions,
     cleanup: async () => {
       await rm(tmp, { recursive: true, force: true });
     },
@@ -102,6 +111,11 @@ async function collectGitFilteredFiles(
   }
 
   const exclusions: ManifestExclusion[] = [];
+  for (const rel of await gitZ(root, ["ls-files", "-d", "-z"])) {
+    if (files.delete(rel) && isSafeRelativePath(rel)) {
+      exclusions.push({ path: rel, reason: "missing" });
+    }
+  }
   for (const rel of await gitZ(root, ["ls-files", "-o", "-i", "--exclude-standard", "-z"])) {
     if (!files.has(rel) && isSafeRelativePath(rel)) {
       exclusions.push({ path: rel, reason: "git-ignored" });
@@ -122,7 +136,16 @@ async function applyLimits(
   let totalBytes = 0;
 
   for (const rel of candidates) {
-    const st = await lstat(path.join(root, rel));
+    const st = await lstat(path.join(root, rel)).catch((error: unknown) => {
+      if (isNotFoundError(error)) {
+        exclusions.push({ path: rel, reason: "missing" });
+        return null;
+      }
+      throw error;
+    });
+    if (st === null) {
+      continue;
+    }
     if (st.isSymbolicLink()) {
       exclusions.push({ path: rel, reason: "symlink-escape" });
       continue;
@@ -200,5 +223,14 @@ function isSafeRelativePath(rel: string): boolean {
     !rel.includes("\\") &&
     !path.posix.isAbsolute(rel) &&
     rel.split("/").every((part) => part !== "" && part !== "." && part !== "..")
+  );
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { readonly code?: unknown }).code === "ENOENT"
   );
 }

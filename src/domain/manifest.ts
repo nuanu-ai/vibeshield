@@ -34,6 +34,7 @@ export type ExclusionReason =
   | "too_large"
   | "truncated"
   | "symlink-escape"
+  | "missing"
   | "dot-env-exception";
 
 export interface ToolchainRecord {

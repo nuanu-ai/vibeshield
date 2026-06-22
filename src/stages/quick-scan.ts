@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { jsonrepair } from "jsonrepair";
 import type { ActionCandidate, RemediationAction } from "../domain/action.js";
 import { type Verdict, verdictLabel } from "../domain/assessment.js";
@@ -585,7 +586,10 @@ function normalizeStage(): StageDefinition {
       const seen = new Set<string>();
 
       for (const record of records) {
-        const filePath = normalizeScannerPath(record.File ?? "");
+        const filePath = resolveManifestPath(
+          normalizeScannerPath(record.File ?? ""),
+          manifestFiles,
+        );
         if (!manifestFiles.has(filePath)) {
           throw new Error(`gitleaks finding points outside the snapshot: ${filePath}`);
         }
@@ -638,10 +642,11 @@ function normalizeStage(): StageDefinition {
           continue;
         }
         for (const candidate of scanner.candidates) {
-          const filePath = candidate.filePath;
-          if (filePath === undefined) {
+          const rawFilePath = candidate.filePath;
+          if (rawFilePath === undefined) {
             continue;
           }
+          const filePath = resolveManifestPath(rawFilePath, manifestFiles);
           if (!manifestFiles.has(filePath)) {
             throw new Error(`${scanner.tool} finding points outside the snapshot: ${filePath}`);
           }
@@ -1632,6 +1637,13 @@ function redactSecrets(text: string): string {
 
 function normalizeScannerPath(raw: string): string {
   let filePath = raw.trim();
+  if (filePath.startsWith("file://")) {
+    try {
+      filePath = fileURLToPath(filePath);
+    } catch {
+      throw new Error(`Invalid scanner path: ${raw}`);
+    }
+  }
   if (filePath.startsWith(`${SOURCE_DIR}/`)) {
     filePath = filePath.slice(SOURCE_DIR.length + 1);
   }
@@ -1648,6 +1660,26 @@ function normalizeScannerPath(raw: string): string {
     throw new Error(`Invalid scanner path: ${raw}`);
   }
   return filePath;
+}
+
+function resolveManifestPath(filePath: string, manifestFiles: ReadonlySet<string>): string {
+  if (manifestFiles.has(filePath)) {
+    return filePath;
+  }
+  for (const variant of scannerPathVariants(filePath)) {
+    if (manifestFiles.has(variant)) {
+      return variant;
+    }
+  }
+  return filePath;
+}
+
+function scannerPathVariants(filePath: string): string[] {
+  const sourcePrefix = `${path.posix.basename(SOURCE_DIR)}/`;
+  if (filePath.startsWith(sourcePrefix)) {
+    return [filePath.slice(sourcePrefix.length)];
+  }
+  return [];
 }
 
 function redactedSnippet(record: GitleaksRecord): string {
