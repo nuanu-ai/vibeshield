@@ -1,0 +1,9 @@
+export const DEFAULT_TOOLCHAIN_IMAGE = "vibeshield-toolchain:latest";
+export const WORK_DIR = "/work/vibeshield";
+export const SOURCE_DIR = "/work/source";
+export const LOCAL_SOURCE_TAR = `${WORK_DIR}/source.tar`;
+export const SOURCE_FILTER_PATH = `${WORK_DIR}/source-filter.json`;
+export const ORIGIN_PATH = `${WORK_DIR}/origin.json`;
+export const MANIFEST_SCRIPT_PATH = `${WORK_DIR}/manifest.mjs`;
+export const MANIFEST_PATH = `${WORK_DIR}/manifest.json`;
+export const GITLEAKS_REPORT_PATH = `${WORK_DIR}/gitleaks.json`;

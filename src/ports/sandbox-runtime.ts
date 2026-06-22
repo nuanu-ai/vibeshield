@@ -19,6 +19,8 @@ export interface SandboxSession {
   download(guestPath: string): Promise<Uint8Array>;
   /** Read a file's bytes from the sandbox. */
   read(guestPath: string): Promise<Uint8Array>;
+  /** Stop/remove resources owned by this session. Idempotent best-effort cleanup. */
+  destroy(): Promise<void>;
 }
 
 export interface ExecResult {

@@ -115,10 +115,33 @@ export class MicrosandboxRuntime implements SandboxRuntime {
   }
 
   async destroy(name: string): Promise<void> {
+    const msb = await msbPath();
+    if (msb !== null && (await removeWithCli(msb, name))) {
+      return;
+    }
     try {
       await Sandbox.remove(name);
     } catch {
       // destroy is best-effort; a missing or already-removed sandbox is fine.
     }
+    if (msb !== null) {
+      await removeWithCli(msb, name);
+    }
   }
+}
+
+async function removeWithCli(msb: string, name: string): Promise<boolean> {
+  for (let i = 0; i < 5; i += 1) {
+    try {
+      await execFileP(msb, ["remove", "--force", name]);
+      return true;
+    } catch {
+      await sleep(200);
+    }
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

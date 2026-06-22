@@ -7,7 +7,12 @@
  * stale when a stage is rerun.
  */
 
-import type { ArtifactRef, StageId } from "../domain/run.js";
+import type { ArtifactRef, SourceInput, StageId } from "../domain/run.js";
+import type { ArtifactStore } from "../ports/artifact-store.js";
+import type { EventSink } from "../ports/event-sink.js";
+import type { ModelProvider } from "../ports/model-provider.js";
+import type { SandboxSession } from "../ports/sandbox-runtime.js";
+import type { StateStore } from "../ports/state-store.js";
 
 /** Outcome of one stage execution. */
 export interface StageResult {
@@ -28,11 +33,14 @@ export interface StageResult {
  */
 export interface StageContext {
   readonly runId: string;
+  readonly runDir: string;
+  readonly source: SourceInput;
   readonly inputs: ReadonlyMap<StageId, Readonly<Record<string, unknown>>>;
-  readonly sandbox: import("../ports/sandbox-runtime.js").SandboxRuntime;
-  readonly state: import("../ports/state-store.js").StateStore;
-  readonly artifacts: import("../ports/artifact-store.js").ArtifactStore;
-  readonly events: import("../ports/event-sink.js").EventSink;
+  readonly session: SandboxSession;
+  readonly state: StateStore;
+  readonly artifacts: ArtifactStore;
+  readonly events: EventSink;
+  readonly model: ModelProvider;
 }
 
 export type StageRun = (ctx: StageContext) => Promise<StageResult>;

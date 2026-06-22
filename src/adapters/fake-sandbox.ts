@@ -18,7 +18,10 @@ import type {
   SandboxSession,
 } from "../ports/sandbox-runtime.js";
 
-export type FakeExecHandler = (command: string[]) => ExecResult | Promise<ExecResult>;
+export type FakeExecHandler = (
+  command: string[],
+  session: FakeSandboxSession,
+) => ExecResult | Promise<ExecResult>;
 
 /** A captured exec invocation, for assertion in tests. */
 export interface FakeInvocation {
@@ -37,11 +40,12 @@ export class FakeSandboxSession implements SandboxSession {
 
   async exec(command: string[]): Promise<ExecResult> {
     this.invocations.push({ name: this.id, command });
-    return await this.execHandler(command);
+    return await this.execHandler(command, this);
   }
 
-  async upload(_localPath: string, guestPath: string): Promise<void> {
-    this.files.set(guestPath, new Uint8Array());
+  async upload(localPath: string, guestPath: string): Promise<void> {
+    const { readFile } = await import("node:fs/promises");
+    this.files.set(guestPath, await readFile(localPath));
   }
 
   async uploadBytes(guestPath: string, data: Uint8Array): Promise<void> {
@@ -54,6 +58,10 @@ export class FakeSandboxSession implements SandboxSession {
 
   async read(guestPath: string): Promise<Uint8Array> {
     return this.files.get(guestPath) ?? new Uint8Array();
+  }
+
+  async destroy(): Promise<void> {
+    this.files.clear();
   }
 }
 
@@ -86,9 +94,9 @@ export class FakeSandboxRuntime implements SandboxRuntime {
   }
 
   async create(options: SandboxCreateOptions): Promise<FakeSandboxSession> {
-    const session = new FakeSandboxSession(options.name, (cmd) => {
+    const session = new FakeSandboxSession(options.name, (cmd, currentSession) => {
       this.invocations.push({ name: options.name, command: cmd });
-      return this.execHandler(cmd);
+      return this.execHandler(cmd, currentSession);
     });
     this.sessions.set(options.name, session);
     return session;

@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     [
       "# Sample App",
       "",
-      "A tiny fixture repo for VibeShield Stage 1 Gate 1 acceptance.",
+      "A tiny fixture repo for VibeShield Quick Scan acceptance.",
       "It contains one file with a planted, well-known fake credential so a",
       "real gitleaks run produces a real finding.",
       "",

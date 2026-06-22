@@ -41,7 +41,7 @@ export interface Finding {
   readonly remediationKey?: string;
 }
 
-/** Same root cause across findings (Gate 1: identity grouping only). */
+/** Same root cause across findings (current slice: identity grouping only). */
 export interface FindingCluster {
   readonly id: string;
   readonly category: FindingCategory;

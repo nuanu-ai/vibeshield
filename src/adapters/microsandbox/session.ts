@@ -6,9 +6,13 @@
  * Network is on by default in microsandbox; we do not restrict egress here.
  */
 
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import type { Sandbox } from "microsandbox";
 import type { ExecResult, SandboxSession } from "../../ports/sandbox-runtime.js";
+
+const execFileP = promisify(execFile);
 
 export class MicrosandboxSession implements SandboxSession {
   constructor(
@@ -40,6 +44,26 @@ export class MicrosandboxSession implements SandboxSession {
     const buf = await this.sb.fs().read(guestPath);
     return new Uint8Array(buf);
   }
+
+  async destroy(): Promise<void> {
+    try {
+      await this.sb.stop();
+    } catch {
+      // Best effort: the runtime-level destroy still tries to force-remove by name.
+    }
+    const msb = await msbPath();
+    if (msb === null) {
+      return;
+    }
+    for (let i = 0; i < 5; i += 1) {
+      try {
+        await execFileP(msb, ["remove", "--force", this.id]);
+        return;
+      } catch {
+        await sleep(200);
+      }
+    }
+  }
 }
 
 /**
@@ -55,4 +79,17 @@ function shellQuote(arg: string): string {
     return arg;
   }
   return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+async function msbPath(): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP("sh", ["-c", "echo $HOME"]);
+    return `${stdout.trim()}/.microsandbox/bin/msb`;
+  } catch {
+    return null;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
