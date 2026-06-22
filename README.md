@@ -33,8 +33,9 @@ hits into deterministic Fix Pack actions.
 Still not done:
 
 - Resume is intentionally not implemented yet.
-- The one OpenRouter/Opus remediation enhancement call is not wired yet; the
-  current slice uses the deterministic catalog fallback.
+- The OpenRouter remediation enhancement is wired. If `OPENROUTER_API_KEY` is
+  missing or the model response is invalid, the deterministic catalog fallback
+  is used.
 - The live Microsandbox acceptance run still requires a local toolchain image.
 
 ## Quickstart
@@ -72,6 +73,7 @@ Override state or image tag when needed:
 ```bash
 VIBESHIELD_STATE_ROOT=/tmp/vibeshield-state pnpm scan /path/to/local/folder
 VIBESHIELD_TOOLCHAIN_TAG=vibeshield-toolchain:latest pnpm scan /path/to/local/folder
+VIBESHIELD_REMEDIATION_MODEL=anthropic/claude-sonnet-4.6 pnpm scan /path/to/local/folder
 ```
 
 ## Run Output

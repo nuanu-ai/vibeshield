@@ -51,7 +51,7 @@ vibeshield scan <github-url | local-folder>
   findings.normalize    raw tool output -> Evidence -> Finding (+ semantic validators)
   findings.correlate    group findings with the same root cause
   actions.rank          ActionCandidate with rule-computed priority + verdict
-  remediation.generate  ONE Opus 4.8 call: candidates -> explanation + prompt   (catalog fallback)
+  remediation.generate  ONE Sonnet call: candidates -> explanation + prompt     (catalog fallback)
   report.compose        one SecurityAssessment object
   report.render         report.json / .md / .html + terminal (current CLI look)
 ```
@@ -162,14 +162,19 @@ Status:
 Closes when: the verdict, priority, and finding set are identical with the AI on
 vs off; the AI only makes the explanations and prompts read better.
 
-- [ ] **Model provider (OpenRouter / Opus 4.8).** In: model-provider port. Do:
-  OpenRouter adapter calling Claude Opus 4.8 (high effort); key from env; absent
-  key → catalog fallback, not a crash. Out: a model client. Done: a call returns
-  structured output; missing key degrades cleanly.
-- [ ] **remediation.generate + fallback.** In: ≤10 candidates + findings +
-  redacted snippets + catalog + inventory. Do: **one** Opus 4.8 call producing
+- [x] **Model provider (OpenRouter / Sonnet).** In: model-provider port. Do:
+  OpenRouter adapter calling the configured Sonnet-class model from `.env`
+  (`VIBESHIELD_REMEDIATION_MODEL`, default `anthropic/claude-sonnet-4.6`);
+  key from `OPENROUTER_API_KEY`; absent key → catalog fallback, not a crash.
+  Out: a model client. Done: unit tests cover configured model, fenced JSON,
+  schema aliases, and missing-key fallback.
+- [x] **remediation.generate + fallback.** In: ≤10 candidates + findings +
+  redacted snippets + catalog + inventory. Do: **one** Sonnet call producing
   per-candidate explanation/steps/prompt/verify; validate ids/paths; invalid →
-  catalog (no repair). Out: enriched `RemediationAction`s. Done: closes Gate 3.
+  catalog (no repair). Out: enriched `RemediationAction`s. Done: live run
+  `20260622140126-5af9d710` used the configured OpenRouter Sonnet model, kept
+  the same verdict/finding ids/candidates as catalog fallback, and produced
+  `fromCatalog: false` remediation copy for secret, dependency, and IaC actions.
 
 ### Cross-cutting (alongside the gates)
 
@@ -302,9 +307,10 @@ Minimal on purpose — enough to keep stages coherent.
   steps, coding-agent prompt template. Unknown findings use a clearly-weaker
   generic template. The catalog is the deterministic fallback and the primary UX
   when the AI is off.
-- **The one AI call** (`remediation.generate`): Claude Opus 4.8, high reasoning
-  effort, via Pi over OpenRouter, on the host. The OpenRouter key comes from an
-  env var; if it is missing, the call is skipped and the catalog is used.
+- **The one AI call** (`remediation.generate`): configured Sonnet-class model
+  over OpenRouter, on the host. `OPENROUTER_API_KEY` and
+  `VIBESHIELD_REMEDIATION_MODEL` come from `.env`; if the key is missing, the
+  call is skipped and the catalog is used.
   - Input: up to ten `ActionCandidate`s with their findings, redacted evidence
     snippets, affected files, the matching catalog entries, and the repo
     inventory.
