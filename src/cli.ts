@@ -12,22 +12,10 @@ import {
 import { SqliteStateStore } from "./adapters/sqlite-state-store.js";
 import { ensureStateRoot, resolveStateRoot, stateDbPath } from "./adapters/state-root.js";
 import { runScan } from "./application/scan-service.js";
-import { verdictLabel } from "./domain/assessment.js";
 import type { SourceInput } from "./domain/run.js";
-import type { ScanEvent } from "./ports/event-sink.js";
+import { renderScanOutcome, supportsAnsiColor, TerminalEventSink } from "./reporting/terminal.js";
+import { assertLocalGitWorktreeRoot } from "./stages/local-source-package.js";
 import { DEFAULT_TOOLCHAIN_IMAGE } from "./stages/paths.js";
-
-class TerminalEventSink {
-  emit(event: ScanEvent): void {
-    if (event.type === "stage-started") {
-      process.stderr.write(`-> ${event.stageId}\n`);
-      return;
-    }
-    if (event.type === "stage-failed" || event.type === "error") {
-      process.stderr.write(`! ${event.message}\n`);
-    }
-  }
-}
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -50,7 +38,7 @@ try {
 async function scan(args: string[]): Promise<void> {
   const sourceArg = args[0];
   if (sourceArg === undefined) {
-    throw new Error("usage: vibeshield scan <github-url-or-local-folder>");
+    throw new Error("usage: vibeshield scan <github-url-or-local-git-root>");
   }
 
   const source = await parseSource(sourceArg);
@@ -66,7 +54,7 @@ async function scan(args: string[]): Promise<void> {
         sandbox: new MicrosandboxRuntime({ imageTag: toolchainImage }),
         state: new SqliteStateStore(db),
         artifacts: new FilesystemBlobs(stateRoot),
-        events: new TerminalEventSink(),
+        events: new TerminalEventSink(process.stderr, { color: supportsAnsiColor(process.stderr) }),
         model: new OpenRouterModelProvider({
           model: remediationModel,
           ...(process.env.OPENROUTER_API_KEY !== undefined
@@ -80,7 +68,7 @@ async function scan(args: string[]): Promise<void> {
         toolchainImage,
       },
     );
-    renderTerminalOutcome(outcome);
+    process.stdout.write(renderScanOutcome(outcome, { color: supportsAnsiColor(process.stdout) }));
   } finally {
     db.close();
   }
@@ -95,8 +83,9 @@ async function parseSource(raw: string): Promise<SourceInput> {
   const localPath = path.resolve(raw);
   const st = await stat(localPath).catch(() => null);
   if (st === null || !st.isDirectory()) {
-    throw new Error(`source is neither a public GitHub URL nor a local folder: ${raw}`);
+    throw new Error(`source is neither a public GitHub URL nor a local directory: ${raw}`);
   }
+  await assertLocalGitWorktreeRoot(localPath);
   return { kind: "local", path: localPath };
 }
 
@@ -122,43 +111,25 @@ function parseGithubUrl(raw: string): string | null {
   return `https://github.com/${owner}/${repo.replace(/\.git$/, "")}.git`;
 }
 
-function renderTerminalOutcome(outcome: Awaited<ReturnType<typeof runScan>>): void {
-  const { assessment } = outcome;
-  process.stdout.write("\nVibeShield Quick Scan\n");
-  process.stdout.write(`Run: ${outcome.runId}\n`);
-  process.stdout.write(`Verdict: ${verdictLabel(assessment.verdict)}\n`);
-  process.stdout.write(`Files scanned: ${assessment.manifest.fileCount}\n`);
-  process.stdout.write(`Findings: ${assessment.findingSummary.total}\n`);
-  process.stdout.write(`Reports: ${outcome.reportPaths.json}\n`);
-  process.stdout.write(`${assessment.limitation}\n`);
-  process.stdout.write("\nCoverage:\n");
-  for (const entry of assessment.coverage) {
-    const reason = entry.reason !== undefined ? ` - ${entry.reason}` : "";
-    process.stdout.write(`- ${entry.check}: ${entry.status}${reason}\n`);
-  }
-
-  for (const ranked of assessment.rankedActions) {
-    process.stdout.write("\n");
-    process.stdout.write(`${ranked.remediation.title}\n`);
-    process.stdout.write(`${ranked.remediation.risk}\n`);
-    process.stdout.write("\nAgent prompt:\n");
-    process.stdout.write(`${ranked.remediation.agentPrompt}\n`);
-  }
-}
-
 function printHelp(): void {
   process.stdout.write(
     [
       "VibeShield",
+      "Quick Scan for AI-built and beginner-built web projects.",
       "",
       "Usage:",
-      "  vibeshield scan <github-url-or-local-folder>",
+      "  vibeshield scan <github-url-or-local-git-root>",
+      "  vibeshield resume <run-directory>   (planned)",
+      "",
+      "Output:",
+      "  Terminal verdict + coverage + Agent Fix Pack",
+      "  report.json / report.md / report.html under the state root",
       "",
       "Environment:",
-      "  VIBESHIELD_STATE_ROOT     override ~/.vibeshield",
-      "  VIBESHIELD_TOOLCHAIN_TAG  override vibeshield-toolchain:latest",
-      "  OPENROUTER_API_KEY        enable one-call remediation enhancement",
-      "  VIBESHIELD_REMEDIATION_MODEL override the OpenRouter remediation model",
+      "  VIBESHIELD_STATE_ROOT          override ~/.vibeshield",
+      "  VIBESHIELD_TOOLCHAIN_TAG       override vibeshield-toolchain:latest",
+      "  OPENROUTER_API_KEY             enable one-call remediation enhancement",
+      "  VIBESHIELD_REMEDIATION_MODEL   override the OpenRouter remediation model",
       "",
     ].join("\n"),
   );
