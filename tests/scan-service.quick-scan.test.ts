@@ -179,6 +179,53 @@ describe("runScan quick scan vertical slice", () => {
     expect(sandbox.invocations.map((i) => i.command[0])).toContain("zizmor");
   });
 
+  it("turns a workflow scanner finding into a deterministic action", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "README.md", size: 10, sha256: "readme-sha" },
+          { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+        ]),
+        [],
+        {
+          actionlint: {
+            exitCode: 1,
+            stdout: JSON.stringify([
+              {
+                Message: 'property "branches" is not defined',
+                Kind: "syntax-check",
+                Filepath: ".github/workflows/ci.yml",
+                Line: 7,
+              },
+            ]),
+            stderr: "",
+          },
+        },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    expect(outcome.assessment.verdict).toBe("not-ready-to-deploy");
+    expect(outcome.assessment.findings[0]).toMatchObject({
+      sourceTool: "actionlint",
+      category: "github-action",
+      ruleId: "syntax-check",
+    });
+    expect(outcome.assessment.findingClusters).toHaveLength(1);
+    expect(outcome.assessment.rankedActions[0]?.remediation.title).toBe(
+      "Harden the GitHub Actions workflow",
+    );
+    expect(outcome.assessment.rankedActions[0]?.remediation.agentPrompt).toContain(
+      ".github/workflows/ci.yml:7",
+    );
+  });
+
   it("runs every applicable scanner from the inventory plan", async () => {
     const source = await writeLocalFixture(dir);
     const sandbox = new FakeSandboxRuntime({
@@ -257,6 +304,34 @@ describe("runScan quick scan vertical slice", () => {
       check: "github-actions.actionlint",
       status: "failed",
       reason: "exit 2; stderr: invalid workflow syntax",
+    });
+  });
+
+  it("blocks a green verdict when required scanner coverage is lost", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "README.md", size: 10, sha256: "readme-sha" },
+          { path: ".github/workflows/ci.yml", size: 80, sha256: "workflow-sha" },
+        ]),
+        [],
+        { actionlint: { exitCode: 2, stdout: "", stderr: "actionlint crashed" } },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    expect(outcome.assessment.verdict).toBe("scan-incomplete");
+    expect(outcome.assessment.rankedActions).toHaveLength(0);
+    expect(coverageByCheck(outcome.assessment.coverage).get("github-actions.actionlint")).toEqual({
+      check: "github-actions.actionlint",
+      status: "failed",
+      reason: "exit 2; stderr: actionlint crashed",
     });
   });
 

@@ -5,7 +5,7 @@ import type { ActionCandidate, RemediationAction } from "../domain/action.js";
 import { type Verdict, verdictLabel } from "../domain/assessment.js";
 import type { CoverageEntry } from "../domain/coverage-summary.js";
 import type { Evidence, RedactedRawArtifact } from "../domain/evidence.js";
-import type { Finding } from "../domain/finding.js";
+import type { Finding, FindingCategory, FindingCluster, Severity } from "../domain/finding.js";
 import type { PlannedCheck, RepositoryInventory, ScanPlan } from "../domain/inventory.js";
 import type { Manifest } from "../domain/manifest.js";
 import { summarizeManifest, summarizeToolchain } from "../domain/manifest-summary.js";
@@ -58,6 +58,7 @@ export function quickScanStages(): StageDefinition[] {
     zizmorStage(),
     trivyConfigStage(),
     normalizeStage(),
+    correlateStage(),
     actionsStage(),
     remediationStage(),
     reportStage(),
@@ -115,6 +116,10 @@ interface ScannerCandidateFields {
 interface NormalizeData {
   readonly evidence: Evidence[];
   readonly findings: Finding[];
+}
+
+interface CorrelateData {
+  readonly clusters: FindingCluster[];
 }
 
 interface ActionsData {
@@ -544,7 +549,83 @@ function normalizeStage(): StageDefinition {
         });
       }
 
+      for (const scanner of scannerRunsFromInputs(ctx)) {
+        if (scanner.check === "secrets.gitleaks" || scanner.rawArtifact === undefined) {
+          continue;
+        }
+        for (const candidate of scanner.candidates) {
+          const filePath = candidate.filePath;
+          if (filePath === undefined) {
+            continue;
+          }
+          if (!manifestFiles.has(filePath)) {
+            throw new Error(`${scanner.tool} finding points outside the snapshot: ${filePath}`);
+          }
+          const startLine = positiveInt(candidate.startLine, 1);
+          const ruleId = candidate.ruleId ?? `${scanner.tool}-finding`;
+          const message = candidate.message ?? `${scanner.tool} reported ${ruleId}`;
+          const snippet = `${ruleId}: ${message}`;
+          const snippetHash = sha256Text(snippet);
+          const fingerprint = stableId("fp", [
+            scanner.tool,
+            ruleId,
+            filePath,
+            String(startLine),
+            snippetHash,
+          ]);
+          if (seen.has(fingerprint)) {
+            continue;
+          }
+          seen.add(fingerprint);
+          const evidenceId = stableId("ev", [
+            scanner.tool,
+            ruleId,
+            filePath,
+            String(startLine),
+            snippetHash,
+          ]);
+          const category = categoryForCheck(scanner.check);
+          evidence.push({
+            id: evidenceId,
+            rawArtifactBlobSha256: scanner.rawArtifact.blobSha256,
+            filePath,
+            startLine,
+            endLine: startLine,
+            snippet,
+            snippetHash,
+            tool: scanner.tool,
+          });
+          findings.push({
+            id: stableId("finding", [fingerprint]),
+            sourceTool: scanner.tool,
+            ruleId,
+            category,
+            severity: severityFromScanner(candidate.severity, category),
+            confidence: "high",
+            locations: [{ filePath, startLine, endLine: startLine }],
+            evidenceIds: [evidenceId],
+            fingerprint,
+            remediationKey: remediationKeyForCategory(category),
+          });
+        }
+      }
+
       return success({ evidence, findings } satisfies NormalizeData);
+    },
+  };
+}
+
+function correlateStage(): StageDefinition {
+  return {
+    id: "findings.correlate",
+    version: "1",
+    dependencies: ["findings.normalize"],
+    inputs: [],
+    outputs: [],
+    required: true,
+    run: async (ctx) => {
+      const { findings } = readInput<NormalizeData>(ctx, "findings.normalize");
+      return success({ clusters: correlateFindings(findings) } satisfies CorrelateData);
     },
   };
 }
@@ -553,7 +634,12 @@ function actionsStage(): StageDefinition {
   return {
     id: "actions.rank",
     version: "1",
-    dependencies: ["findings.normalize", "inventory.detect", ...SCANNER_STAGE_IDS],
+    dependencies: [
+      "findings.normalize",
+      "findings.correlate",
+      "inventory.detect",
+      ...SCANNER_STAGE_IDS,
+    ],
     inputs: [],
     outputs: [],
     required: true,
@@ -561,18 +647,7 @@ function actionsStage(): StageDefinition {
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
       const coverage = coverageFromScanPlan(scanPlan, scannerRunsFromInputs(ctx));
-      const candidates: ActionCandidate[] = [];
-      if (findings.length > 0) {
-        candidates.push({
-          id: stableId("action", findings.map((f) => f.fingerprint).sort()),
-          remediationKey: "live-secret-in-source",
-          priorityScore: 100,
-          findingIds: findings.map((f) => f.id),
-          evidenceIds: evidence.map((ev) => ev.id),
-          affectedFiles: unique(findings.flatMap((f) => f.locations.map((loc) => loc.filePath))),
-          verdictImpact: "blocks-deploy",
-        });
-      }
+      const candidates = actionCandidatesFromFindings(findings, evidence);
       const verdict = verdictFor(findings, coverage);
       return success({ candidates, verdict } satisfies ActionsData);
     },
@@ -608,6 +683,7 @@ function reportStage(): StageDefinition {
       "inventory.detect",
       ...SCANNER_STAGE_IDS,
       "findings.normalize",
+      "findings.correlate",
       "actions.rank",
       "remediation.catalog",
     ],
@@ -619,6 +695,7 @@ function reportStage(): StageDefinition {
       const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
       const coverage = coverageFromScanPlan(scanPlan, scannerRunsFromInputs(ctx));
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
+      const { clusters } = readInput<CorrelateData>(ctx, "findings.correlate");
       const { verdict } = readInput<ActionsData>(ctx, "actions.rank");
       const { rankedActions } = readInput<RemediationData>(ctx, "remediation.catalog");
       const assessment = buildAssessment({
@@ -630,6 +707,7 @@ function reportStage(): StageDefinition {
         findingSummary: summarizeFindings(findings),
         evidence,
         findings,
+        findingClusters: clusters,
         rankedActions,
         generatedAt: new Date().toISOString(),
       });
@@ -1306,6 +1384,9 @@ function catalogRemediation(
       ? `${firstEvidence.filePath}:${firstEvidence.startLine}`
       : (candidate.affectedFiles[0] ?? "the repository");
   const ruleIds = unique(findings.map((finding) => finding.ruleId)).join(", ");
+  if (candidate.remediationKey !== "live-secret-in-source") {
+    return genericCatalogRemediation(candidate, location, ruleIds);
+  }
   return {
     candidateId: candidate.id,
     title: "Remove the committed secret",
@@ -1335,6 +1416,107 @@ function catalogRemediation(
   };
 }
 
+function genericCatalogRemediation(
+  candidate: ActionCandidate,
+  location: string,
+  ruleIds: string,
+): RemediationAction {
+  const template = genericRemediationTemplate(candidate.remediationKey);
+  return {
+    candidateId: candidate.id,
+    title: template.title,
+    risk: template.risk,
+    whyFixNow: template.whyFixNow,
+    fixSteps: template.fixSteps(location),
+    operationalSteps: template.operationalSteps,
+    agentPrompt: [
+      `Fix this VibeShield finding: ${template.title}.`,
+      `Location: ${location}`,
+      `Rule: ${ruleIds}`,
+      template.agentInstruction,
+      "Keep the change minimal, preserve existing behavior where possible, and add or adjust a focused verification step.",
+    ].join("\n"),
+    verifySteps: template.verifySteps,
+    fromCatalog: true,
+  };
+}
+
+function genericRemediationTemplate(remediationKey: string) {
+  switch (remediationKey) {
+    case "dependency-vulnerability":
+      return {
+        title: "Review the vulnerable dependency",
+        risk: "A dependency scanner reported a vulnerable package or dependency manifest.",
+        whyFixNow:
+          "Known vulnerable dependencies can be reachable even when the application code looks unchanged.",
+        fixSteps: (location: string) => [
+          `Review the dependency finding at ${location}.`,
+          "Upgrade, replace, or remove the affected package using the smallest compatible change.",
+          "Update the lockfile together with the manifest when applicable.",
+        ],
+        operationalSteps: ["Check whether the vulnerable package is used in a deployed path."],
+        agentInstruction:
+          "Inspect the dependency manifest or lockfile, apply the smallest safe upgrade/removal, and explain any compatibility risk.",
+        verifySteps: ["Run the package manager install/check command.", "Run VibeShield again."],
+      };
+    case "github-actions-hardening":
+      return {
+        title: "Harden the GitHub Actions workflow",
+        risk: "A workflow scanner reported a CI/CD configuration issue that can weaken repository or deployment security.",
+        whyFixNow:
+          "Workflow issues can expose secrets, broaden token permissions, or run untrusted input during automation.",
+        fixSteps: (location: string) => [
+          `Review the workflow finding at ${location}.`,
+          "Apply the least-privilege workflow change recommended by the scanner.",
+          "Keep workflow behavior equivalent unless the insecure behavior is the problem.",
+        ],
+        operationalSteps: [
+          "Review recent workflow runs if the finding involves secret or token exposure.",
+        ],
+        agentInstruction:
+          "Patch the workflow YAML with least privilege and safe expression handling; do not broaden permissions to silence the scanner.",
+        verifySteps: ["Run actionlint or the workflow parser locally.", "Run VibeShield again."],
+      };
+    case "iac-hardening":
+      return {
+        title: "Fix the infrastructure configuration issue",
+        risk: "An IaC scanner reported a configuration that may expose infrastructure or weaken runtime isolation.",
+        whyFixNow:
+          "Infrastructure defaults are easy to ship accidentally and can become externally reachable after deploy.",
+        fixSteps: (location: string) => [
+          `Review the IaC finding at ${location}.`,
+          "Tighten the configuration using the scanner rule as the source of truth.",
+          "Keep environment-specific values configurable instead of hard-coding exceptions.",
+        ],
+        operationalSteps: [
+          "Confirm the deployed environment is not already using the unsafe setting.",
+        ],
+        agentInstruction:
+          "Patch the IaC file to satisfy the reported rule while preserving the intended deployment shape.",
+        verifySteps: [
+          "Run the IaC validation or plan command if available.",
+          "Run VibeShield again.",
+        ],
+      };
+    default:
+      return {
+        title: "Review the static analysis finding",
+        risk: "A code scanner reported a pattern that can become a security issue.",
+        whyFixNow:
+          "Static findings are cheapest to fix before the app is shipped or copied further.",
+        fixSteps: (location: string) => [
+          `Review the scanner finding at ${location}.`,
+          "Replace the risky pattern with a boring, explicit implementation.",
+          "Add a regression test when the behavior is security-sensitive.",
+        ],
+        operationalSteps: [],
+        agentInstruction:
+          "Refactor the reported code pattern into a safer equivalent and keep the diff narrow.",
+        verifySteps: ["Run the relevant test or typecheck.", "Run VibeShield again."],
+      };
+  }
+}
+
 function repositorySummary(source: SourceInput, manifest: Manifest) {
   const base = {
     name: source.kind === "github" ? repoNameFromUrl(source.url) : path.basename(source.path),
@@ -1354,6 +1536,140 @@ function summarizeFindings(findings: ReadonlyArray<Finding>) {
     byCategory[finding.category] = (byCategory[finding.category] ?? 0) + 1;
   }
   return { total: findings.length, bySeverity, byCategory };
+}
+
+function correlateFindings(findings: ReadonlyArray<Finding>): FindingCluster[] {
+  const groups = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const firstFile = finding.locations[0]?.filePath ?? "repository";
+    const key = [finding.category, finding.remediationKey ?? finding.ruleId, firstFile].join("\0");
+    const group = groups.get(key) ?? [];
+    group.push(finding);
+    groups.set(key, group);
+  }
+  return [...groups.entries()].map(([key, group]) => ({
+    id: stableId("cluster", [key]),
+    category: group[0]?.category ?? "code-pattern",
+    findingIds: group.map((finding) => finding.id),
+    maxSeverity: maxSeverity(group.map((finding) => finding.severity)),
+  }));
+}
+
+function actionCandidatesFromFindings(
+  findings: ReadonlyArray<Finding>,
+  evidence: ReadonlyArray<Evidence>,
+): ActionCandidate[] {
+  const evidenceById = new Map(evidence.map((ev) => [ev.id, ev]));
+  const groups = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const key = finding.remediationKey ?? remediationKeyForCategory(finding.category);
+    const group = groups.get(key) ?? [];
+    group.push(finding);
+    groups.set(key, group);
+  }
+  return [...groups.entries()]
+    .map(([remediationKey, group]) => {
+      const groupEvidence = unique(
+        group.flatMap((finding) => finding.evidenceIds).filter((id) => evidenceById.has(id)),
+      );
+      const severity = maxSeverity(group.map((finding) => finding.severity));
+      return {
+        id: stableId("action", group.map((finding) => finding.fingerprint).sort()),
+        remediationKey,
+        priorityScore: priorityScoreFor(severity, group[0]?.category ?? "code-pattern"),
+        findingIds: group.map((finding) => finding.id),
+        evidenceIds: groupEvidence,
+        affectedFiles: unique(group.flatMap((f) => f.locations.map((loc) => loc.filePath))),
+        verdictImpact: verdictImpactFor(severity),
+      } satisfies ActionCandidate;
+    })
+    .sort(
+      (a, b) =>
+        b.priorityScore - a.priorityScore || a.remediationKey.localeCompare(b.remediationKey),
+    );
+}
+
+function categoryForCheck(check: string): FindingCategory {
+  if (check.startsWith("code-patterns.")) {
+    return "code-pattern";
+  }
+  if (check.startsWith("dependencies.")) {
+    return "dependency";
+  }
+  if (check.startsWith("github-actions.")) {
+    return "github-action";
+  }
+  if (check.startsWith("iac.")) {
+    return "iac";
+  }
+  if (check.startsWith("sbom.")) {
+    return "sbom";
+  }
+  return "code-pattern";
+}
+
+function remediationKeyForCategory(category: FindingCategory): string {
+  switch (category) {
+    case "secret":
+      return "live-secret-in-source";
+    case "dependency":
+      return "dependency-vulnerability";
+    case "github-action":
+      return "github-actions-hardening";
+    case "iac":
+      return "iac-hardening";
+    case "sbom":
+      return "sbom-inventory-review";
+    case "code-pattern":
+      return "code-pattern-review";
+  }
+}
+
+function severityFromScanner(value: string | undefined, category: FindingCategory): Severity {
+  const normalized = value?.toLowerCase();
+  if (normalized === "critical") {
+    return "critical";
+  }
+  if (normalized === "high" || normalized === "error") {
+    return "high";
+  }
+  if (normalized === "medium" || normalized === "warning") {
+    return "medium";
+  }
+  if (normalized === "low" || normalized === "note") {
+    return "low";
+  }
+  return category === "github-action" || category === "iac" ? "medium" : "unknown";
+}
+
+function maxSeverity(values: ReadonlyArray<Severity>): Severity {
+  const order: Severity[] = ["unknown", "low", "medium", "high", "critical"];
+  return values.reduce<Severity>(
+    (max, value) => (order.indexOf(value) > order.indexOf(max) ? value : max),
+    "unknown",
+  );
+}
+
+function priorityScoreFor(severity: Severity, category: FindingCategory): number {
+  const base = {
+    critical: 100,
+    high: 80,
+    medium: 50,
+    low: 20,
+    unknown: 10,
+  } satisfies Record<Severity, number>;
+  const categoryBoost = category === "secret" ? 10 : category === "dependency" ? 5 : 0;
+  return base[severity] + categoryBoost;
+}
+
+function verdictImpactFor(severity: Severity): ActionCandidate["verdictImpact"] {
+  if (severity === "critical" || severity === "high") {
+    return "blocks-deploy";
+  }
+  if (severity === "medium") {
+    return "degrades";
+  }
+  return "informational";
 }
 
 function languageForPath(filePath: string): string | null {

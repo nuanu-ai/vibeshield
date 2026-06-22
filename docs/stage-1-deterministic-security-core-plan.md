@@ -131,6 +131,13 @@ Status:
 Closes when: a fixture matrix touching every check shows a coverage table and a
 still-useful Fix Pack when one check is killed.
 
+Status:
+
+- [ ] **Gate 2 acceptance.** Owner-visible fixture matrix has not been run yet.
+  Needs one run where all checks are applicable and checked, plus one run where a
+  killed check records failed coverage while other findings still produce a Fix
+  Pack.
+
 - [x] **Inventory.detect.** In: manifest. Do: detect languages, manifests,
   workflows, IaC to gate which checks apply. Out: a scan plan. Done: a repo with
   no workflows skips the Actions checks with a recorded reason.
@@ -139,12 +146,10 @@ still-useful Fix Pack when one check is killed.
   (trivy), GitHub Actions (actionlint + zizmor), IaC (trivy config); vuln DBs
   refresh at run start. Out: raw artifacts + candidates per tool. Done: each
   applicable check runs or records a skip reason.
-- [ ] **Correlate + degradation.** In: findings from all checks. Do: cluster
+- [x] **Correlate + degradation.** In: findings from all checks. Do: cluster
   same-root-cause findings; one failing check still yields a Fix Pack; lost
   required coverage → `Scan incomplete`. Out: clusters + truthful coverage. Done:
   killing one check keeps other findings; required-coverage loss blocks green.
-  Current: scanner-failure coverage and non-green verdict are implemented;
-  root-cause clustering remains.
 
 ### Gate 3 — the one AI fix-pack call
 

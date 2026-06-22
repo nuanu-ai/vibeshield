@@ -10,7 +10,7 @@ import type { Verdict } from "./assessment.js";
 import type { CoverageEntry } from "./coverage-summary.js";
 import { SCAN_LIMITATION } from "./coverage-summary.js";
 import type { Evidence } from "./evidence.js";
-import type { Finding } from "./finding.js";
+import type { Finding, FindingCluster } from "./finding.js";
 import type { ManifestSummary, ToolchainSummary } from "./manifest-summary.js";
 
 export interface SecurityAssessment {
@@ -22,6 +22,7 @@ export interface SecurityAssessment {
   readonly findingSummary: FindingSummary;
   readonly evidence: ReadonlyArray<Evidence>;
   readonly findings: ReadonlyArray<Finding>;
+  readonly findingClusters: ReadonlyArray<FindingCluster>;
   readonly rankedActions: ReadonlyArray<RankedAction>;
   readonly limitation: string;
   readonly generatedAt: string;
