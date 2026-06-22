@@ -73,48 +73,59 @@ Closes when: `vibeshield scan <real-repo-with-a-planted-secret>` shows a verdict
 and one usable action (file/line, why, paste-ready prompt from the catalog), with
 the raw scanner output saved as proof a real tool ran.
 
-- [ ] **Backbone + ports.** In: current TS package. Do: add `domain` contracts
+Status:
+
+- [x] **Gate 1 acceptance.** A live local planted-secret scan ran in
+  Microsandbox, produced `Critical fix needed`, included `src/config.ts:4`, wrote
+  redacted raw gitleaks output + `manifest.json` / `report.json` / `report.md` /
+  `report.html`, and destroyed the sandbox. A public GitHub URL smoke also
+  reached source acquisition, manifest, scan, and report.
+
+- [x] **Backbone + ports.** In: current TS package. Do: add `domain` contracts
   (Run, Stage, Artifact, Evidence, Finding, ActionCandidate, RemediationAction,
   SecurityAssessment), a `ScanService`, and the ports (sandbox-runtime,
   state-store, artifact-store, model-provider, event-sink); domain imports no
   adapter. Out: a typed skeleton the thread flows through. Done: a scan call goes
   CLI → ScanService → registry → ports with no domain→adapter import.
-- [ ] **MicrosandboxRuntime.** In: the SandboxRuntime port. Do: implement
+- [x] **MicrosandboxRuntime.** In: the SandboxRuntime port. Do: implement
   create/upload/exec/download/destroy with network on; a fake runtime for tests.
   Out: production adapter + fake. Done: a trusted command runs in a real sandbox,
   writes a file, downloads it, sandbox destroyed; unsupported host fails clearly.
-- [ ] **State store (SQLite) + blob store.** In: state root (default
+- [x] **State store (SQLite) + blob store.** In: state root (default
   `~/.vibeshield`, test-overridable). Do: the tables and `blobs/sha256/...`;
   identical bytes reuse one blob; rerun adds a new attempt, never overwrites. Out:
   persisted state + regeneratable `runs/<id>/` export. Done: one run shows rows +
   blob refs; rerun adds an attempt.
-- [ ] **Stage registry + runner + minimal resume.** In: stage definitions. Do:
-  register, build/validate the DAG, run, record attempts/events, mark descendants
-  stale on rerun; `resume` runs missing/failed/stale. Out: the DAG drives the
-  thread. Done: stage list comes from the registry; resume re-runs only
-  stale/failed.
-- [ ] **Source acquisition.** In: GitHub URL or local folder. Do: GitHub →
+- [x] **Stage registry + runner.** In: stage definitions. Do: register,
+  build/validate the DAG, run, record attempts/events. Out: the DAG drives the
+  thread. Done: stage list comes from the registry and every stage attempt is
+  persisted.
+- [ ] **Minimal resume.** In: a run id or run directory. Do: re-run
+  missing/failed/stale stages and mark descendants stale on forced rerun. Out:
+  resume reuses durable state instead of starting from scratch. Done: resume
+  re-runs only stale/failed/missing work.
+- [x] **Source acquisition.** In: GitHub URL or local folder. Do: GitHub →
   `git clone --depth 1` inside the sandbox; local → copy in; `.git` present → drop
   ignored files and read the commit SHA, else a default ignore set. Out: a source
   dir in the sandbox. Done: ignored files excluded; URL and folder both reach a
   source dir.
-- [ ] **Snapshot manifest.** In: the source dir. Do: write the manifest (commit
+- [x] **Snapshot manifest.** In: the source dir. Do: write the manifest (commit
   SHA, file list+hashes, exclusions, source hash, tool+DB versions). Out:
   `manifest.json`. Done: same input → same source hash; no source tarball stored.
-- [ ] **Secrets check adapter (gitleaks).** In: source dir in the sandbox. Do: run
+- [x] **Secrets check adapter (gitleaks).** In: source dir in the sandbox. Do: run
   gitleaks (argv, fixed config, timeout); redact secret values; store the redacted
   raw output as a blob. Out: `RedactedRawArtifact` + finding candidates. Done: a
   planted secret is
   found; raw output present and redacted.
-- [ ] **Normalize → Evidence → Finding.** In: candidates. Do: build Evidence and
+- [x] **Normalize → Evidence → Finding.** In: candidates. Do: build Evidence and
   Finding per the data model; run semantic validators; collapse duplicates. Out:
   findings + evidence in SQLite. Done: a finding pointing outside the snapshot is
   rejected.
-- [ ] **Actions + ranking + verdict (deterministic).** In: findings. Do: group by
+- [x] **Actions + ranking + verdict (deterministic).** In: findings. Do: group by
   remediation key, score with the ranking signals, compute the verdict — all
   before any AI. Out: `ActionCandidate`s + verdict. Done: rank order is
   explainable from visible fields; a live secret → `Critical fix needed`.
-- [ ] **Catalog remediation + report.** In: candidates + catalog. Do: fill catalog
+- [x] **Catalog remediation + report.** In: candidates + catalog. Do: fill catalog
   templates into `RemediationAction`s; compose one `SecurityAssessment`; render
   terminal/json/md/html through the kept CLI look. Out: `report.json/.md/.html`.
   Done: closes Gate 1.
