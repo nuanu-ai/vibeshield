@@ -40,7 +40,8 @@ follows from them.
 - If the AI call is unavailable, invalid, or over budget, a deterministic
   **catalog template** produces the same actions and prompts.
 - Reports: terminal + `report.json` + `report.md` + `report.html`. **PDF later.**
-- The current CLI look (colors, spinner, layout) is kept.
+- The CLI stays owner-facing: concise progress on stderr and a short receipt on
+  stdout. Full Fix Pack detail stays in HTML/Markdown.
 
 ## The thread
 
@@ -56,7 +57,7 @@ vibeshield scan <github-url | local-git-root>
   actions.rank          ActionCandidate with rule-computed priority + verdict
   remediation.generate  ONE Sonnet call: candidates -> explanation + prompt     (catalog fallback)
   report.compose        one SecurityAssessment object
-  report.render         report.json / .md / .html + terminal (current CLI look)
+  report.render         report.json / .md / .html + short terminal receipt
 ```
 
 Every stage runs from a single `StageRegistry` and records its attempt and its
@@ -183,9 +184,9 @@ vs off; the AI only makes the explanations and prompts read better.
 
 - [x] **CLI look + README.** Keep the terminal palette/progress feel; rewire the
   content to the new Quick Scan flow; rewrite the README to this product. Done:
-  terminal output is a short receipt with verdict, check summary, top fixes, and
-  report paths; HTML/Markdown clearly separate human explanation from the
-  "Prompt For Your Coding Agent" block; README matches the actual `scan`
+  terminal output is a short receipt with repository, verdict, report path, and
+  the static-scan limitation; HTML/Markdown clearly separate human explanation
+  from the "Prompt for your coding agent" block; README matches the actual `scan`
   command, local Git-root input contract, one-command Microsandbox toolchain
   setup, and `.env` with only `OPENROUTER_API_KEY` on the happy path.
   Acceptance: `pnpm exec tsx src/cli.ts --help` shows the current command and
@@ -197,10 +198,12 @@ vs off; the AI only makes the explanations and prompts read better.
   missing/failed/stale stages and mark descendants stale on forced rerun. Out:
   resume reuses durable state instead of starting from scratch. Done: resume
   re-runs only stale/failed/missing work.
-- [ ] **Remove old MVP** as each replacement lands: Daytona, Pi mapping
-  collectors, `attack-hypotheses`, evaluator loops, repo-map-as-truth, duplicate
-  stage arrays, mutable-path overwrite, in-memory registry. Keep OpenRouter as
-  the gateway for the one remediation call.
+- [x] **Remove old MVP from the tracked current surface** as each replacement
+  lands: Daytona, Pi mapping collectors, `attack-hypotheses`, evaluator loops,
+  repo-map-as-truth, duplicate stage arrays, mutable-path overwrite, in-memory
+  registry. Keep OpenRouter as the gateway for the one remediation call. Done:
+  current tracked code/docs describe the Microsandbox deterministic Quick Scan;
+  old MVP material is not part of the runnable path.
 
 ## Runtime
 

@@ -112,8 +112,8 @@ function humanizeStageId(stageId: string): string {
 }
 
 // Short owner-facing receipt. The full Fix Pack lives in the reports; the
-// terminal only answers "what's the verdict, what do I fix first, where's the
-// report". Scanner counts, toolchain tags, and source hashes stay in JSON.
+// terminal only answers "what's the verdict and where is the report". Scanner
+// counts, toolchain tags, source hashes, and fix details stay in reports.
 export function renderScanOutcome(outcome: ScanOutcome, opts: RenderOptions = {}): string {
   const p = makePalette(opts.color ?? false);
   const { assessment } = outcome;

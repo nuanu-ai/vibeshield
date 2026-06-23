@@ -138,10 +138,6 @@ The terminal output is a short receipt, not the whole report:
   ✗ Critical fix needed
     2 fixes to make before you ship. Start with the first one.
 
-  Fix these first
-    1. Remove the committed Stripe secret key  .env:3
-    2. Update the vulnerable dependency  package-lock.json:1
-
   Full report
     ~/.vibeshield/runs/<run-id>/report.html ← open in a browser
     Markdown and JSON are in the same folder.
