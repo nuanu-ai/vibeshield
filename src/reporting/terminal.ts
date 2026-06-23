@@ -1,7 +1,7 @@
 import type { Writable } from "node:stream";
 import type { ScanOutcome } from "../application/scan-service.js";
+import type { Verdict } from "../domain/assessment.js";
 import { verdictLabel } from "../domain/assessment.js";
-import type { CoverageEntry, CoverageStatus } from "../domain/coverage-summary.js";
 import type { SecurityAssessment } from "../domain/security-assessment.js";
 import type { EventSink, ScanEvent } from "../ports/event-sink.js";
 
@@ -22,10 +22,19 @@ interface Palette {
   readonly red: Paint;
   readonly yellow: Paint;
   readonly cyan: Paint;
+  readonly magenta: Paint;
 }
 
-const STATUS_ORDER: ReadonlyArray<CoverageStatus> = ["checked", "degraded", "failed", "skipped"];
+const glyph = {
+  brand: "◆",
+  ok: "✓",
+  fail: "✗",
+  warn: "⚠",
+  step: "›",
+} as const;
 
+// Friendly, deduplicated progress labels. Internal stage ids never reach the
+// user; several scanner stages collapse into one "Running security checks" line.
 const STAGE_PROGRESS_LABELS: Readonly<Record<string, string>> = {
   "source.resolve": "Preparing the repository",
   "toolchain.refresh": "Updating scanner data",
@@ -38,11 +47,11 @@ const STAGE_PROGRESS_LABELS: Readonly<Record<string, string>> = {
   "scan.github-actions.actionlint": "Running security checks",
   "scan.github-actions.zizmor": "Running security checks",
   "scan.iac.trivy-config": "Running security checks",
-  "findings.normalize": "Prioritizing findings",
-  "findings.correlate": "Prioritizing findings",
-  "actions.rank": "Prioritizing findings",
-  "remediation.generate": "Writing the Agent Fix Pack",
-  "report.compose": "Rendering reports",
+  "findings.normalize": "Prioritizing what matters",
+  "findings.correlate": "Prioritizing what matters",
+  "actions.rank": "Prioritizing what matters",
+  "remediation.generate": "Writing your fixes",
+  "report.compose": "Writing the report",
 };
 
 export class TerminalEventSink implements EventSink {
@@ -57,27 +66,28 @@ export class TerminalEventSink implements EventSink {
   }
 
   emit(event: ScanEvent): void {
+    const p = this.palette;
     if (event.type === "run-started") {
-      this.write(`${this.palette.bold("VibeShield")} ${this.palette.dim("quick scan started")}`);
+      this.write(`${p.magenta(glyph.brand)} ${p.bold("VibeShield")} ${p.dim("quick scan")}`);
       return;
     }
     if (event.type === "stage-started") {
       const label = progressLabel(event);
       if (!this.printedProgressLabels.has(label)) {
         this.printedProgressLabels.add(label);
-        this.write(`${this.palette.cyan("[scan]")} ${label}`);
+        this.write(`  ${p.cyan(glyph.step)} ${p.dim(label)}`);
       }
       return;
     }
     if (event.type === "stage-failed" || event.type === "error") {
-      this.write(`${this.palette.red("[fail]")} ${event.message}`);
+      this.write(`  ${p.red(glyph.fail)} ${event.message}`);
       return;
     }
     if (event.type === "run-finished") {
       if (event.details?.status === "failed") {
         return;
       }
-      this.write(`${this.palette.green("[done]")} Quick scan finished`);
+      this.write(`  ${p.green(glyph.ok)} ${p.dim("Scan complete")}`);
     }
   }
 
@@ -101,90 +111,109 @@ function humanizeStageId(stageId: string): string {
     .join(" ");
 }
 
+// Short owner-facing receipt. The full Fix Pack lives in the reports; the
+// terminal only answers "what's the verdict, what do I fix first, where's the
+// report". Scanner counts, toolchain tags, and source hashes stay in JSON.
 export function renderScanOutcome(outcome: ScanOutcome, opts: RenderOptions = {}): string {
-  const palette = makePalette(opts.color ?? false);
+  const p = makePalette(opts.color ?? false);
   const { assessment } = outcome;
   const lines: string[] = [];
 
-  lines.push("", palette.bold("VibeShield Quick Scan"));
-  lines.push(`Run: ${outcome.runId}`);
-  lines.push(`Repository: ${repositoryLine(assessment)}`);
-  lines.push(`Verdict: ${verdictText(assessment.verdict, palette)}`);
-  lines.push(`Fix Pack: ${fixPackSummary(assessment)}`);
-  lines.push(`Checks: ${coverageSummary(assessment.coverage)}`);
-  lines.push(`Snapshot: ${assessment.manifest.fileCount} files scanned`);
   lines.push("");
-  lines.push(palette.bold("What to do next"));
-  if (assessment.rankedActions.length === 0) {
-    lines.push("  No blocking fixes from the checks that completed.");
-  } else {
-    lines.push(`  Open the HTML report and fix the ${topActionNoun(assessment)} in order.`);
-    lines.push("  Each fix has a clearly labeled prompt to paste into your coding agent.");
-  }
-  lines.push("");
-  lines.push(palette.bold("Reports"));
-  lines.push(`  Human report: ${reportPath(outcome.reportPaths, "html") ?? "not written"}`);
-  lines.push(`  Markdown: ${reportPath(outcome.reportPaths, "markdown") ?? "not written"}`);
-  lines.push(`  JSON: ${reportPath(outcome.reportPaths, "json") ?? "not written"}`);
-  lines.push("");
-  lines.push(palette.bold("Top fixes"));
-  if (assessment.rankedActions.length === 0) {
-    lines.push("  None.");
-  } else {
-    for (const line of topActionLines(assessment, palette)) {
-      lines.push(`  ${line}`);
-    }
-  }
-  lines.push("");
-  lines.push(palette.dim(`Toolchain: ${assessment.toolchain.imageTag}`));
   lines.push(
-    palette.dim(
-      `Source snapshot: ${shortHash(assessment.manifest.sourceHash)}; ${assessment.manifest.exclusionCount} exclusions`,
-    ),
+    `  ${p.magenta(glyph.brand)} ${p.bold("VibeShield")}  ${p.dim(repositoryLine(assessment))}`,
   );
-  lines.push(palette.dim(assessment.limitation));
+  lines.push("");
+
+  const verdict = verdictStyle(assessment.verdict, p);
+  lines.push(
+    `  ${verdict.paint(verdict.glyph)} ${p.bold(verdict.paint(verdictLabel(assessment.verdict)))}`,
+  );
+  lines.push(`    ${p.dim(verdictSubline(assessment))}`);
+  lines.push("");
+
+  const htmlPath = outcome.reportPaths.html;
+  const markdownPath = outcome.reportPaths.markdown ?? outcome.reportPaths.md;
+  lines.push(`  ${p.bold("Full report")}`);
+  if (htmlPath !== undefined) {
+    lines.push(`    ${htmlPath} ${p.dim("← open in a browser")}`);
+  }
+  const alongside = [markdownPath, outcome.reportPaths.json].filter(
+    (value): value is string => value !== undefined,
+  );
+  if (alongside.length > 0) {
+    lines.push(`    ${p.dim(`Markdown and JSON are in the same folder.`)}`);
+  }
+  lines.push("");
+  lines.push(`  ${p.dim(assessment.limitation)}`);
+  lines.push("");
 
   return `${lines.join("\n")}\n`;
+}
+
+// Styled, owner-facing help for `vibeshield` and `vibeshield --help`.
+export function renderHelp(opts: RenderOptions = {}): string {
+  const p = makePalette(opts.color ?? false);
+  const heading = (text: string): string => `  ${p.bold(text)}`;
+  const lines = [
+    "",
+    `  ${p.magenta(glyph.brand)} ${p.bold("VibeShield")}   ${p.dim("security autopilot for AI-generated code")}`,
+    "",
+    `  ${p.dim("Scan a repo and get back a short, prioritized Fix Pack: what to change,")}`,
+    `  ${p.dim("why it matters, and a ready-to-paste prompt for your coding agent.")}`,
+    "",
+    heading("Usage"),
+    `    ${p.cyan("vibeshield scan")} <github-url-or-local-git-root>`,
+    "",
+    heading("Examples"),
+    `    ${p.dim("vibeshield scan https://github.com/owner/repo")}`,
+    `    ${p.dim("vibeshield scan ./my-app")}`,
+    "",
+    heading("Output"),
+    `    ${p.dim("A short summary here, plus a full report you can open:")}`,
+    `    ${p.dim("report.html · report.md · report.json")}`,
+    "",
+    heading("Setup"),
+    `    ${p.dim("Needs Docker or Podman + Microsandbox. First run:")} ${p.cyan("pnpm toolchain:prepare")}`,
+    `    ${p.dim("Set OPENROUTER_API_KEY (optional) to improve how each fix is explained.")}`,
+    "",
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+// Single, friendly error line for the CLI's top-level failure path.
+export function renderError(message: string, opts: RenderOptions = {}): string {
+  const p = makePalette(opts.color ?? false);
+  return `\n  ${p.red(glyph.fail)} ${message}\n\n`;
 }
 
 export function supportsAnsiColor(stream: TerminalStream): boolean {
   return Boolean(stream.isTTY) && process.env.NO_COLOR === undefined;
 }
 
-function topActionLines(assessment: SecurityAssessment, palette: Palette): string[] {
-  return assessment.rankedActions.slice(0, 3).map((ranked, index) => {
-    const locations = actionLocations(ranked.candidate.findingIds, assessment);
-    const where = locations.length > 0 ? ` at ${locations.slice(0, 2).join(", ")}` : "";
-    return `${index + 1}. ${palette.bold(ranked.remediation.title)}${where}`;
-  });
-}
-
-function topActionNoun(assessment: SecurityAssessment): string {
-  const count = assessment.rankedActions.length;
-  return count === 1 ? "top fix" : `${count} fixes`;
-}
-
-function actionLocations(
-  findingIds: ReadonlyArray<string>,
-  assessment: SecurityAssessment,
-): string[] {
-  const findingsById = new Map(assessment.findings.map((finding) => [finding.id, finding]));
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const findingId of findingIds) {
-    const finding = findingsById.get(findingId);
-    if (finding === undefined) {
-      continue;
-    }
-    for (const location of finding.locations) {
-      const value = `${location.filePath}:${location.startLine}`;
-      if (!seen.has(value)) {
-        seen.add(value);
-        out.push(value);
-      }
-    }
+function verdictStyle(verdict: Verdict, palette: Palette): { glyph: string; paint: Paint } {
+  if (verdict === "critical-fix-needed" || verdict === "not-ready-to-deploy") {
+    return { glyph: glyph.fail, paint: palette.red };
   }
-  return out;
+  if (verdict === "scan-incomplete") {
+    return { glyph: glyph.warn, paint: palette.yellow };
+  }
+  return { glyph: glyph.ok, paint: palette.green };
+}
+
+function verdictSubline(assessment: SecurityAssessment): string {
+  const count = assessment.rankedActions.length;
+  switch (assessment.verdict) {
+    case "critical-fix-needed":
+    case "not-ready-to-deploy":
+      return count === 0
+        ? "There are problems to fix before you rely on this code — see the report."
+        : `${count} ${count === 1 ? "fix" : "fixes"} to make before you ship — see the report.`;
+    case "scan-incomplete":
+      return "Some checks didn't finish, so this isn't the full picture — see the report.";
+    case "looks-ok-for-now":
+      return "No blocking issues from the checks that ran. Not a guarantee — keep reviewing.";
+  }
 }
 
 function repositoryLine(assessment: SecurityAssessment): string {
@@ -193,73 +222,11 @@ function repositoryLine(assessment: SecurityAssessment): string {
     assessment.repository.originUrl ??
     assessment.repository.localPath ??
     assessment.repository.name;
+  const cleaned = source.replace(/^https?:\/\//, "").replace(/\.git$/, "");
   if (commit === undefined || commit === null) {
-    return source;
+    return cleaned;
   }
-  return `${source} @ ${shortHash(commit)}`;
-}
-
-function verdictText(verdict: SecurityAssessment["verdict"], palette: Palette): string {
-  const label = verdictLabel(verdict);
-  if (verdict === "critical-fix-needed" || verdict === "not-ready-to-deploy") {
-    return palette.red(label);
-  }
-  if (verdict === "scan-incomplete") {
-    return palette.yellow(label);
-  }
-  return palette.green(label);
-}
-
-function fixPackSummary(assessment: SecurityAssessment): string {
-  const count = assessment.rankedActions.length;
-  const noun = count === 1 ? "action" : "actions";
-  const source = remediationSource(assessment);
-  const findings = severitySummary(assessment);
-  return `${count} ${noun} (${source}; deterministic verdict/actions; ${findings})`;
-}
-
-function remediationSource(assessment: SecurityAssessment): string {
-  if (assessment.rankedActions.length === 0) {
-    return "no remediation needed";
-  }
-  const catalogCount = assessment.rankedActions.filter(
-    (action) => action.remediation.fromCatalog,
-  ).length;
-  if (catalogCount === assessment.rankedActions.length) {
-    return "catalog fallback";
-  }
-  if (catalogCount === 0) {
-    return "OpenRouter enhanced";
-  }
-  return "OpenRouter enhanced + catalog fallback";
-}
-
-function severitySummary(assessment: SecurityAssessment): string {
-  const parts = ["critical", "high", "medium", "low", "unknown"]
-    .map((severity) => {
-      const count = assessment.findingSummary.bySeverity[severity] ?? 0;
-      return count > 0 ? `${count} ${severity}` : "";
-    })
-    .filter((part) => part.length > 0);
-  if (parts.length === 0) {
-    return "0 findings";
-  }
-  return parts.join(", ");
-}
-
-function coverageSummary(coverage: ReadonlyArray<CoverageEntry>): string {
-  const counts = new Map<CoverageStatus, number>();
-  for (const entry of coverage) {
-    counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
-  }
-  return STATUS_ORDER.map((status) => `${status} ${counts.get(status) ?? 0}`).join(", ");
-}
-
-function reportPath(
-  reportPaths: ScanOutcome["reportPaths"],
-  key: "html" | "json" | "markdown",
-): string | undefined {
-  return reportPaths[key] ?? (key === "markdown" ? reportPaths.md : undefined);
+  return `${cleaned} @ ${shortHash(commit)}`;
 }
 
 function shortHash(value: string): string {
@@ -270,11 +237,12 @@ function makePalette(color: boolean): Palette {
   const paint = (open: string, close: string): Paint =>
     color ? (text) => `${open}${text}${close}` : (text) => text;
   return {
-    bold: paint("\u001b[1m", "\u001b[22m"),
-    dim: paint("\u001b[2m", "\u001b[22m"),
-    green: paint("\u001b[32m", "\u001b[39m"),
-    red: paint("\u001b[31m", "\u001b[39m"),
-    yellow: paint("\u001b[33m", "\u001b[39m"),
-    cyan: paint("\u001b[36m", "\u001b[39m"),
+    bold: paint("[1m", "[22m"),
+    dim: paint("[2m", "[22m"),
+    green: paint("[32m", "[39m"),
+    red: paint("[31m", "[39m"),
+    yellow: paint("[33m", "[39m"),
+    cyan: paint("[36m", "[39m"),
+    magenta: paint("[35m", "[39m"),
   };
 }

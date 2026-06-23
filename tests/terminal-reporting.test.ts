@@ -4,34 +4,31 @@ import type { SecurityAssessment } from "../src/domain/security-assessment.js";
 import { renderScanOutcome, TerminalEventSink } from "../src/reporting/terminal.js";
 
 describe("terminal reporting", () => {
-  it("renders an owner-facing Fix Pack from the assessment contract", () => {
+  it("renders a concise owner-facing receipt from the assessment contract", () => {
     const text = renderScanOutcome(sampleOutcome({ fromCatalog: false }));
 
-    expect(text).toContain("VibeShield Quick Scan");
-    expect(text).toContain("Verdict: Critical fix needed");
-    expect(text).toContain(
-      "Fix Pack: 1 action (OpenRouter enhanced; deterministic verdict/actions; 1 critical)",
-    );
-    expect(text).toContain("Checks: checked 1, degraded 1, failed 1, skipped 1");
-    expect(text).toContain("Open the HTML report");
-    expect(text).toContain("Human report: /tmp/run/report.html");
-    expect(text).toContain("1. Remove the committed Stripe secret at src/config.ts:4");
-    expect(text).toContain("JSON: /tmp/run/report.json");
-    expect(text).not.toContain("Agent prompt:");
-    expect(text).not.toContain("Remove the committed Stripe key and use process.env");
-    expect(text).not.toContain("A live payment key is present in source code.");
+    expect(text).toContain("VibeShield");
+    expect(text).toContain("github.com/example/demo");
+    expect(text).toContain("Critical fix needed");
+    expect(text).toContain("1 fix to make before you ship");
+    expect(text).toContain("Full report");
+    expect(text).not.toContain("Fix these first");
+    expect(text).not.toContain("src/config.ts:4");
+    expect(text).not.toContain("Remove the committed Stripe secret");
+    expect(text).toContain("/tmp/run/report.html");
     expect(text).not.toContain("\u001b[");
   });
 
-  it("shows catalog fallback explicitly", () => {
+  it("keeps internal pipeline jargon out of the receipt", () => {
     const text = renderScanOutcome(sampleOutcome({ fromCatalog: true }));
 
-    expect(text).toContain(
-      "Fix Pack: 1 action (catalog fallback; deterministic verdict/actions; 1 critical)",
-    );
-    expect(text).toContain(
-      "Each fix has a clearly labeled prompt to paste into your coding agent.",
-    );
+    expect(text).not.toContain("OpenRouter");
+    expect(text).not.toContain("catalog");
+    expect(text).not.toContain("deterministic");
+    expect(text).not.toContain("Toolchain");
+    expect(text).not.toContain("checked 1");
+    expect(text).not.toContain("A live payment key is present in source code.");
+    expect(text).toContain("Markdown and JSON are in the same folder.");
   });
 
   it("prints owner-facing progress events without requiring a live scan", () => {
@@ -77,14 +74,14 @@ describe("terminal reporting", () => {
       timestamp: "2026-06-22T00:00:00.000Z",
     });
 
-    expect(output).toContain("[scan] Preparing the repository");
-    expect(output).toContain("[scan] Running security checks");
-    expect(output).toContain("[fail] sandbox unavailable");
+    expect(output).toContain("Preparing the repository");
+    expect(output).toContain("Running security checks");
+    expect(output).toContain("sandbox unavailable");
     expect(output).not.toContain("source.resolve");
     expect(output).not.toContain("scan.secrets.gitleaks");
     expect(output).not.toContain("scan.code.opengrep");
     expect(output.match(/Running security checks/g)).toHaveLength(1);
-    expect(output).not.toContain("[done] sandbox unavailable");
+    expect(output).not.toContain("Scan complete");
   });
 });
 

@@ -13,7 +13,13 @@ import { SqliteStateStore } from "./adapters/sqlite-state-store.js";
 import { ensureStateRoot, resolveStateRoot, stateDbPath } from "./adapters/state-root.js";
 import { runScan } from "./application/scan-service.js";
 import type { SourceInput } from "./domain/run.js";
-import { renderScanOutcome, supportsAnsiColor, TerminalEventSink } from "./reporting/terminal.js";
+import {
+  renderError,
+  renderHelp,
+  renderScanOutcome,
+  supportsAnsiColor,
+  TerminalEventSink,
+} from "./reporting/terminal.js";
 import { assertLocalGitWorktreeRoot } from "./stages/local-source-package.js";
 import { DEFAULT_TOOLCHAIN_IMAGE } from "./stages/paths.js";
 
@@ -24,21 +30,29 @@ try {
   if (command === "scan") {
     await scan(args.slice(1));
   } else if (command === "resume") {
-    throw new Error("resume is not implemented yet; run a fresh scan for now.");
+    throw new Error("Resume isn't available yet. Run a fresh scan for now.");
   } else {
-    printHelp();
-    process.exitCode = command === undefined || command === "--help" || command === "-h" ? 0 : 1;
+    const wantsHelp = command === undefined || command === "--help" || command === "-h";
+    if (!wantsHelp) {
+      process.stderr.write(
+        renderError(`Unknown command: ${command}`, { color: supportsAnsiColor(process.stderr) }),
+      );
+    }
+    process.stdout.write(renderHelp({ color: supportsAnsiColor(process.stdout) }));
+    process.exitCode = wantsHelp ? 0 : 1;
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`vibeshield: ${message}\n`);
+  process.stderr.write(renderError(message, { color: supportsAnsiColor(process.stderr) }));
   process.exitCode = 1;
 }
 
 async function scan(args: string[]): Promise<void> {
   const sourceArg = args[0];
   if (sourceArg === undefined) {
-    throw new Error("usage: vibeshield scan <github-url-or-local-git-root>");
+    throw new Error(
+      "Tell me what to scan. For example: vibeshield scan https://github.com/owner/repo",
+    );
   }
 
   const source = await parseSource(sourceArg);
@@ -83,7 +97,9 @@ async function parseSource(raw: string): Promise<SourceInput> {
   const localPath = path.resolve(raw);
   const st = await stat(localPath).catch(() => null);
   if (st === null || !st.isDirectory()) {
-    throw new Error(`source is neither a public GitHub URL nor a local directory: ${raw}`);
+    throw new Error(
+      `I can scan a public GitHub URL or a local Git project folder. I couldn't use: ${raw}`,
+    );
   }
   await assertLocalGitWorktreeRoot(localPath);
   return { kind: "local", path: localPath };
@@ -109,25 +125,4 @@ function parseGithubUrl(raw: string): string | null {
     return null;
   }
   return `https://github.com/${owner}/${repo.replace(/\.git$/, "")}.git`;
-}
-
-function printHelp(): void {
-  process.stdout.write(
-    [
-      "VibeShield",
-      "Quick Scan for AI-built and beginner-built web projects.",
-      "",
-      "Usage:",
-      "  vibeshield scan <github-url-or-local-git-root>",
-      "  vibeshield resume <run-directory>   (planned)",
-      "",
-      "Output:",
-      "  Short terminal receipt with report paths",
-      "  Full Fix Pack in report.html and report.md under the state root",
-      "",
-      "Environment:",
-      "  OPENROUTER_API_KEY   optional; enables model-polished Fix Pack wording",
-      "",
-    ].join("\n"),
-  );
 }
