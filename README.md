@@ -72,15 +72,23 @@ Quick Scan end to end.
 
 ```mermaid
 flowchart TD
-    A(["vibeshield scan <github-url-or-local-git-root>"]) --> S[Resolve source]
-    S --> M[Snapshot manifest]
-    M --> I[Inventory]
-    I --> C["Sandboxed checks<br/>gitleaks · opengrep · syft · trivy · actionlint · zizmor"]
-    C --> F[Normalize findings]
-    F --> R[Rank actions + compute verdict]
-    R --> P["Agent Fix Pack<br/>OpenRouter enhancement or catalog fallback"]
-    P --> O["Terminal · report.json · report.md · report.html"]
+    A(["vibeshield scan &lt;github-url-or-local-git-root&gt;"]) --> SBX
+
+    subgraph SBX["🔒 Ephemeral Microsandbox — created fresh, destroyed after the run"]
+        direction TB
+        S["Clone repo / upload local worktree"] --> M["Snapshot manifest"]
+        M --> C["Security checks<br/>gitleaks · opengrep · syft · trivy · actionlint · zizmor"]
+    end
+
+    SBX --> PULL[Pull only the expected artifacts back to the host]
+    PULL --> T["On the host: normalize findings · rank actions · compute verdict<br/>(deterministic, before any model call)"]
+    T --> P["Agent Fix Pack<br/>optional OpenRouter wording, or catalog fallback"]
+    P --> O["Terminal receipt · report.json · report.md · report.html"]
 ```
+
+The untrusted repository is only ever read and executed **inside** the ephemeral
+sandbox. The host operates on the extracted artifacts (manifest, scanner output),
+never on the raw code, and the sandbox is destroyed when the run ends.
 
 1. **Intake** — clone a public GitHub repo inside Microsandbox, or package a
    local Git worktree root with Git filtering and upload it into the sandbox.
@@ -125,23 +133,24 @@ image and loads it into Microsandbox.
 The terminal output is a short receipt, not the whole report:
 
 ```text
-VibeShield Quick Scan
-Verdict: Critical fix needed
-Fix Pack: 1 action (catalog fallback; deterministic verdict/actions; 1 critical)
-Checks: checked 2, degraded 0, failed 0, skipped 5
+  ◆ VibeShield  github.com/acme/widget-shop @ abc123def456
 
-What to do next
-  Open the HTML report and fix the top fix in order.
-  Each fix has a clearly labeled prompt to paste into your coding agent.
+  ✗ Critical fix needed
+    2 fixes to make before you ship. Start with the first one.
 
-Reports
-  Human report: ~/.vibeshield/runs/<run-id>/report.html
-  Markdown: ~/.vibeshield/runs/<run-id>/report.md
-  JSON: ~/.vibeshield/runs/<run-id>/report.json
+  Fix these first
+    1. Remove the committed Stripe secret key  .env:3
+    2. Update the vulnerable dependency  package-lock.json:1
+
+  Full report
+    ~/.vibeshield/runs/<run-id>/report.html ← open in a browser
+    Markdown and JSON are in the same folder.
+
+  This scan did not run your app; authorization logic and runtime behavior were not checked.
 ```
 
 The HTML report is the human-readable Fix Pack. Each fix has a clearly marked
-**Prompt For Your Coding Agent** block to copy and paste.
+**Prompt for your coding agent** block to copy and paste.
 
 The inspectable run artifacts live under `~/.vibeshield/runs/<run-id>/`:
 
