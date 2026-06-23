@@ -171,11 +171,12 @@ vs off; the AI only makes the explanations and prompts read better.
   (`VIBESHIELD_REMEDIATION_MODEL`, default `anthropic/claude-sonnet-4.6`);
   key from `OPENROUTER_API_KEY`; absent key → catalog fallback, not a crash.
   Out: a model client. Done: unit tests cover configured model, fenced JSON,
-  schema aliases, and missing-key fallback.
+  salvageable JSON repair, schema aliases, and missing-key fallback.
 - [x] **remediation.generate + fallback.** In: ≤10 candidates + findings +
   redacted snippets + catalog + inventory. Do: **one** Sonnet call producing
-  per-candidate explanation/steps/prompt/verify; validate ids/paths; invalid →
-  catalog (no repair). Out: enriched `RemediationAction`s. Done: live run
+  per-candidate explanation/steps/prompt/verify; repair salvageable malformed
+  JSON; validate ids/paths; invalid → catalog. Out: enriched
+  `RemediationAction`s. Done: live run
   `20260622140126-5af9d710` used the configured OpenRouter Sonnet model, kept
   the same verdict/finding ids/candidates as catalog fallback, and produced
   `fromCatalog: false` remediation copy for secret, dependency, and IaC actions.
@@ -333,9 +334,9 @@ Minimal on purpose — enough to keep stages coherent.
   - Rules: use only the given finding/evidence ids; never change priority,
     severity, or verdict; separate code changes from operational steps. Secret
     values are redacted out of the input.
-  - **Exactly one model call.** Its output is validated (schema + semantic
-    validators). Anything that fails validation falls back to the catalog for that
-    candidate — no repair step.
+  - **Exactly one model call.** Its output may be syntactically repaired if the
+    JSON is salvageable, then validated (schema + semantic validators). Anything
+    that still fails validation falls back to the catalog.
 - **Semantic validators** on stage outputs: referenced files exist in the
   snapshot, line ranges are in range, hashes match, ids resolve, paths stay
   inside the repo.

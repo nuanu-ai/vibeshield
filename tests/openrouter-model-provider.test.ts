@@ -89,6 +89,24 @@ describe("OpenRouterModelProvider", () => {
       { candidateId: "action-1", title: "T", fromCatalog: false },
     ]);
 
+    const repaired = new OpenRouterModelProvider({
+      apiKey: "test-key",
+      fetchFn: async () =>
+        jsonResponse({
+          choices: [
+            {
+              message: {
+                content:
+                  "{actions:[{candidateId:'action-1',title:'Repaired',risk:'R',whyFixNow:'W',fixSteps:['F'],operationalSteps:[],agentPrompt:'P',verifySteps:['V'],}],}",
+              },
+            },
+          ],
+        }),
+    });
+    await expect(repaired.enhance(modelInput())).resolves.toMatchObject([
+      { candidateId: "action-1", title: "Repaired", fromCatalog: false },
+    ]);
+
     const aliased = new OpenRouterModelProvider({
       apiKey: "test-key",
       fetchFn: async () =>

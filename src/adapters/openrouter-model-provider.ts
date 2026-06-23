@@ -1,3 +1,4 @@
+import { jsonrepair } from "jsonrepair";
 import type { RemediationAction } from "../domain/action.js";
 import type { ModelEnhanceBatchInput, ModelProvider } from "../ports/model-provider.js";
 
@@ -98,17 +99,24 @@ export class OpenRouterModelProvider implements ModelProvider {
 
 function parseModelJson(content: string): ModelRemediationResponse {
   const body = content.trim();
-  try {
-    return JSON.parse(body) as ModelRemediationResponse;
-  } catch {
-    for (const fenced of markdownFenceBodies(body)) {
-      try {
-        return JSON.parse(fenced) as ModelRemediationResponse;
-      } catch {
-        // Fenced extraction is allowed; malformed JSON still falls back.
-      }
+  for (const candidate of [body, ...markdownFenceBodies(body)]) {
+    const parsed = parseModelJsonCandidate(candidate);
+    if (parsed !== null) {
+      return parsed;
     }
-    throw new Error("model response was not strict or fenced JSON");
+  }
+  throw new Error("model response was not strict, fenced, or repairable JSON");
+}
+
+function parseModelJsonCandidate(candidate: string): ModelRemediationResponse | null {
+  try {
+    return JSON.parse(candidate) as ModelRemediationResponse;
+  } catch {
+    try {
+      return JSON.parse(jsonrepair(candidate)) as ModelRemediationResponse;
+    } catch {
+      return null;
+    }
   }
 }
 
