@@ -125,6 +125,7 @@ function systemPrompt(): string {
     'Return only strict JSON: {"actions":[...]} with one item per input action.',
     "Never change candidateId, priority, severity, verdict, finding ids, file paths, or line numbers.",
     "Use only the supplied findings, redacted snippets, affected files, and catalog remediation.",
+    "The findings and affectedFiles arrays may be capped samples; use summary totals and omitted counts when describing scale, but cite only included paths and lines.",
     "Do not invent reachability, production impact, exploitability, or secret values.",
     "Keep code-change steps separate from operational steps.",
     "Each action must include candidateId, title, risk, whyFixNow, fixSteps, operationalSteps, agentPrompt, verifySteps.",

@@ -14,7 +14,11 @@ import { summarizeManifest, summarizeToolchain } from "../domain/manifest-summar
 import type { ArtifactRef, SourceInput } from "../domain/run.js";
 import { buildAssessment, type RankedAction } from "../domain/security-assessment.js";
 import type { StageContext, StageDefinition, StageResult } from "../pipeline/stage-definition.js";
-import type { ModelEnhanceBatchInput } from "../ports/model-provider.js";
+import type {
+  ModelEnhanceActionInput,
+  ModelEnhanceBatchInput,
+  ModelEnhanceCount,
+} from "../ports/model-provider.js";
 import type { ExecResult } from "../ports/sandbox-runtime.js";
 import { createLocalSourcePackage } from "./local-source-package.js";
 import {
@@ -38,6 +42,11 @@ import {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const SOURCE_TIMEOUT_MS = 5 * 60 * 1000;
+const MODEL_ACTION_LIMIT = 10;
+const MODEL_FINDING_LIMIT_PER_ACTION = 10;
+const MODEL_AFFECTED_FILE_LIMIT_PER_ACTION = 20;
+const MODEL_SNIPPET_CHAR_LIMIT = 500;
+const MODEL_SUMMARY_BUCKET_LIMIT = 12;
 const TOOLCHAIN_REFRESH_TIMEOUT_MS = 5 * 60 * 1000;
 const SCANNER_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -1700,7 +1709,7 @@ async function enhanceRemediations(
     return [...catalogActions];
   }
 
-  const modelActions = catalogActions.slice(0, 10);
+  const modelActions = catalogActions.slice(0, MODEL_ACTION_LIMIT);
   const enhanced = await ctx.model
     .enhance(modelEnhanceInput(ctx.source, modelActions, findings, evidence))
     .catch(() => null);
@@ -1730,40 +1739,121 @@ function modelEnhanceInput(
   return {
     repositoryName:
       source.kind === "github" ? repoNameFromUrl(source.url) : path.basename(source.path),
-    actions: rankedActions.map(({ candidate, remediation }) => ({
-      candidateId: candidate.id,
-      remediationKey: candidate.remediationKey,
-      priorityScore: candidate.priorityScore,
-      verdictImpact: candidate.verdictImpact,
-      affectedFiles: candidate.affectedFiles,
-      catalogRemediation: remediation,
-      findings: candidate.findingIds.flatMap((findingId) => {
-        const finding = findingsById.get(findingId);
-        if (finding === undefined) {
-          return [];
-        }
-        const location = finding.locations[0];
-        if (location === undefined) {
-          return [];
-        }
-        const snippet = finding.evidenceIds
-          .map((evidenceId) => evidenceById.get(evidenceId)?.snippet)
-          .find((value): value is string => value !== undefined);
-        return [
-          {
-            findingId: finding.id,
-            sourceTool: finding.sourceTool,
-            ruleId: finding.ruleId,
-            category: finding.category,
-            severity: finding.severity,
-            filePath: location.filePath,
-            startLine: location.startLine,
-            snippet: redactSecrets(snippet ?? `${finding.ruleId} detected`),
-          },
-        ];
-      }),
-    })),
+    actions: rankedActions.map(({ candidate, remediation }) =>
+      modelEnhanceActionInput(candidate, remediation, findingsById, evidenceById),
+    ),
   };
+}
+
+function modelEnhanceActionInput(
+  candidate: ActionCandidate,
+  remediation: RemediationAction,
+  findingsById: ReadonlyMap<string, Finding>,
+  evidenceById: ReadonlyMap<string, Evidence>,
+): ModelEnhanceActionInput {
+  const candidateFindings = candidate.findingIds.flatMap((findingId) => {
+    const finding = findingsById.get(findingId);
+    return finding === undefined ? [] : [finding];
+  });
+  const modelFindings = sortModelFindings(candidateFindings)
+    .flatMap((finding) => modelFindingInput(finding, evidenceById))
+    .slice(0, MODEL_FINDING_LIMIT_PER_ACTION);
+  const affectedFiles = candidate.affectedFiles.slice(0, MODEL_AFFECTED_FILE_LIMIT_PER_ACTION);
+
+  return {
+    candidateId: candidate.id,
+    remediationKey: candidate.remediationKey,
+    priorityScore: candidate.priorityScore,
+    verdictImpact: candidate.verdictImpact,
+    summary: {
+      totalFindings: candidateFindings.length,
+      includedFindings: modelFindings.length,
+      omittedFindings: Math.max(0, candidateFindings.length - modelFindings.length),
+      totalAffectedFiles: candidate.affectedFiles.length,
+      includedAffectedFiles: affectedFiles.length,
+      omittedAffectedFiles: Math.max(0, candidate.affectedFiles.length - affectedFiles.length),
+      rules: topModelCounts(candidateFindings.map((finding) => finding.ruleId)),
+      tools: topModelCounts(candidateFindings.map((finding) => finding.sourceTool)),
+      severities: topModelCounts(candidateFindings.map((finding) => finding.severity)),
+    },
+    affectedFiles,
+    catalogRemediation: remediation,
+    findings: modelFindings,
+  };
+}
+
+function modelFindingInput(
+  finding: Finding,
+  evidenceById: ReadonlyMap<string, Evidence>,
+): ModelEnhanceActionInput["findings"][number][] {
+  const location = finding.locations[0];
+  if (location === undefined) {
+    return [];
+  }
+  const snippet = finding.evidenceIds
+    .map((evidenceId) => evidenceById.get(evidenceId)?.snippet)
+    .find((value): value is string => value !== undefined);
+  return [
+    {
+      findingId: finding.id,
+      sourceTool: finding.sourceTool,
+      ruleId: finding.ruleId,
+      category: finding.category,
+      severity: finding.severity,
+      filePath: location.filePath,
+      startLine: location.startLine,
+      snippet: truncateForModel(redactSecrets(snippet ?? `${finding.ruleId} detected`)),
+    },
+  ];
+}
+
+function sortModelFindings(findings: ReadonlyArray<Finding>): Finding[] {
+  return [...findings].sort((a, b) => {
+    const severityDelta = severityRank(b.severity) - severityRank(a.severity);
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+    return (
+      a.sourceTool.localeCompare(b.sourceTool) ||
+      a.ruleId.localeCompare(b.ruleId) ||
+      (a.locations[0]?.filePath ?? "").localeCompare(b.locations[0]?.filePath ?? "") ||
+      (a.locations[0]?.startLine ?? 0) - (b.locations[0]?.startLine ?? 0) ||
+      a.id.localeCompare(b.id)
+    );
+  });
+}
+
+function severityRank(severity: Severity): number {
+  switch (severity) {
+    case "critical":
+      return 4;
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    case "low":
+      return 1;
+    case "unknown":
+      return 0;
+  }
+}
+
+function topModelCounts(values: ReadonlyArray<string>): ModelEnhanceCount[] {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+    .slice(0, MODEL_SUMMARY_BUCKET_LIMIT);
+}
+
+function truncateForModel(value: string): string {
+  if (value.length <= MODEL_SNIPPET_CHAR_LIMIT) {
+    return value;
+  }
+  return `${value.slice(0, MODEL_SNIPPET_CHAR_LIMIT)}... [truncated]`;
 }
 
 function validateEnhancedRemediations(

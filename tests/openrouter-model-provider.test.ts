@@ -152,6 +152,17 @@ function modelInput(): ModelEnhanceBatchInput {
         remediationKey: "live-secret-in-source",
         priorityScore: 100,
         verdictImpact: "blocks-deploy",
+        summary: {
+          totalFindings: 1,
+          includedFindings: 1,
+          omittedFindings: 0,
+          totalAffectedFiles: 1,
+          includedAffectedFiles: 1,
+          omittedAffectedFiles: 0,
+          rules: [{ value: "stripe-access-token", count: 1 }],
+          tools: [{ value: "gitleaks", count: 1 }],
+          severities: [{ value: "critical", count: 1 }],
+        },
         affectedFiles: ["src/config.ts"],
         catalogRemediation: {
           candidateId: "action-1",

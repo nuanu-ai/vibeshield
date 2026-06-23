@@ -19,9 +19,27 @@ export interface ModelEnhanceActionInput {
   readonly remediationKey: string;
   readonly priorityScore: number;
   readonly verdictImpact: VerdictImpact;
+  readonly summary: ModelEnhanceActionSummary;
   readonly affectedFiles: ReadonlyArray<string>;
   readonly catalogRemediation: RemediationAction;
   readonly findings: ReadonlyArray<ModelEnhanceFindingInput>;
+}
+
+export interface ModelEnhanceActionSummary {
+  readonly totalFindings: number;
+  readonly includedFindings: number;
+  readonly omittedFindings: number;
+  readonly totalAffectedFiles: number;
+  readonly includedAffectedFiles: number;
+  readonly omittedAffectedFiles: number;
+  readonly rules: ReadonlyArray<ModelEnhanceCount>;
+  readonly tools: ReadonlyArray<ModelEnhanceCount>;
+  readonly severities: ReadonlyArray<ModelEnhanceCount>;
+}
+
+export interface ModelEnhanceCount {
+  readonly value: string;
+  readonly count: number;
 }
 
 export interface ModelEnhanceFindingInput {

@@ -658,6 +658,49 @@ describe("runScan quick scan vertical slice", () => {
     expect(enhanced.assessment.rankedActions[0]?.remediation.title).toMatch(/^AI:/);
   });
 
+  it("caps model remediation input while preserving deterministic findings", async () => {
+    const source = await writeLocalFixture(dir);
+    const files = Array.from({ length: 35 }, (_, index) => ({
+      path: `src/secret-${String(index).padStart(2, "0")}.ts`,
+      size: 100,
+      sha256: `secret-${index}-sha`,
+    }));
+    const model = new FakeModelProvider(() => null);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(manifestFor(source.path, files), manySecretRecords(35)),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir), model), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const action = model.inputs[0]?.actions[0];
+    expect(action).toBeDefined();
+    expect(model.inputs[0]?.actions).toHaveLength(1);
+    expect(action?.findings).toHaveLength(10);
+    expect(action?.affectedFiles).toHaveLength(20);
+    expect(action?.summary).toMatchObject({
+      totalFindings: 35,
+      includedFindings: 10,
+      omittedFindings: 25,
+      totalAffectedFiles: 35,
+      includedAffectedFiles: 20,
+      omittedAffectedFiles: 15,
+      rules: [{ value: "stripe-access-token", count: 35 }],
+      tools: [{ value: "gitleaks", count: 35 }],
+      severities: [{ value: "critical", count: 35 }],
+    });
+    expect(action?.findings[0]?.filePath).toBe("src/secret-00.ts");
+    expect(action?.findings.some((finding) => finding.filePath === "src/secret-34.ts")).toBe(false);
+    expect(action?.affectedFiles).not.toContain("src/secret-34.ts");
+    expect(action?.findings[0]?.snippet).toContain("[truncated]");
+    expect(action?.findings[0]?.snippet.length ?? 0).toBeLessThanOrEqual(520);
+    expect(outcome.assessment.findings).toHaveLength(35);
+    expect(outcome.assessment.rankedActions[0]?.candidate.findingIds).toHaveLength(35);
+  });
+
   it("falls back to catalog remediation when the model returns invalid ids or paths", async () => {
     const source = await writeLocalFixture(dir);
     const badModel = new FakeModelProvider((input) =>
@@ -819,6 +862,21 @@ function fakeQuickScanExec(
     }
     return { exitCode: 0, stdout: "", stderr: "" };
   };
+}
+
+function manySecretRecords(count: number): unknown[] {
+  return Array.from({ length: count }, (_, index) => {
+    const file = `src/secret-${String(index).padStart(2, "0")}.ts`;
+    return {
+      RuleID: "stripe-access-token",
+      File: file,
+      StartLine: index + 1,
+      EndLine: index + 1,
+      Secret: PLANTED_SECRET,
+      Match: `stripeSecret: "${PLANTED_SECRET}" ${"x".repeat(800)}`,
+      Fingerprint: `${file}:stripe-access-token:${index + 1}`,
+    };
+  });
 }
 
 function manifestWithToolchainArgs(
