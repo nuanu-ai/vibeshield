@@ -128,6 +128,8 @@ function systemPrompt(): string {
     "The findings and affectedFiles arrays may be capped samples; use summary totals and omitted counts when describing scale, but cite only included paths and lines.",
     "Do not invent reachability, production impact, exploitability, or secret values.",
     "Keep code-change steps separate from operational steps.",
+    "risk and whyFixNow are for the owner: plain language, no scanner jargon.",
+    "agentPrompt is for the owner's coding agent: a self-contained instruction stating the problem, the exact file and line, and what to change, with concrete context (paths, rule or CVE ids). Do not mention VibeShield, scanners, or that this is a finding, and never include secret values.",
     "Each action must include candidateId, title, risk, whyFixNow, fixSteps, operationalSteps, agentPrompt, verifySteps.",
   ].join("\n");
 }

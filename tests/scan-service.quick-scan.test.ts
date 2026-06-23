@@ -112,17 +112,18 @@ describe("runScan quick scan vertical slice", () => {
     });
 
     const html = await readFile(outcome.reportPaths.html ?? "", "utf8");
-    expect(html).toContain("Prompt For Your Coding Agent");
+    expect(html).toContain("Prompt for your coding agent");
     expect(html).toContain("Copy this whole block into your coding agent");
-    expect(html).toContain("What This Means");
-    expect(html).toContain("Where we saw it:");
+    expect(html).toContain("Why now:");
+    expect(html).toContain("<dt>Where</dt>");
     expect(html).toContain("src/config.ts:3");
-    expect(html).toContain("Fix this VibeShield finding");
+    expect(html).toContain("environment-based configuration");
+    expect(html).not.toContain("VibeShield finding");
 
     const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
-    expect(markdown).toContain("### Prompt For Your Coding Agent");
+    expect(markdown).toContain("**Prompt for your coding agent**");
     expect(markdown).toContain("Copy this whole block into your coding agent");
-    expect(markdown).toContain("### What This Means");
+    expect(markdown).toContain("**Why now:**");
     expect(markdown).toContain("**Where:** src/config.ts:3");
 
     expect(sandbox.invocations.map((i) => i.command)).toContainEqual([
