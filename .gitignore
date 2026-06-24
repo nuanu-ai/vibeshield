@@ -33,3 +33,5 @@ docs/ongoing-work/
 .DS_Store
 .idea/
 .vscode/
+.project/
+.worktrees/
