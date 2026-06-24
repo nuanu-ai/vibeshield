@@ -25,7 +25,14 @@ import {
   renderDeepMarkdownReport,
   renderDeepReportJson,
 } from "../reporting/deep-report.js";
-import { DEEP_STATIC_STAGE_ID, type DeepStaticData, deepStaticStage } from "./deep-static.js";
+import {
+  DEEP_STATIC_STAGE_ID,
+  type DeepStaticData,
+  deepStaticStage,
+  HYPOTHESIS_ENRICH_STAGE_ID,
+  type HypothesisEnrichData,
+  hypothesisEnrichStage,
+} from "./deep-static.js";
 import { createLocalSourcePackage } from "./local-source-package.js";
 import {
   GITLEAKS_REPORT_PATH,
@@ -89,8 +96,12 @@ export function quickScanStages(options: QuickScanStagesOptions = {}): StageDefi
     normalizeStage(),
     correlateStage(),
     actionsStage(),
-    remediationStage(),
+    // Deterministic deep analysis runs with the other scans; the LLM steps
+    // (remediation copy, hypothesis enrichment) run last so the report is the
+    // final thing assembled once every scan has completed.
     ...(deep ? [deepStaticStage()] : []),
+    remediationStage(),
+    ...(deep ? [hypothesisEnrichStage()] : []),
     reportStage({ deep }),
   ];
 }
@@ -813,7 +824,7 @@ function reportStage(options: ReportStageOptions): StageDefinition {
       "findings.correlate",
       "actions.rank",
       "remediation.generate",
-      ...(options.deep ? [DEEP_STATIC_STAGE_ID] : []),
+      ...(options.deep ? [DEEP_STATIC_STAGE_ID, HYPOTHESIS_ENRICH_STAGE_ID] : []),
     ],
     inputs: [],
     outputs: ["report.json", "report.md", "report.html"],
@@ -833,6 +844,9 @@ function reportStage(options: ReportStageOptions): StageDefinition {
       const deepData = options.deep
         ? readInput<DeepStaticData>(ctx, DEEP_STATIC_STAGE_ID)
         : undefined;
+      const enrichData = options.deep
+        ? readInput<HypothesisEnrichData>(ctx, HYPOTHESIS_ENRICH_STAGE_ID)
+        : undefined;
       const assessment = buildAssessment({
         repository: repositorySummary(ctx.source, manifest),
         manifest: summarizeManifest(manifest),
@@ -851,7 +865,7 @@ function reportStage(options: ReportStageOptions): StageDefinition {
               findingContextAssessments: deepData.findingContextAssessments,
               staticHypotheses: deepData.staticHypotheses,
               validationRecipes: deepData.validationRecipes,
-              hypothesisEnrichments: deepData.hypothesisEnrichments,
+              hypothesisEnrichments: enrichData?.hypothesisEnrichments ?? [],
               deepActionGroups: deepData.deepActionGroups,
               repositoryMapArtifactRef: deepData.repositoryMapArtifactRef,
               limitations: deepData.limitations,

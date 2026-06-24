@@ -45,7 +45,6 @@ export interface DeepStaticData {
   readonly hypothesisCandidates: ReadonlyArray<HypothesisCandidate>;
   readonly staticHypotheses: ReadonlyArray<StaticHypothesis>;
   readonly validationRecipes: ReadonlyArray<ValidationRecipe>;
-  readonly hypothesisEnrichments: ReadonlyArray<HypothesisEnrichment>;
   readonly deepActionGroups: ReadonlyArray<DeepActionGroup>;
   readonly repositoryMap: RepositoryMap;
   readonly repositoryMapArtifactRef: ArtifactRef;
@@ -114,6 +113,73 @@ export function deepStaticStage(): StageDefinition {
       ]);
     },
   };
+}
+
+export const HYPOTHESIS_ENRICH_STAGE_ID = "hypotheses.enrich";
+
+export interface HypothesisEnrichData {
+  readonly hypothesisEnrichments: ReadonlyArray<HypothesisEnrichment>;
+}
+
+/**
+ * LLM enrichment of the deterministic Deep Static hypotheses. Runs after every
+ * scan and the deterministic graph build so the report-copy step is the last
+ * thing in the pipeline. Degrades to no enrichment rather than failing the run.
+ */
+export function hypothesisEnrichStage(): StageDefinition {
+  return {
+    id: HYPOTHESIS_ENRICH_STAGE_ID,
+    version: "1",
+    dependencies: ["snapshot.manifest", "findings.normalize", DEEP_STATIC_STAGE_ID],
+    inputs: [],
+    outputs: [],
+    required: true,
+    run: async (ctx) => {
+      const { manifest } = readInput<ManifestData>(ctx, "snapshot.manifest");
+      const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
+      const deep = readInput<DeepStaticData>(ctx, DEEP_STATIC_STAGE_ID);
+      const hypothesisEnrichments = await enrichHypothesesOrDegrade({
+        ctx,
+        manifest,
+        evidence,
+        findings,
+        graph: deep.securityGraph,
+        candidates: deep.hypothesisCandidates,
+        staticHypotheses: deep.staticHypotheses,
+        validationRecipes: deep.validationRecipes,
+      });
+      return success({ hypothesisEnrichments } satisfies HypothesisEnrichData);
+    },
+  };
+}
+
+async function enrichHypothesesOrDegrade(input: {
+  readonly ctx: StageContext;
+  readonly manifest: Manifest;
+  readonly evidence: ReadonlyArray<FindingEvidence>;
+  readonly findings: ReadonlyArray<Finding>;
+  readonly graph: SecurityGraph;
+  readonly candidates: ReadonlyArray<HypothesisCandidate>;
+  readonly staticHypotheses: ReadonlyArray<StaticHypothesis>;
+  readonly validationRecipes: ReadonlyArray<ValidationRecipe>;
+}): Promise<HypothesisEnrichment[]> {
+  if (input.staticHypotheses.length === 0) {
+    return [];
+  }
+  try {
+    return await enrichStaticHypotheses({
+      repositoryName: repositoryName(input.manifest),
+      model: input.ctx.model,
+      staticHypotheses: input.staticHypotheses,
+      candidates: input.candidates,
+      graph: input.graph,
+      validationRecipes: input.validationRecipes,
+      findings: input.findings,
+      evidence: input.evidence,
+    });
+  } catch {
+    return [];
+  }
 }
 
 async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData> {
@@ -214,7 +280,6 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     hypothesisCandidates: correlated.hypothesisCandidates,
     staticHypotheses: correlated.staticHypotheses,
     validationRecipes: correlated.validationRecipes,
-    hypothesisEnrichments: correlated.hypothesisEnrichments,
     deepActionGroups: correlated.deepActionGroups,
     repositoryMap,
     repositoryMapArtifactRef,
@@ -349,18 +414,19 @@ async function correlateOrDegrade(input: {
       staticHypotheses,
       candidates: hypothesisCandidates,
     });
-    return enrichAndGroup({
-      ctx: input.ctx,
-      manifest: input.manifest,
-      evidence: input.evidence,
-      findings: input.findings,
-      graph: input.graph,
+    const deepActionGroups = groupDeepActions({
       directActions: input.directActions,
+      staticHypotheses,
+      candidates: hypothesisCandidates,
+      findingContexts: findingContextAssessments,
+    });
+    return {
       findingContextAssessments,
       hypothesisCandidates,
       staticHypotheses,
       validationRecipes,
-    });
+      deepActionGroups,
+    };
   } catch (error) {
     input.failures.push({
       area: "model",
@@ -371,7 +437,6 @@ async function correlateOrDegrade(input: {
       hypothesisCandidates: [],
       staticHypotheses: [],
       validationRecipes: [],
-      hypothesisEnrichments: [],
       deepActionGroups: groupDeepActions({
         directActions: input.directActions,
         staticHypotheses: [],
@@ -380,54 +445,6 @@ async function correlateOrDegrade(input: {
       }),
     };
   }
-}
-
-async function enrichAndGroup(input: {
-  readonly ctx: StageContext;
-  readonly manifest: Manifest;
-  readonly evidence: ReadonlyArray<FindingEvidence>;
-  readonly findings: ReadonlyArray<Finding>;
-  readonly graph: SecurityGraph;
-  readonly directActions: ActionsData["candidates"];
-  readonly findingContextAssessments: ReadonlyArray<FindingContextAssessment>;
-  readonly hypothesisCandidates: ReadonlyArray<HypothesisCandidate>;
-  readonly staticHypotheses: ReadonlyArray<StaticHypothesis>;
-  readonly validationRecipes: ReadonlyArray<ValidationRecipe>;
-}): Promise<
-  Omit<
-    DeepStaticData,
-    | "securityGraph"
-    | "deepCoverage"
-    | "repositoryMap"
-    | "repositoryMapArtifactRef"
-    | "repositoryMapPath"
-    | "limitations"
-  >
-> {
-  const hypothesisEnrichments = await enrichStaticHypotheses({
-    repositoryName: repositoryName(input.manifest),
-    model: input.ctx.model,
-    staticHypotheses: input.staticHypotheses,
-    candidates: input.hypothesisCandidates,
-    graph: input.graph,
-    validationRecipes: input.validationRecipes,
-    findings: input.findings,
-    evidence: input.evidence,
-  });
-  const deepActionGroups = groupDeepActions({
-    directActions: input.directActions,
-    staticHypotheses: input.staticHypotheses,
-    candidates: input.hypothesisCandidates,
-    findingContexts: input.findingContextAssessments,
-  });
-  return {
-    findingContextAssessments: input.findingContextAssessments,
-    hypothesisCandidates: input.hypothesisCandidates,
-    staticHypotheses: input.staticHypotheses,
-    validationRecipes: input.validationRecipes,
-    hypothesisEnrichments,
-    deepActionGroups,
-  };
 }
 
 function findingContextOrStandalone(
