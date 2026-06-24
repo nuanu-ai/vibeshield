@@ -64,7 +64,12 @@ describe("enrichStaticHypotheses fallback", () => {
         validationRecipeText: expect.stringContaining("Required fixtures:"),
       }),
     ]);
-    expect(first[0]?.attackDescription).toContain(fixture.hypothesis.pathSummary);
+    expect(first[0]?.attackDescription).toContain(
+      "Untrusted input can reach a sensitive operation",
+    );
+    expect(first[0]?.attackDescription).not.toContain("graph edges");
+    expect(first[0]?.agentPrompt).toContain("src/proxy.ts");
+    expect(first[0]?.agentPrompt).not.toContain(fixture.hypothesis.id);
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
   });
 

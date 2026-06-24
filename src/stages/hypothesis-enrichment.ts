@@ -106,9 +106,11 @@ export async function enrichStaticHypotheses(
   const recipesByHypothesisId = new Map(
     validationRecipes.map((recipe) => [recipe.hypothesisId, recipe]),
   );
+  const nodesById = new Map(input.graph.nodes.map((node) => [node.id, node]));
+  const evidenceById = new Map((input.evidence ?? []).map((evidence) => [evidence.id, evidence]));
   const fallback = validateHypothesisEnrichments(
     staticHypotheses.map((hypothesis) =>
-      fallbackEnrichment(hypothesis, candidateById, recipesByHypothesisId),
+      fallbackEnrichment(hypothesis, candidateById, recipesByHypothesisId, nodesById, evidenceById),
     ),
     { hypothesisIds: staticHypotheses.map((hypothesis) => hypothesis.id) },
   );
@@ -235,28 +237,23 @@ function fallbackEnrichment(
   hypothesis: StaticHypothesis,
   candidateById: ReadonlyMap<string, HypothesisCandidate>,
   recipesByHypothesisId: ReadonlyMap<string, ValidationRecipe>,
+  nodesById: ReadonlyMap<string, SecurityGraphNode>,
+  evidenceById: ReadonlyMap<string, Evidence>,
 ): HypothesisEnrichment {
   const candidate = requiredCandidate(hypothesis, candidateById);
   const recipe = recipesByHypothesisId.get(hypothesis.id);
+  const location = locateHypothesis(hypothesis, candidate, nodesById, evidenceById);
 
   return {
     id: hypothesisEnrichmentId(hypothesis.id),
     hypothesisId: hypothesis.id,
     source: "catalog",
-    attackDescription: `${statusLabel(hypothesis)}: ${hypothesis.pathSummary}`,
-    assumptions: [
-      `Static status is ${hypothesis.status} with confidence ${Math.round(
-        hypothesis.staticConfidence * 100,
-      )}%.`,
-      `Rule family ${candidate.family} produced candidate ${candidate.id}.`,
-      ...(candidate.findingIds.length === 0
-        ? ["No Quick Scan finding ids are linked to this hypothesis."]
-        : [`Linked finding ids: ${uniqueSorted(candidate.findingIds).join(", ")}.`]),
-    ],
+    attackDescription: `${familyCopy(candidate).concern}${locationSentence(location)}`,
+    assumptions: assumptionsText(hypothesis, candidate),
     impact: impactText(candidate.family, hypothesis),
-    remediation: remediationText(candidate, hypothesis),
-    agentPrompt: agentPrompt(candidate, hypothesis),
-    acceptanceCriteria: acceptanceCriteria(candidate, hypothesis, recipe),
+    remediation: remediationText(candidate, location),
+    agentPrompt: agentPrompt(candidate, location),
+    acceptanceCriteria: acceptanceCriteria(recipe),
     validationRecipeText: validationRecipeText(recipe),
   };
 }
@@ -490,19 +487,6 @@ function toModelEnrichment(record: HypothesisEnrichment): ModelHypothesisEnrichm
   };
 }
 
-function statusLabel(hypothesis: StaticHypothesis): string {
-  switch (hypothesis.status) {
-    case "statically_supported":
-      return "Likely attack path";
-    case "candidate":
-      return "Candidate attack path";
-    case "inconclusive":
-      return "Inconclusive attack path";
-    case "statically_contradicted":
-      return "Contradicted attack path";
-  }
-}
-
 function impactText(family: string, hypothesis: StaticHypothesis): string {
   switch (family) {
     case "external_input_to_dangerous_operation":
@@ -520,26 +504,145 @@ function impactText(family: string, hypothesis: StaticHypothesis): string {
   }
 }
 
-function remediationText(candidate: HypothesisCandidate, hypothesis: StaticHypothesis): string {
-  return `Review the graph refs for ${hypothesis.id}, add or verify the missing control for "${candidate.title}", and keep direct findings separate unless the later action grouping stage links them.`;
+interface HypothesisLocation {
+  readonly source?: string | undefined;
+  readonly sink?: string | undefined;
+  readonly spots: ReadonlyArray<string>;
 }
 
-function agentPrompt(candidate: HypothesisCandidate, hypothesis: StaticHypothesis): string {
-  return `Investigate hypothesis ${hypothesis.id} (${candidate.family}). Use only the referenced graph evidence to address this path: ${hypothesis.pathSummary} Do not change deterministic ids, static status, priority, or verdict.`;
+interface FamilyCopy {
+  readonly concern: string;
+  readonly fix: string;
 }
 
-function acceptanceCriteria(
-  candidate: HypothesisCandidate,
-  hypothesis: StaticHypothesis,
-  recipe: ValidationRecipe | undefined,
-): string[] {
+const FAMILY_COPY: Readonly<Record<string, FamilyCopy>> = {
+  external_input_to_dangerous_operation: {
+    concern:
+      "Untrusted input can reach a sensitive operation in this project without a validated check in between.",
+    fix: "Validate, escape, or allowlist the untrusted value before it reaches that operation — or confirm an existing check already covers this case.",
+  },
+  sast_reachable_path: {
+    concern: "A scanner flagged code that looks reachable from how this app is entered.",
+    fix: "Fix the flagged code and make sure nothing else reachable still hits the same unsafe pattern.",
+  },
+  dependency_usage_path: {
+    concern:
+      "A vulnerable dependency is actually used by this code, not just listed in the manifest.",
+    fix: "Upgrade or replace the affected dependency, or stop calling the vulnerable API at these call sites.",
+  },
+  ci_supply_chain_path: {
+    concern: "A build or CI step can reach privileged or mutable resources.",
+    fix: "Pin the step and cut its privileges so it cannot reach resources it should not touch during a release.",
+  },
+  secret_impact_chain: {
+    concern: "A secret is connected to a privileged integration or an exposed resource.",
+    fix: "Scope the secret down and make sure it cannot reach the exposed resource without a control in front of it.",
+  },
+};
+
+function familyCopy(candidate: HypothesisCandidate): FamilyCopy {
+  return (
+    FAMILY_COPY[candidate.family] ?? {
+      concern: candidate.title,
+      fix: "Add or verify a control that breaks this path.",
+    }
+  );
+}
+
+function assumptionsText(hypothesis: StaticHypothesis, candidate: HypothesisCandidate): string[] {
   return [
-    `The change addresses candidate ${candidate.id} without changing hypothesis ${hypothesis.id} or status ${hypothesis.status}.`,
-    "Any report wording still says runtime validation is required unless a later runtime stage proves otherwise.",
-    recipe === undefined
-      ? "No runtime recipe is available yet, so manual validation remains out of scope for this stage."
-      : `Future runtime validation can use fixtures: ${recipe.requiredFixtures.join(", ")}.`,
+    `Static analysis supports this path with about ${Math.round(
+      hypothesis.staticConfidence * 100,
+    )}% confidence; it has not been confirmed by running the app.`,
+    candidate.findingIds.length === 0
+      ? "No Quick Scan finding is directly linked to this path."
+      : "A Quick Scan finding is linked to this path.",
   ];
+}
+
+function remediationText(candidate: HypothesisCandidate, location: HypothesisLocation): string {
+  const { fix } = familyCopy(candidate);
+  const where =
+    location.spots.length === 0 ? "" : ` Focus on ${location.spots.slice(0, 4).join(", ")}.`;
+  return `${fix}${where}`;
+}
+
+function agentPrompt(candidate: HypothesisCandidate, location: HypothesisLocation): string {
+  const { concern, fix } = familyCopy(candidate);
+  return [
+    `${concern}${locationSentence(location)}`,
+    fix,
+    "This was found by static analysis, which did not run your app — confirm the path is real, make the change, then re-check that it closes the path.",
+  ].join(" ");
+}
+
+function acceptanceCriteria(recipe: ValidationRecipe | undefined): string[] {
+  return [
+    "The untrusted path is blocked by a validated control, or shown not to be reachable.",
+    "The change is checked against the real code, not just this report.",
+    recipe === undefined
+      ? "Runtime confirmation is still open — treat this path as unproven until the running app is exercised."
+      : `Runtime confirmation can later use these fixtures: ${recipe.requiredFixtures.join(", ")}.`,
+  ];
+}
+
+function locateHypothesis(
+  hypothesis: StaticHypothesis,
+  candidate: HypothesisCandidate,
+  nodesById: ReadonlyMap<string, SecurityGraphNode>,
+  evidenceById: ReadonlyMap<string, Evidence>,
+): HypothesisLocation {
+  const nodes = candidate.supportingNodeIds.flatMap((id) => {
+    const node = nodesById.get(id);
+    return node === undefined ? [] : [node];
+  });
+  const source = nodeLocation(
+    nodes.find((node) => node.kind === "Source" || node.kind === "Boundary"),
+  );
+  const sink = nodeLocation(nodes.find((node) => node.kind === "Sink"));
+  const spots = uniqueStable([
+    ...nodes.flatMap((node) => {
+      const value = nodeLocation(node);
+      return value === undefined ? [] : [value];
+    }),
+    ...hypothesis.supportingEvidenceIds.flatMap((id) => {
+      const evidence = evidenceById.get(id);
+      return evidence === undefined ? [] : [`${evidence.filePath}:${evidence.startLine}`];
+    }),
+  ]);
+  return { source, sink, spots };
+}
+
+function nodeLocation(node: SecurityGraphNode | undefined): string | undefined {
+  if (node === undefined || node.repoPath === undefined) {
+    return undefined;
+  }
+  if (node.lineRange === undefined) {
+    return node.repoPath;
+  }
+  const { startLine, endLine } = node.lineRange;
+  const lines = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+  return `${node.repoPath}:${lines}`;
+}
+
+function locationSentence(location: HypothesisLocation): string {
+  if (
+    location.source !== undefined &&
+    location.sink !== undefined &&
+    location.source !== location.sink
+  ) {
+    return ` It starts at ${location.source} and reaches ${location.sink}.`;
+  }
+  if (location.sink !== undefined) {
+    return ` The operation is at ${location.sink}.`;
+  }
+  if (location.source !== undefined) {
+    return ` It starts at ${location.source}.`;
+  }
+  if (location.spots.length > 0) {
+    return ` Relevant code: ${location.spots.slice(0, 4).join(", ")}.`;
+  }
+  return "";
 }
 
 function requiredCandidate(

@@ -243,7 +243,8 @@ function hypothesisSystemPrompt(): string {
     "Use only supplied graph refs, redacted evidence snippets, coverage gaps, validation recipe context, and catalogEnrichment.",
     "Do not invent reachability, production impact, exploitability, missing controls, confirmed runtime behavior, or secret values.",
     "Wording must stay static-analysis honest: say runtime validation is required unless the supplied static status says the path is contradicted.",
-    "agentPrompt is for the owner's coding agent: mention the hypothesis id and graph-backed path, but do not mention VibeShield, scanners, model output, or secret values.",
+    "attackDescription and impact are for the owner: plain language, no scanner or graph jargon.",
+    "agentPrompt is for the owner's coding agent: a self-contained instruction that names the concrete files and lines from the supplied graph refs and evidence (where the untrusted input enters and the operation it reaches) and what to change to break the path. Because static analysis cannot prove reachability, tell the agent to confirm the path is real and re-check that the change closes it. Do not mention VibeShield, scanners, model output, hypotheses, graphs, ids, or secret values.",
     "Each item must include hypothesisId, attackDescription, assumptions, impact, remediation, agentPrompt, acceptanceCriteria, validationRecipeText.",
   ].join("\n");
 }
