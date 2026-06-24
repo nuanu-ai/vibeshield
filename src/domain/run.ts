@@ -78,6 +78,8 @@ export type ArtifactRole =
   | "manifest"
   | "inventory"
   | "scanner.raw"
+  | "program-analysis.raw"
+  | "program-analysis.slice"
   | "report.json"
   | "report.md"
   | "report.html";

@@ -12,8 +12,9 @@ import { describe, expect, it } from "vitest";
 import { MicrosandboxRuntime } from "../src/adapters/microsandbox/runtime.js";
 
 const TOOLCHAIN_TAG = process.env.VIBESHIELD_TOOLCHAIN_TAG ?? "vibeshield-toolchain:latest";
+const describeLive = process.env.VIBESHIELD_LIVE_MICROSANDBOX === "1" ? describe : describe.skip;
 
-describe.skip("MicrosandboxRuntime (live)", () => {
+describeLive("MicrosandboxRuntime (live)", () => {
   it("boots the toolchain image, writes a file, reads it back, destroys", async () => {
     const runtime = new MicrosandboxRuntime({ imageTag: TOOLCHAIN_TAG });
     const avail = await runtime.isAvailable();
@@ -28,6 +29,7 @@ describe.skip("MicrosandboxRuntime (live)", () => {
       expect(new TextDecoder().decode(back)).toBe("hello-vibeshield");
       for (const command of [
         ["gitleaks", "version"],
+        ["atom", "--help"],
         ["opengrep", "--version"],
         ["syft", "version"],
         ["trivy", "--version"],
