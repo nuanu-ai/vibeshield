@@ -12,6 +12,7 @@ export * from "./evidence.js";
 export * from "./finding.js";
 export * from "./finding-context-assessment.js";
 export * from "./hypothesis-candidate.js";
+export * from "./hypothesis-enrichment.js";
 export * from "./inventory.js";
 export * from "./manifest.js";
 export * from "./manifest-summary.js";

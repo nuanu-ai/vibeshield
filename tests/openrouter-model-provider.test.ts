@@ -3,7 +3,10 @@ import {
   DEFAULT_REMEDIATION_MODEL,
   OpenRouterModelProvider,
 } from "../src/adapters/openrouter-model-provider.js";
-import type { ModelEnhanceBatchInput } from "../src/ports/model-provider.js";
+import type {
+  ModelEnhanceBatchInput,
+  ModelHypothesisEnrichBatchInput,
+} from "../src/ports/model-provider.js";
 
 describe("OpenRouterModelProvider", () => {
   it("posts one remediation batch to the configured model and parses structured actions", async () => {
@@ -159,6 +162,115 @@ describe("OpenRouterModelProvider", () => {
     await ok.enhance(modelInput());
     expect(JSON.parse(String(requests[0]?.body)).model).toBe(DEFAULT_REMEDIATION_MODEL);
   });
+
+  it("posts one hypothesis enrichment batch and parses structured copy", async () => {
+    const requests: RequestInit[] = [];
+    const provider = new OpenRouterModelProvider({
+      apiKey: "test-key",
+      fetchFn: async (_url, init) => {
+        requests.push(init ?? {});
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  hypotheses: [
+                    {
+                      hypothesisId: "hypothesis-1",
+                      attackDescription: "Static attack description.",
+                      assumptions: ["Uses supplied graph refs."],
+                      impact: "Static impact.",
+                      remediation: "Add a control.",
+                      agentPrompt: "Patch hypothesis-1.",
+                      acceptanceCriteria: ["Path is blocked."],
+                      validationRecipeText: "Use the supplied recipe later.",
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        });
+      },
+    });
+
+    const result = await provider.enrichHypotheses(hypothesisInput());
+
+    expect(result).toEqual([
+      {
+        hypothesisId: "hypothesis-1",
+        attackDescription: "Static attack description.",
+        assumptions: ["Uses supplied graph refs."],
+        impact: "Static impact.",
+        remediation: "Add a control.",
+        agentPrompt: "Patch hypothesis-1.",
+        acceptanceCriteria: ["Path is blocked."],
+        validationRecipeText: "Use the supplied recipe later.",
+      },
+    ]);
+    const body = JSON.parse(String(requests[0]?.body));
+    expect(body.response_format).toEqual({ type: "json_object" });
+    expect(body.messages[0].content).toContain("Never add or change hypothesis ids");
+    expect(body.messages[1].content).toContain("hypothesis-1");
+  });
+
+  it("accepts fenced hypothesis JSON and returns null for invalid hypothesis output", async () => {
+    const unavailable = new OpenRouterModelProvider();
+    await expect(unavailable.enrichHypotheses(hypothesisInput())).resolves.toBeNull();
+
+    const fenced = new OpenRouterModelProvider({
+      apiKey: "test-key",
+      fetchFn: async () =>
+        jsonResponse({
+          choices: [
+            {
+              message: {
+                content:
+                  '```json\n{"enrichments":[{"hypothesis_id":"hypothesis-1","attack_description":"A","assumptions":["B"],"impact":"C","remediation":"D","agent_prompt":"E","acceptance_criteria":["F"],"validation_recipe_text":"G"}]}\n```',
+              },
+            },
+          ],
+        }),
+    });
+    await expect(fenced.enrichHypotheses(hypothesisInput())).resolves.toMatchObject([
+      { hypothesisId: "hypothesis-1", attackDescription: "A" },
+    ]);
+
+    const prohibited = new OpenRouterModelProvider({
+      apiKey: "test-key",
+      fetchFn: async () =>
+        jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  hypotheses: [
+                    {
+                      hypothesisId: "hypothesis-1",
+                      status: "confirmed",
+                      attackDescription: "A",
+                      assumptions: ["B"],
+                      impact: "C",
+                      remediation: "D",
+                      agentPrompt: "E",
+                      acceptanceCriteria: ["F"],
+                      validationRecipeText: "G",
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+    });
+    await expect(prohibited.enrichHypotheses(hypothesisInput())).resolves.toBeNull();
+
+    const invalid = new OpenRouterModelProvider({
+      apiKey: "test-key",
+      fetchFn: async () => jsonResponse({ choices: [{ message: { content: "{not json}" } }] }),
+    });
+    await expect(invalid.enrichHypotheses(hypothesisInput())).resolves.toBeNull();
+  });
 });
 
 function modelInput(): ModelEnhanceBatchInput {
@@ -205,6 +317,72 @@ function modelInput(): ModelEnhanceBatchInput {
             snippet: 'stripeSecret: "***REDACTED***"',
           },
         ],
+      },
+    ],
+  };
+}
+
+function hypothesisInput(): ModelHypothesisEnrichBatchInput {
+  return {
+    repositoryName: "repo",
+    hypotheses: [
+      {
+        hypothesisId: "hypothesis-1",
+        candidateId: "candidate-1",
+        family: "external_input_to_dangerous_operation",
+        ruleId: "stage2.external-input-dangerous-operation",
+        title: "External input reaches fetch",
+        status: "statically_supported",
+        staticConfidence: 0.85,
+        pathSummary: "Boundary reaches fetch.",
+        runtimeValidationRequired: true,
+        candidateReason: "Boundary path exists.",
+        findingIds: ["finding-1"],
+        supportingNodeIds: ["node-1"],
+        supportingEdgeIds: ["edge-1"],
+        contradictingNodeIds: [],
+        contradictingEdgeIds: [],
+        coverageState: "checked",
+        coverageRefs: ["stage2:call_graph:checked"],
+        requiredValidation: ["boundary_input_fixture"],
+        graphRefs: [
+          {
+            refType: "node",
+            id: "node-1",
+            kind: "Boundary",
+            label: "GET /proxy",
+          },
+        ],
+        observedControls: [],
+        coverageGaps: [],
+        evidenceSnippets: [
+          {
+            evidenceId: "evidence-1",
+            tool: "semgrep",
+            filePath: "src/proxy.ts",
+            startLine: 1,
+            endLine: 1,
+            snippet: "fetch(req.query.url)",
+          },
+        ],
+        validationRecipe: {
+          recipeId: "recipe-1",
+          requiredFixtures: ["boundary_input_fixture"],
+          steps: ["Prepare input."],
+          expectedResult: "Gather runtime evidence later.",
+          safetyNotes: ["Do not run against production."],
+          knownGaps: [],
+        },
+        catalogEnrichment: {
+          hypothesisId: "hypothesis-1",
+          attackDescription: "Catalog attack description.",
+          assumptions: ["Catalog assumption."],
+          impact: "Catalog impact.",
+          remediation: "Catalog remediation.",
+          agentPrompt: "Catalog prompt.",
+          acceptanceCriteria: ["Catalog criterion."],
+          validationRecipeText: "Catalog recipe.",
+        },
       },
     ],
   };

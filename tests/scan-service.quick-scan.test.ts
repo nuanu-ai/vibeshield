@@ -13,7 +13,12 @@ import { runScan } from "../src/application/scan-service.js";
 import type { RemediationAction } from "../src/domain/action.js";
 import type { Manifest } from "../src/domain/manifest.js";
 import type { ScanEvent } from "../src/ports/event-sink.js";
-import type { ModelEnhanceBatchInput, ModelProvider } from "../src/ports/model-provider.js";
+import type {
+  ModelEnhanceBatchInput,
+  ModelHypothesisEnrichBatchInput,
+  ModelHypothesisEnrichment,
+  ModelProvider,
+} from "../src/ports/model-provider.js";
 import {
   GITLEAKS_REPORT_PATH,
   MANIFEST_PATH,
@@ -1007,5 +1012,11 @@ class FakeModelProvider implements ModelProvider {
   async enhance(input: ModelEnhanceBatchInput): Promise<ReadonlyArray<RemediationAction> | null> {
     this.inputs.push(input);
     return this.responder(input);
+  }
+
+  async enrichHypotheses(
+    _input: ModelHypothesisEnrichBatchInput,
+  ): Promise<ReadonlyArray<ModelHypothesisEnrichment> | null> {
+    return null;
   }
 }
