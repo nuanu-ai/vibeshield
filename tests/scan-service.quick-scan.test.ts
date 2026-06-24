@@ -213,7 +213,7 @@ describe("runScan quick scan vertical slice", () => {
 
     const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
     expect(markdown).toContain("## Likely attack paths");
-    expect(markdown).toContain("## Deep analysis coverage");
+    expect(markdown).toContain("## What was checked");
   });
 
   it("adds present-only dependency graph context without mutating Quick Scan findings", async () => {
@@ -364,20 +364,15 @@ describe("runScan quick scan vertical slice", () => {
     });
 
     const markdown = await readFile(modelOn.reportPaths.markdown ?? "", "utf8");
-    expect(markdown).toContain("## Fix now");
+    expect(markdown).toContain("## Fix these first");
     expect(markdown).toContain("## Likely attack paths");
-    expect(markdown).toContain("## Deep analysis coverage");
-    expect(markdown).toContain("## Quick finding context");
-    expect(markdown).toContain("## Validation recipes");
-    expect(markdown).toContain("Repository map artifact:");
+    expect(markdown).toContain("## What was checked");
     expect(markdown).toContain("Model attack description");
 
     const html = await readFile(modelOn.reportPaths.html ?? "", "utf8");
-    expect(html).toContain("<h2>Fix now</h2>");
+    expect(html).toContain("<h2>Fix these first</h2>");
     expect(html).toContain("<h2>Likely attack paths</h2>");
-    expect(html).toContain("<h2>Deep analysis coverage</h2>");
-    expect(html).toContain("<h2>Quick finding context</h2>");
-    expect(html).toContain("<h2>Validation recipes</h2>");
+    expect(html).toContain("What was checked");
     expect(html).toContain("Model attack description");
   });
 

@@ -25,31 +25,29 @@ describe("deep report renderers", () => {
   it("renders owner-facing deep Markdown sections", () => {
     const markdown = renderDeepMarkdownReport("run-1", deepAssessment());
 
-    expect(markdown).toContain("## Fix now");
+    expect(markdown).toContain("## Fix these first");
     expect(markdown).toContain("Rotate leaked key");
     expect(markdown).toContain("## Likely attack paths");
     expect(markdown).toContain("External input reaches fetch");
-    expect(markdown).toContain("statically_supported");
-    expect(markdown).toContain("## Deep analysis coverage");
-    expect(markdown).toContain("| call_graph | checked | atom |  |");
-    expect(markdown).toContain("## Quick finding context");
-    expect(markdown).toContain("linked_to_hypothesis");
-    expect(markdown).toContain("## Validation recipes");
+    expect(markdown).toContain("High confidence");
+    expect(markdown).toContain("## What was checked");
+    expect(markdown).toContain("| Call graph | Checked |");
     expect(markdown).toContain("principal_a");
-    expect(markdown).toContain("Repository map artifact: `repo-map-sha`");
+    expect(markdown).not.toContain("statically_supported");
+    expect(markdown).not.toContain("hypothesis-1");
+    expect(markdown).not.toContain("repo-map-sha");
   });
 
   it("renders equivalent escaped deep HTML sections", () => {
     const html = renderDeepHtmlReport("run-1", deepAssessment());
 
-    expect(html).toContain("<h2>Fix now</h2>");
+    expect(html).toContain("<h2>Fix these first</h2>");
     expect(html).toContain("<h2>Likely attack paths</h2>");
-    expect(html).toContain("<h2>Deep analysis coverage</h2>");
-    expect(html).toContain("<h2>Quick finding context</h2>");
-    expect(html).toContain("<h2>Validation recipes</h2>");
+    expect(html).toContain("What was checked");
     expect(html).toContain("External input reaches &lt;fetch&gt;");
     expect(html).not.toContain("<fetch>");
-    expect(html).toContain("repo-map-sha");
+    expect(html).not.toContain("repo-map-sha");
+    expect(html).not.toContain("statically_supported");
   });
 
   it("keeps Quick Scan assessments valid when deep fields are absent", () => {
@@ -58,9 +56,9 @@ describe("deep report renderers", () => {
     const markdown = renderDeepMarkdownReport("run-quick", assessment);
     const html = renderDeepHtmlReport("run-quick", assessment);
 
-    expect(markdown).toContain("No non-contradicted static hypotheses were produced.");
-    expect(markdown).toContain("No Deep Static coverage was recorded.");
-    expect(html).toContain("No future runtime validation recipes were generated.");
+    expect(markdown).toContain("The deep analysis didn't trace any likely attack paths.");
+    expect(markdown).toContain("## What was checked");
+    expect(html).toContain("The deep analysis didn't trace any likely attack paths.");
   });
 });
 
