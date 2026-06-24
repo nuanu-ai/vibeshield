@@ -5,6 +5,7 @@
 
 export * from "./action.js";
 export * from "./assessment.js";
+export * from "./component-reachability.js";
 export * from "./coverage-summary.js";
 export * from "./deep-coverage.js";
 export * from "./evidence.js";
