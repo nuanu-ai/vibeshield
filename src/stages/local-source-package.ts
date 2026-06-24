@@ -116,8 +116,16 @@ async function collectGitFilteredFiles(
       exclusions.push({ path: rel, reason: "missing" });
     }
   }
-  for (const rel of await gitZ(root, ["ls-files", "-o", "-i", "--exclude-standard", "-z"])) {
-    if (!files.has(rel) && isSafeRelativePath(rel)) {
+  for (const rawRel of await gitZ(root, [
+    "ls-files",
+    "-o",
+    "-i",
+    "--exclude-standard",
+    "--directory",
+    "-z",
+  ])) {
+    const rel = normalizeGitIgnoredPath(rawRel);
+    if (!files.has(rel) && !hasIncludedChild(files, rel) && isSafeRelativePath(rel)) {
       exclusions.push({ path: rel, reason: "git-ignored" });
     }
   }
@@ -224,6 +232,20 @@ function isSafeRelativePath(rel: string): boolean {
     !path.posix.isAbsolute(rel) &&
     rel.split("/").every((part) => part !== "" && part !== "." && part !== "..")
   );
+}
+
+function normalizeGitIgnoredPath(rel: string): string {
+  return rel.replace(/\/+$/u, "");
+}
+
+function hasIncludedChild(files: ReadonlySet<string>, rel: string): boolean {
+  const prefix = `${rel}/`;
+  for (const file of files) {
+    if (file.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isNotFoundError(error: unknown): boolean {

@@ -2836,12 +2836,15 @@ if (preFiltered) {
     .filter(Boolean)
     .map(toPosixPath)
     .filter(isSafeRelativePath);
-  for (const ignored of git(["-C", sourceDir, "ls-files", "-o", "-i", "--exclude-standard", "-z"])
+  for (const ignored of git(["-C", sourceDir, "ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z"])
     .split("\0")
     .filter(Boolean)
     .map(toPosixPath)
+    .map(normalizeGitIgnoredPath)
     .filter(isSafeRelativePath)) {
-    exclusions.push({ path: ignored, reason: "git-ignored" });
+    if (!rels.includes(ignored) && !hasIncludedChild(rels, ignored)) {
+      exclusions.push({ path: ignored, reason: "git-ignored" });
+    }
   }
   exclusions.push({ path: ".git", reason: "builtin-ignore" });
   files = await filesFromList(sourceDir, rels, exclusions);
@@ -2992,6 +2995,15 @@ function isSafeRelativePath(rel) {
     !path.posix.isAbsolute(rel) &&
     rel.split("/").every((part) => part !== "" && part !== "." && part !== "..")
   );
+}
+
+function normalizeGitIgnoredPath(rel) {
+  return rel.replace(/\/+$/u, "");
+}
+
+function hasIncludedChild(files, rel) {
+  const prefix = rel + "/";
+  return files.some((file) => file.startsWith(prefix));
 }
 `;
 }

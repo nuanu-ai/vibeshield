@@ -32,10 +32,12 @@ describe("local source packaging", () => {
   it("uses Git-filtered files and still includes env files for secret scanning", async () => {
     const source = path.join(dir, "repo");
     await mkdir(source);
-    await writeFile(path.join(source, ".gitignore"), ".env\nignored.txt\n");
+    await writeFile(path.join(source, ".gitignore"), ".env\nignored.txt\nnode_modules/\n");
     await writeFile(path.join(source, "app.ts"), "export const ok = true;\n");
     await writeFile(path.join(source, ".env"), "TOKEN=TEST_STRIPE_SECRET_PLACEHOLDER\n");
     await writeFile(path.join(source, "ignored.txt"), "ignore me\n");
+    await mkdir(path.join(source, "node_modules", "pkg"), { recursive: true });
+    await writeFile(path.join(source, "node_modules", "pkg", "index.js"), "ignore me too\n");
     await initGitRepo(source);
 
     const pkg = await createLocalSourcePackage(source);
@@ -47,8 +49,16 @@ describe("local source packaging", () => {
       await expect(readFile(path.join(extract, "app.ts"), "utf8")).resolves.toContain("ok");
       await expect(readFile(path.join(extract, ".env"), "utf8")).resolves.toContain("TOKEN=");
       await expect(readFile(path.join(extract, "ignored.txt"), "utf8")).rejects.toThrow();
+      await expect(
+        readFile(path.join(extract, "node_modules/pkg/index.js"), "utf8"),
+      ).rejects.toThrow();
       expect(pkg.commitSha).toMatch(/^[0-9a-f]{40}$/);
       expect(pkg.exclusions).toContainEqual({ path: "ignored.txt", reason: "git-ignored" });
+      expect(pkg.exclusions).toContainEqual({ path: "node_modules", reason: "git-ignored" });
+      expect(pkg.exclusions).not.toContainEqual({
+        path: "node_modules/pkg/index.js",
+        reason: "git-ignored",
+      });
     } finally {
       await pkg.cleanup();
     }
