@@ -80,6 +80,7 @@ export type ArtifactRole =
   | "scanner.raw"
   | "program-analysis.raw"
   | "program-analysis.slice"
+  | "repository-map.json"
   | "report.json"
   | "report.md"
   | "report.html";

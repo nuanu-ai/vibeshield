@@ -6,13 +6,19 @@
  */
 
 import type { ActionCandidate, RemediationAction } from "./action.js";
+import type { DeepActionGroup } from "./action-group.js";
 import type { Verdict } from "./assessment.js";
 import type { CoverageEntry } from "./coverage-summary.js";
 import { SCAN_LIMITATION } from "./coverage-summary.js";
 import type { DeepCoverageEntry } from "./deep-coverage.js";
 import type { Evidence } from "./evidence.js";
 import type { Finding, FindingCluster } from "./finding.js";
+import type { FindingContextAssessment } from "./finding-context-assessment.js";
+import type { HypothesisEnrichment } from "./hypothesis-enrichment.js";
 import type { ManifestSummary, ToolchainSummary } from "./manifest-summary.js";
+import type { ArtifactRef } from "./run.js";
+import type { StaticHypothesis } from "./static-hypothesis.js";
+import type { ValidationRecipe } from "./validation-recipe.js";
 
 export interface SecurityAssessment {
   readonly repository: RepositorySummary;
@@ -26,6 +32,13 @@ export interface SecurityAssessment {
   readonly findings: ReadonlyArray<Finding>;
   readonly findingClusters: ReadonlyArray<FindingCluster>;
   readonly rankedActions: ReadonlyArray<RankedAction>;
+  readonly findingContextAssessments?: ReadonlyArray<FindingContextAssessment>;
+  readonly staticHypotheses?: ReadonlyArray<StaticHypothesis>;
+  readonly validationRecipes?: ReadonlyArray<ValidationRecipe>;
+  readonly hypothesisEnrichments?: ReadonlyArray<HypothesisEnrichment>;
+  readonly deepActionGroups?: ReadonlyArray<DeepActionGroup>;
+  readonly repositoryMapArtifactRef?: ArtifactRef;
+  readonly limitations?: ReadonlyArray<string>;
   readonly limitation: string;
   readonly generatedAt: string;
 }
