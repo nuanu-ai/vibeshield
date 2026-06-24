@@ -6,13 +6,18 @@
  *   stage_attempts   — append-only history; reruns add a new attempt
  *   artifacts        — artifact refs known to a run
  *   stale_stages     — stages invalidated by a dependency rerun
+ *   security_graphs  — Deep Static graph projection metadata
+ *   graph_nodes      — deterministic graph nodes
+ *   graph_edges      — deterministic graph edges
+ *   graph_flows      — bounded graph paths used for static hypotheses
+ *   graph_coverage   — Deep Static coverage by analysis area
  *
  * Versioned via the user_version pragma. Bump + add migration steps when the
  * shape changes. The runner never reads run state off disk; it loads it here.
  */
 import type { DatabaseSync } from "node:sqlite";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export function migrate(db: DatabaseSync): void {
   db.exec(`
@@ -57,6 +62,85 @@ export function migrate(db: DatabaseSync): void {
       stage_id      TEXT NOT NULL,
       PRIMARY KEY (run_id, stage_id),
       FOREIGN KEY (run_id) REFERENCES runs(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS security_graphs (
+      id            TEXT PRIMARY KEY,
+      run_id        TEXT NOT NULL,
+      snapshot_id   TEXT NOT NULL,
+      graph_version TEXT NOT NULL,
+      created_at    TEXT NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES runs(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS graph_nodes (
+      graph_id         TEXT NOT NULL,
+      id               TEXT NOT NULL,
+      kind             TEXT NOT NULL,
+      stable_key       TEXT NOT NULL,
+      label            TEXT NOT NULL,
+      repo_path        TEXT,
+      line_start       INTEGER,
+      line_end         INTEGER,
+      symbol           TEXT,
+      properties_json  TEXT NOT NULL,
+      evidence_ids_json TEXT NOT NULL,
+      producer         TEXT NOT NULL,
+      producer_version TEXT NOT NULL,
+      confidence       REAL NOT NULL,
+      coverage_state   TEXT NOT NULL,
+      PRIMARY KEY (graph_id, id),
+      UNIQUE (graph_id, stable_key),
+      FOREIGN KEY (graph_id) REFERENCES security_graphs(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS graph_edges (
+      graph_id         TEXT NOT NULL,
+      id               TEXT NOT NULL,
+      kind             TEXT NOT NULL,
+      stable_key       TEXT NOT NULL,
+      from_node_id     TEXT NOT NULL,
+      to_node_id       TEXT NOT NULL,
+      properties_json  TEXT NOT NULL,
+      evidence_ids_json TEXT NOT NULL,
+      producer         TEXT NOT NULL,
+      producer_version TEXT NOT NULL,
+      confidence       REAL NOT NULL,
+      coverage_state   TEXT NOT NULL,
+      PRIMARY KEY (graph_id, id),
+      UNIQUE (graph_id, stable_key),
+      FOREIGN KEY (graph_id) REFERENCES security_graphs(id) ON DELETE CASCADE,
+      FOREIGN KEY (graph_id, from_node_id) REFERENCES graph_nodes(graph_id, id),
+      FOREIGN KEY (graph_id, to_node_id) REFERENCES graph_nodes(graph_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS graph_flows (
+      graph_id          TEXT NOT NULL,
+      id                TEXT NOT NULL,
+      source_node_id    TEXT NOT NULL,
+      sink_node_id      TEXT NOT NULL,
+      path_edge_ids_json TEXT NOT NULL,
+      control_node_ids_json TEXT NOT NULL,
+      coverage_state    TEXT NOT NULL,
+      confidence        REAL NOT NULL,
+      evidence_ids_json TEXT NOT NULL,
+      PRIMARY KEY (graph_id, id),
+      FOREIGN KEY (graph_id) REFERENCES security_graphs(id) ON DELETE CASCADE,
+      FOREIGN KEY (graph_id, source_node_id) REFERENCES graph_nodes(graph_id, id),
+      FOREIGN KEY (graph_id, sink_node_id) REFERENCES graph_nodes(graph_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS graph_coverage (
+      graph_id         TEXT NOT NULL,
+      area             TEXT NOT NULL,
+      state            TEXT NOT NULL,
+      covered_count    INTEGER,
+      total_count      INTEGER,
+      reason           TEXT,
+      producer         TEXT NOT NULL,
+      producer_version TEXT NOT NULL,
+      PRIMARY KEY (graph_id, area, producer),
+      FOREIGN KEY (graph_id) REFERENCES security_graphs(id) ON DELETE CASCADE
     );
   `);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

@@ -13,3 +13,4 @@ export * from "./manifest.js";
 export * from "./manifest-summary.js";
 export * from "./run.js";
 export * from "./security-assessment.js";
+export * from "./security-graph.js";

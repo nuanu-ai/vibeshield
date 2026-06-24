@@ -17,6 +17,21 @@ import type {
   StageAttemptStatus,
   StageId,
 } from "../domain/run.js";
+import {
+  type GraphCoverage,
+  type GraphCoverageArea,
+  type GraphCoverageState,
+  type LineRange,
+  type SecurityFlow,
+  type SecurityGraph,
+  type SecurityGraphEdge,
+  type SecurityGraphEdgeKind,
+  type SecurityGraphNode,
+  type SecurityGraphNodeKind,
+  type SecurityGraphValidationContext,
+  sortSecurityGraph,
+  validateSecurityGraph,
+} from "../domain/security-graph.js";
 import type { StateStore } from "../ports/state-store.js";
 import { migrate } from "./sqlite-schema.js";
 
@@ -31,6 +46,66 @@ interface AttemptRow {
   outputs_json: string;
   data_json: string | null;
   marked_stale_json: string | null;
+}
+
+interface GraphRow {
+  id: string;
+  run_id: string;
+  snapshot_id: string;
+  graph_version: string;
+  created_at: string;
+}
+
+interface GraphNodeRow {
+  id: string;
+  kind: string;
+  stable_key: string;
+  label: string;
+  repo_path: string | null;
+  line_start: number | null;
+  line_end: number | null;
+  symbol: string | null;
+  properties_json: string;
+  evidence_ids_json: string;
+  producer: string;
+  producer_version: string;
+  confidence: number;
+  coverage_state: string;
+}
+
+interface GraphEdgeRow {
+  id: string;
+  kind: string;
+  stable_key: string;
+  from_node_id: string;
+  to_node_id: string;
+  properties_json: string;
+  evidence_ids_json: string;
+  producer: string;
+  producer_version: string;
+  confidence: number;
+  coverage_state: string;
+}
+
+interface GraphFlowRow {
+  id: string;
+  source_node_id: string;
+  sink_node_id: string;
+  path_edge_ids_json: string;
+  control_node_ids_json: string;
+  coverage_state: string;
+  confidence: number;
+  evidence_ids_json: string;
+}
+
+interface GraphCoverageRow {
+  area: string;
+  state: string;
+  covered_count: number | null;
+  total_count: number | null;
+  reason: string | null;
+  producer: string;
+  producer_version: string;
 }
 
 export class SqliteStateStore implements StateStore {
@@ -107,6 +182,60 @@ export class SqliteStateStore implements StateStore {
     }
   }
 
+  async recordSecurityGraph(
+    graph: SecurityGraph,
+    validationContext: SecurityGraphValidationContext,
+  ): Promise<void> {
+    const normalized = validateSecurityGraph(graph, validationContext);
+    if (normalized.runId !== graph.runId) {
+      throw new Error(`security graph runId mismatch: ${normalized.runId}`);
+    }
+    this.db.exec("BEGIN");
+    try {
+      this.deleteSecurityGraphRows(normalized.id);
+      this.db
+        .prepare(
+          `INSERT INTO security_graphs (id, run_id, snapshot_id, graph_version, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(
+          normalized.id,
+          normalized.runId,
+          normalized.snapshotId,
+          normalized.graphVersion,
+          normalized.createdAt,
+        );
+      this.insertGraphNodes(normalized.id, normalized.nodes);
+      this.insertGraphEdges(normalized.id, normalized.edges);
+      this.insertGraphFlows(normalized.id, normalized.flows);
+      this.insertGraphCoverage(normalized.id, normalized.coverage);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async loadSecurityGraph(runId: RunId, graphId: string): Promise<SecurityGraph | null> {
+    const graphRow = this.db
+      .prepare("SELECT * FROM security_graphs WHERE run_id = ? AND id = ?")
+      .get(runId, graphId) as GraphRow | undefined;
+    if (graphRow === undefined) {
+      return null;
+    }
+    return sortSecurityGraph({
+      id: graphRow.id,
+      runId: graphRow.run_id,
+      snapshotId: graphRow.snapshot_id,
+      graphVersion: graphRow.graph_version,
+      nodes: this.loadGraphNodes(graphId),
+      edges: this.loadGraphEdges(graphId),
+      flows: this.loadGraphFlows(graphId),
+      coverage: this.loadGraphCoverage(graphId),
+      createdAt: graphRow.created_at,
+    });
+  }
+
   async finishRun(id: RunId, status: RunStatus, finishedAt: string): Promise<void> {
     this.db
       .prepare("UPDATE runs SET status = ?, finished_at = ? WHERE id = ?")
@@ -153,4 +282,191 @@ export class SqliteStateStore implements StateStore {
       .all(runId) as { stage_id: string }[];
     return new Set(rows.map((r) => r.stage_id));
   }
+
+  private deleteSecurityGraphRows(graphId: string): void {
+    this.db.prepare("DELETE FROM graph_coverage WHERE graph_id = ?").run(graphId);
+    this.db.prepare("DELETE FROM graph_flows WHERE graph_id = ?").run(graphId);
+    this.db.prepare("DELETE FROM graph_edges WHERE graph_id = ?").run(graphId);
+    this.db.prepare("DELETE FROM graph_nodes WHERE graph_id = ?").run(graphId);
+    this.db.prepare("DELETE FROM security_graphs WHERE id = ?").run(graphId);
+  }
+
+  private insertGraphNodes(graphId: string, nodes: ReadonlyArray<SecurityGraphNode>): void {
+    const stmt = this.db.prepare(
+      `INSERT INTO graph_nodes
+       (graph_id, id, kind, stable_key, label, repo_path, line_start, line_end, symbol,
+        properties_json, evidence_ids_json, producer, producer_version, confidence, coverage_state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const node of nodes) {
+      stmt.run(
+        graphId,
+        node.id,
+        node.kind,
+        node.stableKey,
+        node.label,
+        node.repoPath ?? null,
+        node.lineRange?.startLine ?? null,
+        node.lineRange?.endLine ?? null,
+        node.symbol ?? null,
+        JSON.stringify(node.properties),
+        JSON.stringify(node.evidenceIds),
+        node.producer,
+        node.producerVersion,
+        node.confidence,
+        node.coverageState,
+      );
+    }
+  }
+
+  private insertGraphEdges(graphId: string, edges: ReadonlyArray<SecurityGraphEdge>): void {
+    const stmt = this.db.prepare(
+      `INSERT INTO graph_edges
+       (graph_id, id, kind, stable_key, from_node_id, to_node_id, properties_json,
+        evidence_ids_json, producer, producer_version, confidence, coverage_state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const edge of edges) {
+      stmt.run(
+        graphId,
+        edge.id,
+        edge.kind,
+        edge.stableKey,
+        edge.fromNodeId,
+        edge.toNodeId,
+        JSON.stringify(edge.properties),
+        JSON.stringify(edge.evidenceIds),
+        edge.producer,
+        edge.producerVersion,
+        edge.confidence,
+        edge.coverageState,
+      );
+    }
+  }
+
+  private insertGraphFlows(graphId: string, flows: ReadonlyArray<SecurityFlow>): void {
+    const stmt = this.db.prepare(
+      `INSERT INTO graph_flows
+       (graph_id, id, source_node_id, sink_node_id, path_edge_ids_json,
+        control_node_ids_json, coverage_state, confidence, evidence_ids_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const flow of flows) {
+      stmt.run(
+        graphId,
+        flow.id,
+        flow.sourceNodeId,
+        flow.sinkNodeId,
+        JSON.stringify(flow.pathEdgeIds),
+        JSON.stringify(flow.controlNodeIds),
+        flow.coverageState,
+        flow.confidence,
+        JSON.stringify(flow.evidenceIds),
+      );
+    }
+  }
+
+  private insertGraphCoverage(graphId: string, coverage: ReadonlyArray<GraphCoverage>): void {
+    const stmt = this.db.prepare(
+      `INSERT INTO graph_coverage
+       (graph_id, area, state, covered_count, total_count, reason, producer, producer_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const entry of coverage) {
+      stmt.run(
+        graphId,
+        entry.area,
+        entry.state,
+        entry.coveredCount ?? null,
+        entry.totalCount ?? null,
+        entry.reason ?? null,
+        entry.producer,
+        entry.producerVersion,
+      );
+    }
+  }
+
+  private loadGraphNodes(graphId: string): SecurityGraphNode[] {
+    const rows = this.db
+      .prepare("SELECT * FROM graph_nodes WHERE graph_id = ? ORDER BY id")
+      .all(graphId) as unknown as GraphNodeRow[];
+    return rows.map((row) => {
+      const lineRange = lineRangeFrom(row.line_start, row.line_end);
+      return {
+        id: row.id,
+        kind: row.kind as SecurityGraphNodeKind,
+        stableKey: row.stable_key,
+        label: row.label,
+        ...(row.repo_path !== null ? { repoPath: row.repo_path } : {}),
+        ...(lineRange !== undefined ? { lineRange } : {}),
+        ...(row.symbol !== null ? { symbol: row.symbol } : {}),
+        properties: JSON.parse(row.properties_json) as Record<string, unknown>,
+        evidenceIds: JSON.parse(row.evidence_ids_json) as string[],
+        producer: row.producer,
+        producerVersion: row.producer_version,
+        confidence: row.confidence,
+        coverageState: row.coverage_state as GraphCoverageState,
+      };
+    });
+  }
+
+  private loadGraphEdges(graphId: string): SecurityGraphEdge[] {
+    const rows = this.db
+      .prepare("SELECT * FROM graph_edges WHERE graph_id = ? ORDER BY id")
+      .all(graphId) as unknown as GraphEdgeRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      kind: row.kind as SecurityGraphEdgeKind,
+      stableKey: row.stable_key,
+      fromNodeId: row.from_node_id,
+      toNodeId: row.to_node_id,
+      properties: JSON.parse(row.properties_json) as Record<string, unknown>,
+      evidenceIds: JSON.parse(row.evidence_ids_json) as string[],
+      producer: row.producer,
+      producerVersion: row.producer_version,
+      confidence: row.confidence,
+      coverageState: row.coverage_state as GraphCoverageState,
+    }));
+  }
+
+  private loadGraphFlows(graphId: string): SecurityFlow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM graph_flows WHERE graph_id = ? ORDER BY id")
+      .all(graphId) as unknown as GraphFlowRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      sourceNodeId: row.source_node_id,
+      sinkNodeId: row.sink_node_id,
+      pathEdgeIds: JSON.parse(row.path_edge_ids_json) as string[],
+      controlNodeIds: JSON.parse(row.control_node_ids_json) as string[],
+      coverageState: row.coverage_state as GraphCoverageState,
+      confidence: row.confidence,
+      evidenceIds: JSON.parse(row.evidence_ids_json) as string[],
+    }));
+  }
+
+  private loadGraphCoverage(graphId: string): GraphCoverage[] {
+    const rows = this.db
+      .prepare("SELECT * FROM graph_coverage WHERE graph_id = ? ORDER BY area, producer")
+      .all(graphId) as unknown as GraphCoverageRow[];
+    return rows.map((row) => ({
+      area: row.area as GraphCoverageArea,
+      state: row.state as GraphCoverageState,
+      ...(row.covered_count !== null ? { coveredCount: row.covered_count } : {}),
+      ...(row.total_count !== null ? { totalCount: row.total_count } : {}),
+      ...(row.reason !== null ? { reason: row.reason } : {}),
+      producer: row.producer,
+      producerVersion: row.producer_version,
+    }));
+  }
+}
+
+function lineRangeFrom(startLine: number | null, endLine: number | null): LineRange | undefined {
+  if (startLine === null && endLine === null) {
+    return undefined;
+  }
+  if (startLine === null || endLine === null) {
+    throw new Error("graph node line range is partially persisted");
+  }
+  return { startLine, endLine };
 }

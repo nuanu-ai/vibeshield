@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ArtifactRef, Run, RunId, StageAttempt, StageId } from "../src/domain/run.js";
+import type {
+  SecurityGraph,
+  SecurityGraphValidationContext,
+} from "../src/domain/security-graph.js";
 import { runStages } from "../src/pipeline/runner.js";
 import type { StageDefinition } from "../src/pipeline/stage-definition.js";
 import type { StoredBlob } from "../src/ports/artifact-store.js";
@@ -89,6 +93,15 @@ class MemoryStateStore {
   }
 
   async recordArtifacts(_runId: RunId, _artifacts: ReadonlyArray<ArtifactRef>): Promise<void> {}
+
+  async recordSecurityGraph(
+    _graph: SecurityGraph,
+    _validationContext: SecurityGraphValidationContext,
+  ): Promise<void> {}
+
+  async loadSecurityGraph(_runId: RunId, _graphId: string): Promise<SecurityGraph | null> {
+    return null;
+  }
 
   async finishRun(id: RunId, status: Run["status"], finishedAt: string): Promise<void> {
     const run = this.runs.get(id);

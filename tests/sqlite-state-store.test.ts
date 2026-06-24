@@ -5,6 +5,14 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SqliteStateStore } from "../src/adapters/sqlite-state-store.js";
 import type { Run, StageAttempt } from "../src/domain/run.js";
+import {
+  type SecurityGraph,
+  securityFlowId,
+  securityGraphEdgeId,
+  securityGraphId,
+  securityGraphNodeId,
+  sortSecurityGraph,
+} from "../src/domain/security-graph.js";
 
 describe("SqliteStateStore", () => {
   let dir: string;
@@ -104,4 +112,176 @@ describe("SqliteStateStore", () => {
     expect(loaded?.status).toBe("success");
     expect(loaded?.finishedAt).toBe("2026-01-01T00:10:00Z");
   });
+
+  it("creates graph projection tables during migration", () => {
+    const rows = db
+      .prepare(
+        `SELECT name FROM sqlite_master
+         WHERE type = 'table'
+           AND name IN ('security_graphs', 'graph_nodes', 'graph_edges', 'graph_flows', 'graph_coverage')
+         ORDER BY name`,
+      )
+      .all() as { name: string }[];
+
+    expect(rows.map((row) => row.name)).toEqual([
+      "graph_coverage",
+      "graph_edges",
+      "graph_flows",
+      "graph_nodes",
+      "security_graphs",
+    ]);
+  });
+
+  it("persists and reloads a security graph projection", async () => {
+    await store.createRun(makeRun());
+    const graph = makeSecurityGraph();
+
+    await store.recordSecurityGraph(graph, graphValidationContext());
+
+    await expect(store.loadSecurityGraph("run-1", graph.id)).resolves.toEqual(
+      sortSecurityGraph(graph),
+    );
+  });
+
+  it("replaces an existing security graph projection without stale rows", async () => {
+    await store.createRun(makeRun());
+    const graph = makeSecurityGraph();
+    const replacement = makeSecurityGraph({
+      coverage: [
+        {
+          area: "boundaries",
+          state: "partial",
+          coveredCount: 1,
+          totalCount: 2,
+          reason: "one route parser failed",
+          producer: "test-fixture",
+          producerVersion: "2",
+        },
+      ],
+    });
+
+    await store.recordSecurityGraph(graph, graphValidationContext());
+    await store.recordSecurityGraph(replacement, graphValidationContext());
+
+    await expect(store.loadSecurityGraph("run-1", graph.id)).resolves.toEqual(
+      sortSecurityGraph(replacement),
+    );
+    expect(db.prepare("SELECT COUNT(*) AS count FROM graph_coverage").get()).toEqual({
+      count: 1,
+    });
+  });
+
+  it("rejects invalid security graphs before persistence", async () => {
+    await store.createRun(makeRun());
+    const graph = makeSecurityGraph({
+      nodes: [{ ...boundaryNode(), evidenceIds: ["missing-ev"] }, sinkNode()],
+    });
+
+    await expect(store.recordSecurityGraph(graph, graphValidationContext())).rejects.toThrow(
+      /missing evidence id: missing-ev/,
+    );
+
+    const rows = db.prepare("SELECT id FROM security_graphs").all();
+    expect(rows).toEqual([]);
+  });
 });
+
+function graphValidationContext() {
+  return {
+    manifestPaths: new Set(["src/routes/upload.ts", "src/lib/fetch.ts"]),
+    evidenceIds: new Set(["ev-route", "ev-sink"]),
+  };
+}
+
+function makeSecurityGraph(overrides: Partial<SecurityGraph> = {}): SecurityGraph {
+  return {
+    id: securityGraphId("snapshot-1", "1"),
+    runId: "run-1",
+    snapshotId: "snapshot-1",
+    graphVersion: "1",
+    nodes: [boundaryNode(), sinkNode()],
+    edges: [callEdge()],
+    flows: [flow()],
+    coverage: [
+      {
+        area: "boundaries",
+        state: "checked",
+        coveredCount: 1,
+        totalCount: 1,
+        producer: "test-fixture",
+        producerVersion: "1",
+      },
+    ],
+    createdAt: "2026-06-24T09:00:00Z",
+    ...overrides,
+  };
+}
+
+function boundaryNode() {
+  const stableKey = "Boundary:http:POST /upload:src/routes/upload.ts:10:uploadHandler";
+  return {
+    id: securityGraphNodeId("1", stableKey),
+    kind: "Boundary" as const,
+    stableKey,
+    label: "POST /upload",
+    repoPath: "src/routes/upload.ts",
+    lineRange: { startLine: 10, endLine: 12 },
+    symbol: "uploadHandler",
+    properties: { boundaryType: "HTTP route", method: "POST" },
+    evidenceIds: ["ev-route"],
+    producer: "test-fixture",
+    producerVersion: "1",
+    confidence: 1,
+    coverageState: "checked" as const,
+  };
+}
+
+function sinkNode() {
+  const stableKey = "Sink:http-client:src/lib/fetch.ts:4:fetchUrl";
+  return {
+    id: securityGraphNodeId("1", stableKey),
+    kind: "Sink" as const,
+    stableKey,
+    label: "fetchUrl",
+    repoPath: "src/lib/fetch.ts",
+    lineRange: { startLine: 4, endLine: 4 },
+    symbol: "fetchUrl",
+    properties: { sinkType: "outbound_http" },
+    evidenceIds: ["ev-sink"],
+    producer: "test-fixture",
+    producerVersion: "1",
+    confidence: 0.95,
+    coverageState: "checked" as const,
+  };
+}
+
+function callEdge() {
+  const stableKey = `calls:${boundaryNode().id}:${sinkNode().id}:src/routes/upload.ts:12`;
+  return {
+    id: securityGraphEdgeId("1", stableKey),
+    kind: "calls" as const,
+    stableKey,
+    fromNodeId: boundaryNode().id,
+    toNodeId: sinkNode().id,
+    properties: { callsite: "src/routes/upload.ts:12" },
+    evidenceIds: ["ev-route"],
+    producer: "test-fixture",
+    producerVersion: "1",
+    confidence: 0.9,
+    coverageState: "checked" as const,
+  };
+}
+
+function flow() {
+  const stableKey = `flow:${boundaryNode().id}:${sinkNode().id}:${callEdge().id}`;
+  return {
+    id: securityFlowId("1", stableKey),
+    sourceNodeId: boundaryNode().id,
+    sinkNodeId: sinkNode().id,
+    pathEdgeIds: [callEdge().id],
+    controlNodeIds: [],
+    coverageState: "checked" as const,
+    confidence: 0.9,
+    evidenceIds: ["ev-route", "ev-sink"],
+  };
+}
