@@ -10,6 +10,7 @@ export * from "./coverage-summary.js";
 export * from "./deep-coverage.js";
 export * from "./evidence.js";
 export * from "./finding.js";
+export * from "./finding-context-assessment.js";
 export * from "./inventory.js";
 export * from "./manifest.js";
 export * from "./manifest-summary.js";
