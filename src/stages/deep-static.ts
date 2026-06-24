@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { AtomProgramAnalysisBackend } from "../adapters/atom-program-analysis-backend.js";
 import type { DeepActionGroup } from "../domain/action-group.js";
+import type { ComponentReachability } from "../domain/component-reachability.js";
 import type { DeepCoverage } from "../domain/deep-coverage.js";
 import type { Finding, FindingCluster } from "../domain/finding.js";
 import type { FindingContextAssessment } from "../domain/finding-context-assessment.js";
@@ -20,6 +21,7 @@ import type {
   ProgramAnalysisFailure,
   ProgramAnalysisModelRef,
 } from "../ports/program-analysis-backend.js";
+import { composeComponentReachability } from "./component-reachability.js";
 import { groupDeepActions } from "./deep-action-grouping.js";
 import { composeDeepCoverage } from "./deep-coverage.js";
 import { assessFindingContext, type FindingHypothesisLink } from "./finding-context-assessment.js";
@@ -166,18 +168,24 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     baseGraph: programGraph,
     failures: compositionFailures,
   });
+  const reachability = composeReachabilityOrDegrade({
+    graph,
+    manifest,
+    failures: compositionFailures,
+  });
 
   const correlated = await correlateOrDegrade({
     ctx,
     manifest,
     evidence,
     findings,
-    graph,
+    graph: reachability.graph,
+    componentReachability: reachability.componentReachability,
     directActions,
     failures: compositionFailures,
   });
 
-  const repositoryMap = renderRepositoryMap(graph);
+  const repositoryMap = renderRepositoryMap(reachability.graph);
   const repositoryMapPath = path.join(ctx.runDir, "repository-map.json");
   await mkdir(ctx.runDir, { recursive: true });
   const repositoryMapBytes = jsonBytes(repositoryMap);
@@ -194,13 +202,13 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     snapshotId,
     manifest,
     backendCoverage,
-    graphCoverage: graph.coverage,
+    graphCoverage: reachability.graph.coverage,
     failures: compositionFailures,
     createdAt,
   });
 
   return {
-    securityGraph: graph,
+    securityGraph: reachability.graph,
     deepCoverage,
     findingContextAssessments: correlated.findingContextAssessments,
     hypothesisCandidates: correlated.hypothesisCandidates,
@@ -272,12 +280,36 @@ function composeGraphOrFallback(input: {
   }
 }
 
+function composeReachabilityOrDegrade(input: {
+  readonly graph: SecurityGraph;
+  readonly manifest: Manifest;
+  readonly failures: ProgramAnalysisFailure[];
+}): {
+  readonly graph: SecurityGraph;
+  readonly componentReachability: ReadonlyArray<ComponentReachability>;
+} {
+  try {
+    const result = composeComponentReachability({
+      graph: input.graph,
+      manifest: input.manifest,
+    });
+    return { graph: result.graph, componentReachability: result.reachability };
+  } catch (error) {
+    input.failures.push({
+      area: "component_usage",
+      reason: publicReason("Deep Static component reachability failed", error),
+    });
+    return { graph: input.graph, componentReachability: [] };
+  }
+}
+
 async function correlateOrDegrade(input: {
   readonly ctx: StageContext;
   readonly manifest: Manifest;
   readonly evidence: ReadonlyArray<FindingEvidence>;
   readonly findings: ReadonlyArray<Finding>;
   readonly graph: SecurityGraph;
+  readonly componentReachability: ReadonlyArray<ComponentReachability>;
   readonly directActions: ActionsData["candidates"];
   readonly failures: ProgramAnalysisFailure[];
 }): Promise<
@@ -292,7 +324,12 @@ async function correlateOrDegrade(input: {
   >
 > {
   try {
-    const firstPassContexts = findingContextOrStandalone(input.findings, input.graph, []);
+    const firstPassContexts = findingContextOrStandalone(
+      input.findings,
+      input.graph,
+      [],
+      input.componentReachability,
+    );
     const hypothesisCandidates = correlateStage2Hypotheses({
       graph: input.graph,
       findingContexts: firstPassContexts,
@@ -306,6 +343,7 @@ async function correlateOrDegrade(input: {
       input.findings,
       input.graph,
       hypothesisLinks(hypothesisCandidates, staticHypotheses),
+      input.componentReachability,
     );
     const validationRecipes = composeValidationRecipes({
       staticHypotheses,
@@ -396,9 +434,15 @@ function findingContextOrStandalone(
   findings: ReadonlyArray<Finding>,
   graph: SecurityGraph,
   links: ReadonlyArray<FindingHypothesisLink>,
+  componentReachability: ReadonlyArray<ComponentReachability> = [],
 ): FindingContextAssessment[] {
   try {
-    return assessFindingContext({ findings, graph, hypothesisLinks: links });
+    return assessFindingContext({
+      findings,
+      graph,
+      hypothesisLinks: links,
+      componentReachability,
+    });
   } catch {
     return standaloneContexts(findings);
   }

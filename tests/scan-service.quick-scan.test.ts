@@ -28,6 +28,7 @@ import {
   OPENGREP_REPORT_PATH,
   SOURCE_DIR,
   TRIVY_CACHE_DIR,
+  TRIVY_VULN_REPORT_PATH,
 } from "../src/stages/paths.js";
 
 const encoder = new TextEncoder();
@@ -212,6 +213,118 @@ describe("runScan quick scan vertical slice", () => {
     const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
     expect(markdown).toContain("## Likely attack paths");
     expect(markdown).toContain("## Deep analysis coverage");
+  });
+
+  it("adds present-only dependency graph context without mutating Quick Scan findings", async () => {
+    const source = await writeLocalFixture(dir);
+    const blobs = new FilesystemBlobs(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, gate2ManifestFiles()),
+        [
+          {
+            RuleID: "stripe-access-token",
+            Description: "Stripe Access Token",
+            File: "src/routes/upload.ts",
+            StartLine: 10,
+            EndLine: 10,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/routes/upload.ts:stripe-access-token:10",
+          },
+        ],
+        {
+          atom: { mode: "success" },
+          trivyVuln: trivyDependencyReport(),
+        },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, blobs), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+      deep: true,
+    });
+
+    const secretFinding = outcome.assessment.findings.find(
+      (finding) => finding.category === "secret",
+    );
+    const dependencyFinding = outcome.assessment.findings.find(
+      (finding) => finding.category === "dependency",
+    );
+    expect(secretFinding).toMatchObject({
+      sourceTool: "gitleaks",
+      ruleId: "stripe-access-token",
+      severity: "critical",
+      remediationKey: "live-secret-in-source",
+    });
+    expect(dependencyFinding).toMatchObject({
+      sourceTool: "trivy",
+      ruleId: "CVE-2024-1234",
+      category: "dependency",
+      severity: "high",
+      remediationKey: "dependency-vulnerability",
+    });
+    expect(outcome.assessment.rankedActions.map((action) => action.remediation.title)).toEqual([
+      "Remove the committed secret",
+      "Review the vulnerable dependency",
+    ]);
+    expect(outcome.assessment.rankedActions.map((action) => action.candidate.findingIds)).toEqual([
+      [secretFinding?.id],
+      [dependencyFinding?.id],
+    ]);
+
+    const dependencyContext = outcome.assessment.findingContextAssessments?.find(
+      (context) => context.findingId === dependencyFinding?.id,
+    );
+    expect(dependencyContext).toMatchObject({
+      status: "weakened",
+      reason: "component is present but no import, use, or boundary reachability was observed",
+      coverageState: "checked",
+    });
+    expect(dependencyContext?.graphNodeIds).toHaveLength(1);
+    expect(dependencyContext?.graphEdgeIds).toEqual([]);
+
+    const report = JSON.parse(await readFile(outcome.reportPaths.json ?? "", "utf8")) as {
+      assessment: {
+        findings: Array<{ id: string; category: string; ruleId: string; severity: string }>;
+        findingContextAssessments?: Array<{
+          findingId: string;
+          status: string;
+          reason: string;
+        }>;
+        rankedActions: Array<{ candidate: { findingIds: string[] } }>;
+      };
+    };
+    expect(report.assessment.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: secretFinding?.id,
+          category: "secret",
+          ruleId: "stripe-access-token",
+          severity: "critical",
+        }),
+        expect.objectContaining({
+          id: dependencyFinding?.id,
+          category: "dependency",
+          ruleId: "CVE-2024-1234",
+          severity: "high",
+        }),
+      ]),
+    );
+    expect(report.assessment.findingContextAssessments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          findingId: dependencyFinding?.id,
+          status: "weakened",
+        }),
+      ]),
+    );
+    expect(report.assessment.rankedActions.map((action) => action.candidate.findingIds)).toEqual([
+      [secretFinding?.id],
+      [dependencyFinding?.id],
+    ]);
   });
 
   it("keeps the Quick Scan Fix Pack when Deep Static backend analysis fails", async () => {
@@ -930,6 +1043,7 @@ interface FakeScannerOverrides {
     readonly stderr: string;
     readonly metadata?: Record<string, unknown> | null;
   };
+  readonly trivyVuln?: unknown;
   readonly atom?: {
     readonly mode: "success" | "fail";
   };
@@ -974,6 +1088,12 @@ function fakeQuickScanExec(
         session.files.set(`${TRIVY_CACHE_DIR}/db/metadata.json`, jsonBytes(metadata));
       }
       return override ?? { exitCode: 0, stdout: "", stderr: "" };
+    }
+    if (bin === "trivy" && command[1] === "fs" && command.includes("vuln")) {
+      if (overrides.trivyVuln !== undefined) {
+        session.files.set(TRIVY_VULN_REPORT_PATH, jsonBytes(overrides.trivyVuln));
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
     }
     if (bin === "actionlint" && command[1] !== "-version") {
       return overrides.actionlint ?? { exitCode: 0, stdout: "[]", stderr: "" };
@@ -1167,6 +1287,31 @@ function deepManifestFiles(): Manifest["files"] {
     { path: "src/routes/upload.ts", size: 120, sha256: "route-sha" },
     { path: "src/lib/fetch.ts", size: 90, sha256: "fetch-sha" },
   ];
+}
+
+function gate2ManifestFiles(): Manifest["files"] {
+  return [...deepManifestFiles(), { path: "package.json", size: 60, sha256: "package-sha" }];
+}
+
+function trivyDependencyReport() {
+  return {
+    Results: [
+      {
+        Target: "package.json",
+        Vulnerabilities: [
+          {
+            VulnerabilityID: "CVE-2024-1234",
+            PkgName: "lodash",
+            InstalledVersion: "4.17.20",
+            FixedVersion: "4.17.21",
+            Severity: "HIGH",
+            Title: "lodash prototype pollution",
+            Description: "fixture vulnerability",
+          },
+        ],
+      },
+    ],
+  };
 }
 
 function jsonBytes(value: unknown): Uint8Array {
