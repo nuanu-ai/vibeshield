@@ -4,6 +4,7 @@
  */
 
 export * from "./action.js";
+export * from "./action-group.js";
 export * from "./assessment.js";
 export * from "./component-reachability.js";
 export * from "./coverage-summary.js";
