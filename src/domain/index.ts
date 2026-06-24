@@ -17,6 +17,7 @@ export * from "./hypothesis-enrichment.js";
 export * from "./inventory.js";
 export * from "./manifest.js";
 export * from "./manifest-summary.js";
+export * from "./repository-map.js";
 export * from "./run.js";
 export * from "./security-assessment.js";
 export * from "./security-graph.js";
