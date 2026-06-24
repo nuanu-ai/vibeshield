@@ -61,6 +61,7 @@ async function initGitRepo(source: string, files = [".gitignore", "app.ts"]): Pr
     cwd: source,
   });
   await execFileP("git", ["config", "user.name", "VibeShield Test"], { cwd: source });
+  await execFileP("git", ["config", "commit.gpgsign", "false"], { cwd: source });
   await execFileP("git", ["add", ...files], { cwd: source });
   await execFileP("git", ["commit", "-m", "fixture"], { cwd: source });
 }

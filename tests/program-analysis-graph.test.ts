@@ -43,6 +43,30 @@ describe("composeProgramAnalysisGraph boundary", () => {
       expect.arrayContaining(["receives", "registers"]),
     );
   });
+
+  it("creates Boundary and Source nodes from real Atom framework-input flows", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({
+        artifacts: [
+          artifact("entities", realAtomUsageSlices()),
+          artifact("call_edges", realAtomReachables()),
+        ],
+      }),
+    );
+
+    expect(graph.nodes.find((node) => node.kind === "Boundary")).toMatchObject({
+      label: "proxyHandler",
+      repoPath: "src/routes/proxy.js",
+      properties: { boundaryType: "framework-input", routeOrName: "proxyHandler" },
+    });
+    expect(graph.nodes.find((node) => node.kind === "Source")).toMatchObject({
+      label: "req",
+      properties: { sourceType: "external_input" },
+    });
+    expect(graph.edges.map((edge) => edge.kind)).toEqual(
+      expect.arrayContaining(["receives", "registers"]),
+    );
+  });
 });
 
 describe("composeProgramAnalysisGraph path", () => {
@@ -68,6 +92,36 @@ describe("composeProgramAnalysisGraph path", () => {
 
     expect(graph.edges.filter((edge) => edge.kind === "calls")).toHaveLength(0);
   });
+
+  it("resolves real Atom file-qualified call names through a unique target symbol", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({
+        artifacts: [
+          artifact("entities", realAtomUsageSlices()),
+          artifact("call_edges", realAtomReachables()),
+        ],
+      }),
+    );
+    const calls = graph.edges.filter((edge) => edge.kind === "calls");
+    const labelsById = new Map(graph.nodes.map((node) => [node.id, node.label]));
+
+    expect(
+      calls.map((edge) => [labelsById.get(edge.fromNodeId), labelsById.get(edge.toNodeId)]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["proxyHandler", "fetchUrl"],
+        ["fetchUrl", "fetch"],
+      ]),
+    );
+  });
+
+  it("does not create a call edge for ambiguous file-qualified target symbols", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", ambiguousQualifiedSymbolSlices())] }),
+    );
+
+    expect(graph.edges.filter((edge) => edge.kind === "calls")).toHaveLength(0);
+  });
 });
 
 describe("composeProgramAnalysisGraph flow", () => {
@@ -82,6 +136,20 @@ describe("composeProgramAnalysisGraph flow", () => {
     expect(positive.flows).toHaveLength(1);
     expect(positive.flows[0]?.pathEdgeIds).toHaveLength(4);
     expect(negative.flows).toHaveLength(0);
+  });
+
+  it("creates SecurityFlow from real Atom framework-input and unresolved cross-file call facts", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({
+        artifacts: [
+          artifact("entities", realAtomUsageSlices()),
+          artifact("call_edges", realAtomReachables()),
+        ],
+      }),
+    );
+
+    expect(graph.flows).toHaveLength(1);
+    expect(graph.flows[0]?.pathEdgeIds).toHaveLength(4);
   });
 });
 
@@ -241,6 +309,138 @@ function ambiguousSymbolSlices() {
   };
 }
 
+function ambiguousQualifiedSymbolSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "src/routes/upload.ts::program:uploadHandler",
+        fileName: "src/routes/upload.ts",
+        lineNumber: 10,
+        usages: [
+          {
+            targetObj: {
+              name: "shared",
+              resolvedMethod: "src/routes/upload.ts::program:shared",
+              label: "CALL",
+              lineNumber: 12,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "src/lib/one.ts::program:shared",
+        fileName: "src/lib/one.ts",
+        lineNumber: 3,
+        usages: [],
+      },
+      {
+        fullName: "src/lib/two.ts::program:shared",
+        fileName: "src/lib/two.ts",
+        lineNumber: 4,
+        usages: [],
+      },
+    ],
+  };
+}
+
+function realAtomUsageSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "src/lib/fetcher.js::program",
+        fileName: "src/lib/fetcher.js",
+        lineNumber: 1,
+        usages: [],
+      },
+      {
+        fullName: "src/lib/fetcher.js::program:fetchUrl",
+        fileName: "src/lib/fetcher.js",
+        lineNumber: 1,
+        usages: [
+          {
+            targetObj: {
+              name: "url",
+              typeFullName: "ANY",
+              position: 1,
+              lineNumber: 1,
+              label: "PARAM",
+            },
+            invokedCalls: [
+              {
+                callName: "fetch",
+                resolvedMethod: "fetch",
+                isExternal: true,
+                lineNumber: 2,
+              },
+            ],
+          },
+          {
+            targetObj: {
+              name: "fetch",
+              resolvedMethod: "fetch",
+              isExternal: true,
+              lineNumber: 2,
+              label: "CALL",
+            },
+          },
+        ],
+      },
+      {
+        fullName: "src/routes/proxy.js::program",
+        fileName: "src/routes/proxy.js",
+        lineNumber: 1,
+        usages: [
+          {
+            targetObj: {
+              name: "require",
+              resolvedMethod: "src/routes/proxy.js::program:require",
+              isExternal: true,
+              lineNumber: 1,
+              label: "CALL",
+            },
+          },
+        ],
+      },
+      {
+        fullName: "src/routes/proxy.js::program:proxyHandler",
+        fileName: "src/routes/proxy.js",
+        lineNumber: 3,
+        usages: [
+          {
+            targetObj: {
+              name: "fetchUrl",
+              resolvedMethod: "src/routes/proxy.js::program:fetchUrl",
+              isExternal: true,
+              lineNumber: 4,
+              label: "CALL",
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function realAtomReachables() {
+  return [
+    {
+      flows: [
+        {
+          id: 41,
+          label: "METHOD_PARAMETER_IN",
+          name: "req",
+          parentMethodName: "proxyHandler",
+          parentFileName: "src/routes/proxy.js",
+          parentClassName: "src/routes/proxy.js::program",
+          lineNumber: 3,
+          tags: "framework-input",
+        },
+      ],
+      purls: [],
+    },
+  ];
+}
+
 function artifact(
   kind: ProgramAnalysisExtractionKind,
   parsed: unknown,
@@ -271,6 +471,8 @@ function manifest(): Manifest {
     files: [
       { path: "src/routes/upload.ts", size: 100, sha256: "route-sha" },
       { path: "src/lib/fetch.ts", size: 80, sha256: "fetch-sha" },
+      { path: "src/routes/proxy.js", size: 120, sha256: "proxy-sha" },
+      { path: "src/lib/fetcher.js", size: 90, sha256: "fetcher-sha" },
       { path: "src/lib/one.ts", size: 70, sha256: "one-sha" },
       { path: "src/lib/two.ts", size: 75, sha256: "two-sha" },
     ],

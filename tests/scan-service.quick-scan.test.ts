@@ -1127,6 +1127,7 @@ async function initGitFixture(sourcePath: string): Promise<void> {
     cwd: sourcePath,
   });
   await execFileP("git", ["config", "user.name", "VibeShield Test"], { cwd: sourcePath });
+  await execFileP("git", ["config", "commit.gpgsign", "false"], { cwd: sourcePath });
   await execFileP("git", ["add", "."], { cwd: sourcePath });
   await execFileP("git", ["commit", "-m", "fixture"], { cwd: sourcePath });
 }

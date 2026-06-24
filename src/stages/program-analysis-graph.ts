@@ -49,6 +49,15 @@ interface BoundaryHint {
   readonly sourceName?: string;
 }
 
+interface FlowBoundaryObservation {
+  readonly fullName: string;
+  readonly repoPath: string;
+  readonly lineRange: LineRange;
+  readonly sourceName: string;
+  readonly evidenceId: string;
+  readonly producerVersion: string;
+}
+
 interface GraphBuilder {
   readonly nodes: SecurityGraphNode[];
   readonly edges: SecurityGraphEdge[];
@@ -83,6 +92,11 @@ export function composeProgramAnalysisGraph(
     ...artifactsOfKind(artifactsByKind, "component_usage"),
   ];
   const flowArtifacts = artifactsOfKind(artifactsByKind, "flows");
+  const reachabilityArtifacts = [
+    ...artifactsOfKind(artifactsByKind, "call_edges"),
+    ...artifactsOfKind(artifactsByKind, "component_usage"),
+    ...flowArtifacts,
+  ];
   const builder = graphBuilder();
   const observedEntities: ObservedEntity[] = [];
 
@@ -102,6 +116,17 @@ export function composeProgramAnalysisGraph(
       continue;
     }
     addBoundaryHint(builder, input.graphVersion, entity, owner);
+  }
+
+  for (const observation of readFlowBoundaryObservations(reachabilityArtifacts, manifestPaths)) {
+    addFlowBoundaryObservation(builder, input.graphVersion, observation);
+  }
+
+  for (const entity of observedEntities) {
+    const owner = builder.codeByFullName.get(entity.fullName);
+    if (owner === undefined) {
+      continue;
+    }
     addObservedCalls(builder, input.graphVersion, entity, owner);
   }
 
@@ -191,6 +216,49 @@ function readObservedEntities(
   return observed;
 }
 
+function readFlowBoundaryObservations(
+  artifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact>,
+  manifestPaths: ReadonlySet<string>,
+): FlowBoundaryObservation[] {
+  return artifacts.flatMap((artifact) => {
+    const observations: FlowBoundaryObservation[] = [];
+    for (const flowRecord of asObjectArray(artifact.parsed)) {
+      for (const flow of asObjectArray(flowRecord.flows)) {
+        const label = stringValue(flow.label);
+        const tags = stringValue(flow.tags);
+        const repoPath = stringValue(flow.parentFileName);
+        const methodName = stringValue(flow.parentMethodName);
+        const parentClassName = stringValue(flow.parentClassName);
+        const lineNumber = positiveInteger(flow.lineNumber);
+        const sourceName = stringValue(flow.name) ?? stringValue(flow.code);
+        if (
+          label !== "METHOD_PARAMETER_IN" ||
+          tags?.includes("framework-input") !== true ||
+          repoPath === undefined ||
+          methodName === undefined ||
+          lineNumber === undefined ||
+          sourceName === undefined ||
+          !isSafeManifestPath(repoPath, manifestPaths)
+        ) {
+          continue;
+        }
+        observations.push({
+          fullName:
+            parentClassName === undefined
+              ? `${repoPath}::program:${methodName}`
+              : `${parentClassName}:${methodName}`,
+          repoPath,
+          lineRange: { startLine: lineNumber, endLine: lineNumber },
+          sourceName,
+          evidenceId: artifact.sliceArtifact.blobSha256,
+          producerVersion: artifact.backendVersion,
+        });
+      }
+    }
+    return observations;
+  });
+}
+
 function addCodeEntity(
   builder: GraphBuilder,
   graphVersion: string,
@@ -272,6 +340,65 @@ function addBoundaryHint(
   });
 }
 
+function addFlowBoundaryObservation(
+  builder: GraphBuilder,
+  graphVersion: string,
+  observation: FlowBoundaryObservation,
+): void {
+  const owner = findBoundaryOwner(builder, observation);
+  if (owner === undefined || hasRegisteredBoundary(builder, owner.id)) {
+    return;
+  }
+
+  const boundary = addNode(builder, graphVersion, {
+    kind: "Boundary",
+    stableKey: `Boundary:framework-input::${owner.symbol ?? owner.label}`,
+    label: observationLabel(observation),
+    repoPath: observation.repoPath,
+    lineRange: observation.lineRange,
+    ...(owner.symbol === undefined ? {} : { symbol: owner.symbol }),
+    properties: {
+      boundaryType: "framework-input",
+      routeOrName: observationLabel(observation),
+    },
+    evidenceIds: [observation.evidenceId],
+    producerVersion: observation.producerVersion,
+  });
+  const source = addNode(builder, graphVersion, {
+    kind: "Source",
+    stableKey: `Source:${boundary.stableKey}:${observation.sourceName}`,
+    label: observation.sourceName,
+    repoPath: observation.repoPath,
+    lineRange: observation.lineRange,
+    symbol: observation.sourceName,
+    properties: {
+      sourceType: "external_input",
+      boundaryNodeId: boundary.id,
+    },
+    evidenceIds: [observation.evidenceId],
+    producerVersion: observation.producerVersion,
+  });
+
+  addEdge(builder, graphVersion, {
+    kind: "receives",
+    stableKey: `receives:${source.id}:${boundary.id}`,
+    fromNodeId: source.id,
+    toNodeId: boundary.id,
+    properties: {},
+    evidenceIds: [observation.evidenceId],
+    producerVersion: observation.producerVersion,
+  });
+  addEdge(builder, graphVersion, {
+    kind: "registers",
+    stableKey: `registers:${boundary.id}:${owner.id}`,
+    fromNodeId: boundary.id,
+    toNodeId: owner.id,
+    properties: {},
+    evidenceIds: [observation.evidenceId],
+    producerVersion: observation.producerVersion,
+  });
+}
+
 function addObservedCalls(
   builder: GraphBuilder,
   graphVersion: string,
@@ -309,11 +436,30 @@ function findTargetCodeEntity(builder: GraphBuilder, name: string): SecurityGrap
   if (exactTarget !== undefined) {
     return exactTarget;
   }
-  if (name.includes(":")) {
-    return undefined;
-  }
   const symbolTargets = builder.codeBySymbol.get(symbolFromFullName(name)) ?? [];
   return symbolTargets.length === 1 ? symbolTargets[0] : undefined;
+}
+
+function findBoundaryOwner(
+  builder: GraphBuilder,
+  observation: FlowBoundaryObservation,
+): SecurityGraphNode | undefined {
+  const exactTarget = builder.codeByFullName.get(observation.fullName);
+  if (exactTarget !== undefined) {
+    return exactTarget;
+  }
+  const symbolTargets = builder.codeBySymbol.get(symbolFromFullName(observation.fullName)) ?? [];
+  const sameFileTargets = symbolTargets.filter((node) => node.repoPath === observation.repoPath);
+  return sameFileTargets.length === 1 ? sameFileTargets[0] : undefined;
+}
+
+function hasRegisteredBoundary(builder: GraphBuilder, ownerId: string): boolean {
+  return builder.edges.some(
+    (edge) =>
+      edge.kind === "registers" &&
+      edge.toNodeId === ownerId &&
+      builder.nodes.find((node) => node.id === edge.fromNodeId)?.kind === "Boundary",
+  );
 }
 
 function addSymbolTarget(builder: GraphBuilder, symbol: string, node: SecurityGraphNode): void {
@@ -573,6 +719,10 @@ function boundaryHint(value: unknown): BoundaryHint | undefined {
     ...(method === undefined ? {} : { method }),
     ...(sourceName === undefined ? {} : { sourceName }),
   };
+}
+
+function observationLabel(observation: FlowBoundaryObservation): string {
+  return symbolFromFullName(observation.fullName);
 }
 
 function asObject(value: unknown): AtomObject {

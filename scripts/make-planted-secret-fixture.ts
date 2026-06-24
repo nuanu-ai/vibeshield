@@ -45,6 +45,7 @@ async function main(): Promise<void> {
   await git(dest, ["init", "-q", "--initial-branch=main"]);
   await git(dest, ["config", "user.email", "fixture@vibeshield.test"]);
   await git(dest, ["config", "user.name", "VibeShield Fixture"]);
+  await git(dest, ["config", "commit.gpgsign", "false"]);
 
   await writeFile(
     path.join(dest, "README.md"),
