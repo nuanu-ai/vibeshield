@@ -26,6 +26,9 @@ import {
 const DEFAULT_ATOM_BIN = "atom";
 const DEFAULT_ATOM_VERSION = "2.5.6";
 const MAX_ERROR_OUTPUT = 4000;
+const MAX_PUBLIC_ERROR_OUTPUT = 500;
+const MAX_SLICE_SHARDS = 999;
+const encoder = new TextEncoder();
 
 export interface AtomProgramAnalysisBackendOptions {
   readonly session: SandboxSession;
@@ -175,7 +178,7 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
     ];
 
     await this.execAtom(command, kind);
-    const sliceBytes = await this.readRequired(slicePath, kind);
+    const sliceBytes = await this.readRequiredSlice(slicePath, kind);
     const parsed = parseSliceJson(sliceBytes, kind);
     const stored = await this.artifacts.store(sliceBytes);
 
@@ -199,9 +202,10 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
     try {
       const result = await this.session.exec([...command]);
       if (result.exitCode !== 0) {
+        const output = publicOutputSummary(result);
         throw new ProgramAnalysisBackendError(
           "atom_exit_nonzero",
-          `Atom ${area} command failed with exit code ${result.exitCode}.`,
+          `Atom ${area} command failed with exit code ${result.exitCode}.${output}`,
           {
             area,
             command,
@@ -227,7 +231,7 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
   }
 
   private async readRequired(path: string, area: ProgramAnalysisCoverageArea): Promise<Uint8Array> {
-    const bytes = await this.session.read(path);
+    const bytes = await this.readOptional(path);
     if (bytes.byteLength === 0) {
       throw new ProgramAnalysisBackendError(
         "atom_output_missing",
@@ -239,6 +243,55 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
       );
     }
     return bytes;
+  }
+
+  private async readRequiredSlice(
+    path: string,
+    kind: ProgramAnalysisExtractionKind,
+  ): Promise<Uint8Array> {
+    const chunks = await this.readSliceChunks(path);
+    if (chunks.length === 0) {
+      throw new ProgramAnalysisBackendError(
+        "atom_output_missing",
+        `Atom ${kind} output is missing: ${path}`,
+        {
+          kind,
+          path,
+        },
+      );
+    }
+    const firstChunk = chunks[0];
+    if (chunks.length === 1 && firstChunk !== undefined) {
+      return firstChunk;
+    }
+    return mergeSliceChunks(chunks, kind);
+  }
+
+  private async readSliceChunks(path: string): Promise<Uint8Array[]> {
+    const chunks: Uint8Array[] = [];
+    const primary = await this.readOptional(path);
+    if (primary.byteLength > 0) {
+      chunks.push(primary);
+    }
+    for (let index = 1; index <= MAX_SLICE_SHARDS; index += 1) {
+      const shard = await this.readOptional(sliceShardPath(path, index));
+      if (shard.byteLength === 0) {
+        break;
+      }
+      chunks.push(shard);
+    }
+    return chunks;
+  }
+
+  private async readOptional(path: string): Promise<Uint8Array> {
+    try {
+      return await this.session.read(path);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return new Uint8Array();
+      }
+      throw error;
+    }
   }
 }
 
@@ -293,4 +346,77 @@ function countCovered(counts: ReadonlyArray<{ readonly fileCount: number }>): nu
 
 function truncate(value: string): string {
   return value.length > MAX_ERROR_OUTPUT ? `${value.slice(0, MAX_ERROR_OUTPUT)}...` : value;
+}
+
+function publicOutputSummary(result: { readonly stdout: string; readonly stderr: string }): string {
+  const stderr = compact(result.stderr);
+  if (stderr.length > 0) {
+    return ` stderr: ${truncatePublic(stderr)}`;
+  }
+  const stdout = compact(result.stdout);
+  if (stdout.length > 0) {
+    return ` stdout: ${truncatePublic(stdout)}`;
+  }
+  return "";
+}
+
+function compact(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncatePublic(value: string): string {
+  return value.length > MAX_PUBLIC_ERROR_OUTPUT
+    ? `${value.slice(0, MAX_PUBLIC_ERROR_OUTPUT)}...`
+    : value;
+}
+
+function sliceShardPath(path: string, index: number): string {
+  return path.endsWith(".json")
+    ? `${path.slice(0, -".json".length)}_${index}.json`
+    : `${path}_${index}`;
+}
+
+function mergeSliceChunks(
+  chunks: ReadonlyArray<Uint8Array>,
+  kind: ProgramAnalysisExtractionKind,
+): Uint8Array {
+  const parsed = chunks.map((chunk) => parseSliceJson(chunk, kind));
+  if (parsed.every(Array.isArray)) {
+    return encoder.encode(JSON.stringify(parsed.flat()));
+  }
+  if (parsed.every(hasObjectSlices)) {
+    const objectChunks = parsed as Array<{ readonly objectSlices: unknown[] }>;
+    const first = objectChunks[0];
+    if (first === undefined) {
+      return encoder.encode(JSON.stringify({ objectSlices: [] }));
+    }
+    const rest = objectChunks.slice(1);
+    return encoder.encode(
+      JSON.stringify({
+        ...first,
+        objectSlices: [...first.objectSlices, ...rest.flatMap((chunk) => chunk.objectSlices)],
+      }),
+    );
+  }
+  throw new ProgramAnalysisBackendError(
+    "atom_invalid_json",
+    `Atom ${kind} sharded slice JSON cannot be merged: expected arrays or objectSlices objects.`,
+    {
+      kind,
+      chunks: chunks.length,
+    },
+  );
+}
+
+function hasObjectSlices(value: unknown): value is { readonly objectSlices: unknown[] } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as { readonly objectSlices?: unknown }).objectSlices)
+  );
+}
+
+function isMissingPathError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:enoent|not found|no such file)/iu.test(message);
 }

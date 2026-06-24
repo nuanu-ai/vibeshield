@@ -122,6 +122,35 @@ describe("AtomProgramAnalysisBackend extract", () => {
       ATOM_COMPONENT_USAGE_SLICE_PATH,
     ]);
   });
+
+  it("merges Atom numbered slice shards into one extraction artifact", async () => {
+    const artifacts = new MemoryArtifacts();
+    const session = new FakeSandboxSession("atom-test", (command, currentSession) => {
+      const slicePath = valueAfter(command, "-s");
+      if (slicePath !== undefined) {
+        currentSession.files.set(slicePath, jsonBytes([{ kind: command[1], id: "primary" }]));
+        currentSession.files.set(
+          slicePath.replace(/\.json$/, "_1.json"),
+          jsonBytes([{ kind: command[1], id: "shard-1" }]),
+        );
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const backend = new AtomProgramAnalysisBackend({ session, artifacts });
+
+    const callEdges = await backend.extractCallEdges(modelRef());
+
+    expect(callEdges.parsed).toEqual([
+      { kind: "reachables", id: "primary" },
+      { kind: "reachables", id: "shard-1" },
+    ]);
+    await expect(artifacts.read(callEdges.sliceArtifact.blobSha256)).resolves.toEqual(
+      jsonBytes([
+        { kind: "reachables", id: "primary" },
+        { kind: "reachables", id: "shard-1" },
+      ]),
+    );
+  });
 });
 
 describe("AtomProgramAnalysisBackend failure", () => {
@@ -139,6 +168,7 @@ describe("AtomProgramAnalysisBackend failure", () => {
       nonZero.buildModel({ sourceDir: SOURCE_DIR, manifest: manifest(["src/app.ts"]) }),
     ).rejects.toMatchObject({
       code: "atom_exit_nonzero",
+      message: "Atom model command failed with exit code 127. stderr: atom: not found",
     });
 
     const missing = new AtomProgramAnalysisBackend({

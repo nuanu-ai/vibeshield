@@ -56,7 +56,7 @@ export interface MicrosandboxRuntimeOptions {
   readonly imageTag?: string;
   /** vCPUs per sandbox; default 2. */
   readonly cpus?: number;
-  /** Memory in MiB per sandbox; default 2048. */
+  /** Memory in MiB per sandbox; default 4096. */
   readonly memoryMib?: number;
 }
 
@@ -68,7 +68,7 @@ export class MicrosandboxRuntime implements SandboxRuntime {
   constructor(opts: MicrosandboxRuntimeOptions = {}) {
     this.imageTag = opts.imageTag ?? "vibeshield-toolchain:latest";
     this.cpus = opts.cpus ?? 2;
-    this.memoryMib = opts.memoryMib ?? 2048;
+    this.memoryMib = opts.memoryMib ?? 4096;
   }
 
   async isAvailable(): Promise<SandboxAvailability> {
