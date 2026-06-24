@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { DeepCoverage } from "../src/domain/deep-coverage.js";
 import type { ArtifactRef, Run, RunId, StageAttempt, StageId } from "../src/domain/run.js";
 import type {
   SecurityGraph,
@@ -100,6 +101,12 @@ class MemoryStateStore {
   ): Promise<void> {}
 
   async loadSecurityGraph(_runId: RunId, _graphId: string): Promise<SecurityGraph | null> {
+    return null;
+  }
+
+  async recordDeepCoverage(_coverage: DeepCoverage): Promise<void> {}
+
+  async loadDeepCoverage(_runId: RunId): Promise<DeepCoverage | null> {
     return null;
   }
 

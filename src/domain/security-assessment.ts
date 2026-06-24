@@ -9,6 +9,7 @@ import type { ActionCandidate, RemediationAction } from "./action.js";
 import type { Verdict } from "./assessment.js";
 import type { CoverageEntry } from "./coverage-summary.js";
 import { SCAN_LIMITATION } from "./coverage-summary.js";
+import type { DeepCoverageEntry } from "./deep-coverage.js";
 import type { Evidence } from "./evidence.js";
 import type { Finding, FindingCluster } from "./finding.js";
 import type { ManifestSummary, ToolchainSummary } from "./manifest-summary.js";
@@ -19,6 +20,7 @@ export interface SecurityAssessment {
   readonly toolchain: ToolchainSummary;
   readonly verdict: Verdict;
   readonly coverage: ReadonlyArray<CoverageEntry>;
+  readonly deepCoverage?: ReadonlyArray<DeepCoverageEntry>;
   readonly findingSummary: FindingSummary;
   readonly evidence: ReadonlyArray<Evidence>;
   readonly findings: ReadonlyArray<Finding>;

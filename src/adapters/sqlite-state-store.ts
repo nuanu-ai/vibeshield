@@ -7,6 +7,8 @@
  */
 
 import type { DatabaseSync } from "node:sqlite";
+import type { DeepCoverage, DeepCoverageArea, DeepCoverageState } from "../domain/deep-coverage.js";
+import { sortDeepCoverage, validateDeepCoverage } from "../domain/deep-coverage.js";
 import type {
   ArtifactRef,
   Run,
@@ -106,6 +108,18 @@ interface GraphCoverageRow {
   reason: string | null;
   producer: string;
   producer_version: string;
+}
+
+interface DeepCoverageRow {
+  snapshot_id: string;
+  area: string;
+  state: string;
+  covered_count: number | null;
+  total_count: number | null;
+  reason: string | null;
+  producer: string;
+  producer_version: string;
+  created_at: string;
 }
 
 export class SqliteStateStore implements StateStore {
@@ -233,6 +247,62 @@ export class SqliteStateStore implements StateStore {
       flows: this.loadGraphFlows(graphId),
       coverage: this.loadGraphCoverage(graphId),
       createdAt: graphRow.created_at,
+    });
+  }
+
+  async recordDeepCoverage(coverage: DeepCoverage): Promise<void> {
+    const normalized = validateDeepCoverage(coverage);
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("DELETE FROM deep_coverage WHERE run_id = ?").run(normalized.runId);
+      const stmt = this.db.prepare(
+        `INSERT INTO deep_coverage
+         (run_id, snapshot_id, area, state, covered_count, total_count, reason,
+          producer, producer_version, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const entry of normalized.entries) {
+        stmt.run(
+          normalized.runId,
+          normalized.snapshotId,
+          entry.area,
+          entry.state,
+          entry.coveredCount ?? null,
+          entry.totalCount ?? null,
+          entry.reason ?? null,
+          entry.producer,
+          entry.producerVersion,
+          normalized.createdAt,
+        );
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async loadDeepCoverage(runId: RunId): Promise<DeepCoverage | null> {
+    const rows = this.db
+      .prepare("SELECT * FROM deep_coverage WHERE run_id = ? ORDER BY area, producer")
+      .all(runId) as unknown as DeepCoverageRow[];
+    const first = rows[0];
+    if (first === undefined) {
+      return null;
+    }
+    return sortDeepCoverage({
+      runId,
+      snapshotId: first.snapshot_id,
+      createdAt: first.created_at,
+      entries: rows.map((row) => ({
+        area: row.area as DeepCoverageArea,
+        state: row.state as DeepCoverageState,
+        ...(row.covered_count !== null ? { coveredCount: row.covered_count } : {}),
+        ...(row.total_count !== null ? { totalCount: row.total_count } : {}),
+        ...(row.reason !== null ? { reason: row.reason } : {}),
+        producer: row.producer,
+        producerVersion: row.producer_version,
+      })),
     });
   }
 

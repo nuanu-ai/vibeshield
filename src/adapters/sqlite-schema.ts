@@ -11,13 +11,14 @@
  *   graph_edges      — deterministic graph edges
  *   graph_flows      — bounded graph paths used for static hypotheses
  *   graph_coverage   — Deep Static coverage by analysis area
+ *   deep_coverage    — Run-level Deep Static coverage truth for reports
  *
  * Versioned via the user_version pragma. Bump + add migration steps when the
  * shape changes. The runner never reads run state off disk; it loads it here.
  */
 import type { DatabaseSync } from "node:sqlite";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export function migrate(db: DatabaseSync): void {
   db.exec(`
@@ -141,6 +142,21 @@ export function migrate(db: DatabaseSync): void {
       producer_version TEXT NOT NULL,
       PRIMARY KEY (graph_id, area, producer),
       FOREIGN KEY (graph_id) REFERENCES security_graphs(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS deep_coverage (
+      run_id           TEXT NOT NULL,
+      snapshot_id      TEXT NOT NULL,
+      area             TEXT NOT NULL,
+      state            TEXT NOT NULL,
+      covered_count    INTEGER,
+      total_count      INTEGER,
+      reason           TEXT,
+      producer         TEXT NOT NULL,
+      producer_version TEXT NOT NULL,
+      created_at       TEXT NOT NULL,
+      PRIMARY KEY (run_id, area, producer),
+      FOREIGN KEY (run_id) REFERENCES runs(id)
     );
   `);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

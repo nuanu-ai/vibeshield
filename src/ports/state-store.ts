@@ -5,6 +5,7 @@
  * on disk. Reruns add a new attempt; old attempts are kept.
  */
 
+import type { DeepCoverage } from "../domain/deep-coverage.js";
 import type { ArtifactRef, Run, RunId, StageAttempt, StageId } from "../domain/run.js";
 import type { SecurityGraph, SecurityGraphValidationContext } from "../domain/security-graph.js";
 
@@ -26,6 +27,10 @@ export interface StateStore {
   ): Promise<void>;
   /** Load a persisted Deep Static graph projection. */
   loadSecurityGraph(runId: RunId, graphId: string): Promise<SecurityGraph | null>;
+  /** Persist Deep Static coverage truth for a run. */
+  recordDeepCoverage(coverage: DeepCoverage): Promise<void>;
+  /** Load persisted Deep Static coverage truth for a run. */
+  loadDeepCoverage(runId: RunId): Promise<DeepCoverage | null>;
   /** Set terminal run status + finishedAt. */
   finishRun(id: RunId, status: Run["status"], finishedAt: string): Promise<void>;
 }

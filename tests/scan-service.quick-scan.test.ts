@@ -105,6 +105,8 @@ describe("runScan quick scan vertical slice", () => {
     };
     expect(report.assessment.verdict).toBe("critical-fix-needed");
     expect(report.assessment.rankedActions).toHaveLength(1);
+    expect("deepCoverage" in outcome.assessment).toBe(false);
+    expect("deepCoverage" in report.assessment).toBe(false);
     expect(coverageByCheck(report.assessment.coverage).get("github-actions.actionlint")).toEqual({
       check: "github-actions.actionlint",
       status: "skipped",

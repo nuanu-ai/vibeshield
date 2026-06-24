@@ -4,6 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SqliteStateStore } from "../src/adapters/sqlite-state-store.js";
+import type { DeepCoverage } from "../src/domain/deep-coverage.js";
 import type { Run, StageAttempt } from "../src/domain/run.js";
 import {
   type SecurityGraph,
@@ -118,12 +119,13 @@ describe("SqliteStateStore", () => {
       .prepare(
         `SELECT name FROM sqlite_master
          WHERE type = 'table'
-           AND name IN ('security_graphs', 'graph_nodes', 'graph_edges', 'graph_flows', 'graph_coverage')
+           AND name IN ('security_graphs', 'graph_nodes', 'graph_edges', 'graph_flows', 'graph_coverage', 'deep_coverage')
          ORDER BY name`,
       )
       .all() as { name: string }[];
 
     expect(rows.map((row) => row.name)).toEqual([
+      "deep_coverage",
       "graph_coverage",
       "graph_edges",
       "graph_flows",
@@ -184,6 +186,38 @@ describe("SqliteStateStore", () => {
     const rows = db.prepare("SELECT id FROM security_graphs").all();
     expect(rows).toEqual([]);
   });
+
+  it("persists and reloads deepCoverage for a run", async () => {
+    await store.createRun(makeRun());
+    const coverage = makeDeepCoverage();
+
+    await store.recordDeepCoverage(coverage);
+
+    await expect(store.loadDeepCoverage("run-1")).resolves.toEqual(coverage);
+  });
+
+  it("replaces deepCoverage rows for the same run deterministically", async () => {
+    await store.createRun(makeRun());
+    await store.recordDeepCoverage(makeDeepCoverage());
+    const replacement = makeDeepCoverage({
+      entries: [
+        {
+          area: "model",
+          state: "failed",
+          reason: "Atom process exited 137",
+          producer: "atom",
+          producerVersion: "atom@2.5.6",
+        },
+      ],
+    });
+
+    await store.recordDeepCoverage(replacement);
+
+    await expect(store.loadDeepCoverage("run-1")).resolves.toEqual(replacement);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM deep_coverage").get()).toEqual({
+      count: 1,
+    });
+  });
 });
 
 function graphValidationContext() {
@@ -213,6 +247,25 @@ function makeSecurityGraph(overrides: Partial<SecurityGraph> = {}): SecurityGrap
       },
     ],
     createdAt: "2026-06-24T09:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeDeepCoverage(overrides: Partial<DeepCoverage> = {}): DeepCoverage {
+  return {
+    runId: "run-1",
+    snapshotId: "snapshot-1",
+    createdAt: "2026-06-24T10:00:00Z",
+    entries: [
+      {
+        area: "boundaries",
+        state: "checked",
+        coveredCount: 1,
+        totalCount: 1,
+        producer: "atom",
+        producerVersion: "atom@2.5.6",
+      },
+    ],
     ...overrides,
   };
 }
