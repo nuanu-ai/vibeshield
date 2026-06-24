@@ -12,6 +12,7 @@ import { SqliteStateStore } from "../src/adapters/sqlite-state-store.js";
 import { runScan } from "../src/application/scan-service.js";
 import type { RemediationAction } from "../src/domain/action.js";
 import type { Manifest } from "../src/domain/manifest.js";
+import type { SecurityAssessment } from "../src/domain/security-assessment.js";
 import type { ScanEvent } from "../src/ports/event-sink.js";
 import type {
   ModelEnhanceBatchInput,
@@ -325,6 +326,82 @@ describe("runScan quick scan vertical slice", () => {
       [secretFinding?.id],
       [dependencyFinding?.id],
     ]);
+  });
+
+  it("keeps deterministic Deep Static facts stable when model enrichment is enabled", async () => {
+    const source = await writeLocalFixture(dir);
+    const modelOff = await runGate4DeepScan(dir, source, new NullModelProvider());
+    const model = new FakeModelProvider(
+      () => null,
+      (input) =>
+        input.hypotheses.map((hypothesis) => modelHypothesisOutput(hypothesis.hypothesisId)),
+    );
+    const modelOn = await runGate4DeepScan(dir, source, model);
+
+    expect(model.hypothesisInputs).toHaveLength(1);
+    expect(deepDeterministicProjection(modelOn.assessment)).toEqual(
+      deepDeterministicProjection(modelOff.assessment),
+    );
+    expect(
+      modelOff.assessment.hypothesisEnrichments?.every((item) => item.source === "catalog"),
+    ).toBe(true);
+    expect(modelOn.assessment.hypothesisEnrichments?.every((item) => item.source === "model")).toBe(
+      true,
+    );
+    expect(modelOn.assessment.hypothesisEnrichments?.[0]?.attackDescription).toContain(
+      "Model attack description",
+    );
+
+    const report = JSON.parse(await readFile(modelOn.reportPaths.json ?? "", "utf8")) as {
+      assessment: SecurityAssessment;
+    };
+    expect(deepDeterministicProjection(report.assessment)).toEqual(
+      deepDeterministicProjection(modelOff.assessment),
+    );
+    expect(report.assessment.hypothesisEnrichments?.[0]).toMatchObject({
+      source: "model",
+      attackDescription: expect.stringContaining("Model attack description"),
+    });
+
+    const markdown = await readFile(modelOn.reportPaths.markdown ?? "", "utf8");
+    expect(markdown).toContain("## Fix now");
+    expect(markdown).toContain("## Likely attack paths");
+    expect(markdown).toContain("## Deep analysis coverage");
+    expect(markdown).toContain("## Quick finding context");
+    expect(markdown).toContain("## Validation recipes");
+    expect(markdown).toContain("Repository map artifact:");
+    expect(markdown).toContain("Model attack description");
+
+    const html = await readFile(modelOn.reportPaths.html ?? "", "utf8");
+    expect(html).toContain("<h2>Fix now</h2>");
+    expect(html).toContain("<h2>Likely attack paths</h2>");
+    expect(html).toContain("<h2>Deep analysis coverage</h2>");
+    expect(html).toContain("<h2>Quick finding context</h2>");
+    expect(html).toContain("<h2>Validation recipes</h2>");
+    expect(html).toContain("Model attack description");
+  });
+
+  it("falls back to deterministic hypothesis enrichment for invalid model output", async () => {
+    const source = await writeLocalFixture(dir);
+    const model = new FakeModelProvider(
+      () => null,
+      (input) =>
+        input.hypotheses.map((hypothesis) => ({
+          ...modelHypothesisOutput(hypothesis.hypothesisId),
+          attackDescription: "Runtime confirmed exploit.",
+        })),
+    );
+
+    const outcome = await runGate4DeepScan(dir, source, model);
+
+    expect(model.hypothesisInputs).toHaveLength(1);
+    expect(outcome.assessment.staticHypotheses?.length).toBeGreaterThan(0);
+    expect(
+      outcome.assessment.hypothesisEnrichments?.every((item) => item.source === "catalog"),
+    ).toBe(true);
+    expect(outcome.assessment.hypothesisEnrichments?.[0]?.attackDescription).not.toContain(
+      "Runtime confirmed exploit",
+    );
   });
 
   it("keeps the Quick Scan Fix Pack when Deep Static backend analysis fails", async () => {
@@ -1030,6 +1107,109 @@ function deps(
   };
 }
 
+async function runGate4DeepScan(
+  root: string,
+  source: Awaited<ReturnType<typeof writeLocalFixture>>,
+  model: ModelProvider,
+) {
+  const sandbox = new FakeSandboxRuntime({
+    exec: fakeQuickScanExec(
+      manifestFor(source.path, deepManifestFiles()),
+      [
+        {
+          RuleID: "stripe-access-token",
+          Description: "Stripe Access Token",
+          File: "src/routes/upload.ts",
+          StartLine: 10,
+          EndLine: 10,
+          Secret: PLANTED_SECRET,
+          Match: `stripeSecret: "${PLANTED_SECRET}"`,
+          Fingerprint: "src/routes/upload.ts:stripe-access-token:10",
+        },
+      ],
+      { atom: { mode: "success" } },
+    ),
+  });
+  return runScan(deps(sandbox, new FilesystemBlobs(root), model), {
+    source,
+    runRoot: path.join(root, "runs"),
+    toolchainImage: "test-toolchain:latest",
+    deep: true,
+  });
+}
+
+function modelHypothesisOutput(hypothesisId: string): ModelHypothesisEnrichment {
+  return {
+    hypothesisId,
+    attackDescription: `Model attack description for ${hypothesisId}.`,
+    assumptions: ["Model assumption from supplied static graph refs."],
+    impact: "Model impact explanation.",
+    remediation: "Model remediation guidance.",
+    agentPrompt: `Model prompt for ${hypothesisId}.`,
+    acceptanceCriteria: ["Model acceptance criterion."],
+    validationRecipeText: "Model validation recipe text.",
+  };
+}
+
+function deepDeterministicProjection(assessment: SecurityAssessment) {
+  return {
+    verdict: assessment.verdict,
+    findings: assessment.findings.map((finding) => ({
+      id: finding.id,
+      sourceTool: finding.sourceTool,
+      ruleId: finding.ruleId,
+      category: finding.category,
+      severity: finding.severity,
+      confidence: finding.confidence,
+      fingerprint: finding.fingerprint,
+      evidenceIds: [...finding.evidenceIds],
+      locations: finding.locations.map((location) => ({ ...location })),
+      remediationKey: finding.remediationKey,
+    })),
+    rankedActions: assessment.rankedActions.map((action) => ({
+      candidate: action.candidate,
+    })),
+    findingContextAssessments: (assessment.findingContextAssessments ?? []).map((context) => ({
+      findingId: context.findingId,
+      status: context.status,
+      graphNodeIds: [...context.graphNodeIds],
+      graphEdgeIds: [...context.graphEdgeIds],
+      hypothesisIds: [...context.hypothesisIds],
+      coverageState: context.coverageState,
+    })),
+    staticHypotheses: (assessment.staticHypotheses ?? []).map((hypothesis) => ({
+      id: hypothesis.id,
+      candidateId: hypothesis.candidateId,
+      status: hypothesis.status,
+      staticConfidence: hypothesis.staticConfidence,
+      title: hypothesis.title,
+      supportingEvidenceIds: [...hypothesis.supportingEvidenceIds],
+      contradictingEvidenceIds: [...hypothesis.contradictingEvidenceIds],
+      coverageState: hypothesis.coverageState,
+      runtimeValidationRequired: hypothesis.runtimeValidationRequired,
+    })),
+    validationRecipes: (assessment.validationRecipes ?? []).map((recipe) => ({
+      id: recipe.id,
+      hypothesisId: recipe.hypothesisId,
+      requiredFixtures: [...recipe.requiredFixtures],
+      expectedResult: recipe.expectedResult,
+    })),
+    deepActionGroups: (assessment.deepActionGroups ?? []).map((group) => ({
+      id: group.id,
+      leadKind: group.leadKind,
+      remediationKey: group.remediationKey,
+      priorityScore: group.priorityScore,
+      verdictImpact: group.verdictImpact,
+      directActionIds: [...group.directActionIds],
+      findingIds: [...group.findingIds],
+      hypothesisIds: [...group.hypothesisIds],
+      evidenceIds: [...group.evidenceIds],
+      affectedFiles: [...group.affectedFiles],
+    })),
+    repositoryMapArtifactRole: assessment.repositoryMapArtifactRef?.role,
+  };
+}
+
 interface FakeScannerOverrides {
   readonly actionlint?: {
     readonly exitCode: number;
@@ -1332,11 +1512,15 @@ class CollectingEvents {
 
 class FakeModelProvider implements ModelProvider {
   readonly inputs: ModelEnhanceBatchInput[] = [];
+  readonly hypothesisInputs: ModelHypothesisEnrichBatchInput[] = [];
 
   constructor(
     private readonly responder: (
       input: ModelEnhanceBatchInput,
     ) => ReadonlyArray<RemediationAction> | null,
+    private readonly hypothesisResponder: (
+      input: ModelHypothesisEnrichBatchInput,
+    ) => ReadonlyArray<ModelHypothesisEnrichment> | null = () => null,
   ) {}
 
   async isAvailable(): Promise<boolean> {
@@ -1349,8 +1533,9 @@ class FakeModelProvider implements ModelProvider {
   }
 
   async enrichHypotheses(
-    _input: ModelHypothesisEnrichBatchInput,
+    input: ModelHypothesisEnrichBatchInput,
   ): Promise<ReadonlyArray<ModelHypothesisEnrichment> | null> {
-    return null;
+    this.hypothesisInputs.push(input);
+    return this.hypothesisResponder(input);
   }
 }
