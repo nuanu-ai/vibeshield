@@ -20,6 +20,8 @@ import type {
   ModelProvider,
 } from "../src/ports/model-provider.js";
 import {
+  ATOM_FLOWS_SLICE_PATH,
+  ATOM_MODEL_PATH,
   GITLEAKS_REPORT_PATH,
   MANIFEST_PATH,
   MANIFEST_SCRIPT_PATH,
@@ -146,6 +148,114 @@ describe("runScan quick scan vertical slice", () => {
       "--redact=100",
       "--no-banner",
     ]);
+    expect(sandbox.invocations.map((i) => i.command[0])).not.toContain("atom");
+  });
+
+  it("writes deep reports and repository-map.json when deep scan is requested", async () => {
+    const source = await writeLocalFixture(dir);
+    const blobs = new FilesystemBlobs(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, deepManifestFiles()),
+        [
+          {
+            RuleID: "stripe-access-token",
+            Description: "Stripe Access Token",
+            File: "src/routes/upload.ts",
+            StartLine: 10,
+            EndLine: 10,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/routes/upload.ts:stripe-access-token:10",
+          },
+        ],
+        { atom: { mode: "success" } },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, blobs), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+      deep: true,
+    });
+
+    expect(sandbox.invocations.map((i) => i.command[0])).toContain("atom");
+    expect(outcome.reportPaths.repositoryMap).toBeDefined();
+    expect(outcome.assessment.repositoryMapArtifactRef).toMatchObject({
+      role: "repository-map.json",
+    });
+    expect(outcome.assessment.deepCoverage?.some((entry) => entry.area === "call_graph")).toBe(
+      true,
+    );
+    expect(
+      outcome.assessment.staticHypotheses?.some(
+        (hypothesis) => hypothesis.status === "statically_supported",
+      ),
+    ).toBe(true);
+
+    const report = JSON.parse(await readFile(outcome.reportPaths.json ?? "", "utf8")) as {
+      assessment: {
+        repositoryMapArtifactRef?: { role: string };
+        staticHypotheses?: Array<{ id: string; status: string }>;
+      };
+    };
+    expect(report.assessment.repositoryMapArtifactRef?.role).toBe("repository-map.json");
+    expect(report.assessment.staticHypotheses?.[0]?.id).toMatch(/^static_hypothesis_/);
+
+    const repositoryMap = JSON.parse(
+      await readFile(outcome.reportPaths.repositoryMap ?? "", "utf8"),
+    ) as { boundaries: unknown[]; relationships: unknown[] };
+    expect(repositoryMap.boundaries).toHaveLength(1);
+    expect(repositoryMap.relationships.length).toBeGreaterThan(0);
+
+    const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
+    expect(markdown).toContain("## Likely attack paths");
+    expect(markdown).toContain("## Deep analysis coverage");
+  });
+
+  it("keeps the Quick Scan Fix Pack when Deep Static backend analysis fails", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path),
+        [
+          {
+            RuleID: "stripe-access-token",
+            Description: "Stripe Access Token",
+            File: "src/config.ts",
+            StartLine: 3,
+            EndLine: 3,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/config.ts:stripe-access-token:3",
+          },
+        ],
+        { atom: { mode: "fail" } },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+      deep: true,
+    });
+
+    expect(outcome.assessment.verdict).toBe("critical-fix-needed");
+    expect(outcome.assessment.rankedActions).toHaveLength(1);
+    expect(outcome.reportPaths.repositoryMap).toBeDefined();
+    expect(
+      outcome.assessment.deepCoverage?.some(
+        (entry) =>
+          entry.state === "failed" && entry.reason?.includes("Deep Static program analysis failed"),
+      ),
+    ).toBe(true);
+    expect(
+      outcome.assessment.staticHypotheses?.some(
+        (hypothesis) => hypothesis.status === "statically_supported",
+      ),
+    ).toBe(false);
   });
 
   it("rejects scanner evidence that is not inside the snapshot manifest", async () => {
@@ -820,6 +930,9 @@ interface FakeScannerOverrides {
     readonly stderr: string;
     readonly metadata?: Record<string, unknown> | null;
   };
+  readonly atom?: {
+    readonly mode: "success" | "fail";
+  };
 }
 
 function fakeQuickScanExec(
@@ -868,7 +981,74 @@ function fakeQuickScanExec(
     if (bin === "zizmor" && command[1] !== "--version") {
       return overrides.zizmor ?? { exitCode: 0, stdout: "[]", stderr: "" };
     }
+    if (bin === "atom" && overrides.atom !== undefined) {
+      if (overrides.atom.mode === "fail") {
+        return { exitCode: 2, stdout: "", stderr: "atom crashed" };
+      }
+      writeAtomOutput(command, session);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
     return { exitCode: 0, stdout: "", stderr: "" };
+  };
+}
+
+function writeAtomOutput(command: string[], session: Parameters<FakeExecHandler>[1]): void {
+  if (command[1] === "-o") {
+    session.files.set(ATOM_MODEL_PATH, encoder.encode("fake atom model"));
+    return;
+  }
+  const slicePath = command[command.indexOf("-s") + 1];
+  if (slicePath === undefined) {
+    return;
+  }
+  const slices =
+    slicePath === ATOM_FLOWS_SLICE_PATH
+      ? { graph: { nodes: [], edges: [] }, paths: [["source", "sink"]] }
+      : positiveAtomSlices();
+  session.files.set(slicePath, jsonBytes(slices));
+}
+
+function positiveAtomSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "src/routes/upload.ts::program:uploadHandler",
+        fileName: "src/routes/upload.ts",
+        lineNumber: 10,
+        boundary: {
+          boundaryType: "HTTP route",
+          routeOrName: "POST /upload",
+          method: "POST",
+          sourceName: "req.query.url",
+        },
+        usages: [
+          {
+            targetObj: {
+              name: "fetchUrl",
+              resolvedMethod: "src/lib/fetch.ts::program:fetchUrl",
+              label: "CALL",
+              lineNumber: 12,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "src/lib/fetch.ts::program:fetchUrl",
+        fileName: "src/lib/fetch.ts",
+        lineNumber: 3,
+        usages: [
+          {
+            targetObj: {
+              name: "fetch",
+              resolvedMethod: "fetch",
+              isExternal: true,
+              label: "CALL",
+              lineNumber: 4,
+            },
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -977,6 +1157,14 @@ function defaultManifestFiles(): Manifest["files"] {
   return [
     { path: "README.md", size: 10, sha256: "readme-sha" },
     { path: "src/config.ts", size: 80, sha256: "config-sha" },
+  ];
+}
+
+function deepManifestFiles(): Manifest["files"] {
+  return [
+    { path: "README.md", size: 10, sha256: "readme-sha" },
+    { path: "src/routes/upload.ts", size: 120, sha256: "route-sha" },
+    { path: "src/lib/fetch.ts", size: 90, sha256: "fetch-sha" },
   ];
 }
 

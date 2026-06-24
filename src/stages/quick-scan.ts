@@ -20,6 +20,12 @@ import type {
   ModelEnhanceCount,
 } from "../ports/model-provider.js";
 import type { ExecResult } from "../ports/sandbox-runtime.js";
+import {
+  renderDeepHtmlReport,
+  renderDeepMarkdownReport,
+  renderDeepReportJson,
+} from "../reporting/deep-report.js";
+import { DEEP_STATIC_STAGE_ID, type DeepStaticData, deepStaticStage } from "./deep-static.js";
 import { createLocalSourcePackage } from "./local-source-package.js";
 import {
   GITLEAKS_REPORT_PATH,
@@ -62,7 +68,12 @@ const SCANNER_STAGE_IDS = [
 
 type ScannerStageId = (typeof SCANNER_STAGE_IDS)[number];
 
-export function quickScanStages(): StageDefinition[] {
+export interface QuickScanStagesOptions {
+  readonly deep?: boolean;
+}
+
+export function quickScanStages(options: QuickScanStagesOptions = {}): StageDefinition[] {
+  const deep = options.deep ?? false;
   return [
     sourceResolveStage(),
     toolchainRefreshStage(),
@@ -79,7 +90,8 @@ export function quickScanStages(): StageDefinition[] {
     correlateStage(),
     actionsStage(),
     remediationStage(),
-    reportStage(),
+    ...(deep ? [deepStaticStage()] : []),
+    reportStage({ deep }),
   ];
 }
 
@@ -785,7 +797,11 @@ function remediationStage(): StageDefinition {
   };
 }
 
-function reportStage(): StageDefinition {
+interface ReportStageOptions {
+  readonly deep: boolean;
+}
+
+function reportStage(options: ReportStageOptions): StageDefinition {
   return {
     id: "report.compose",
     version: "1",
@@ -797,6 +813,7 @@ function reportStage(): StageDefinition {
       "findings.correlate",
       "actions.rank",
       "remediation.generate",
+      ...(options.deep ? [DEEP_STATIC_STAGE_ID] : []),
     ],
     inputs: [],
     outputs: ["report.json", "report.md", "report.html"],
@@ -813,6 +830,9 @@ function reportStage(): StageDefinition {
       const { clusters } = readInput<CorrelateData>(ctx, "findings.correlate");
       const { verdict } = readInput<ActionsData>(ctx, "actions.rank");
       const { rankedActions } = readInput<RemediationData>(ctx, "remediation.generate");
+      const deepData = options.deep
+        ? readInput<DeepStaticData>(ctx, DEEP_STATIC_STAGE_ID)
+        : undefined;
       const assessment = buildAssessment({
         repository: repositorySummary(ctx.source, manifest),
         manifest: summarizeManifest(manifest),
@@ -824,13 +844,37 @@ function reportStage(): StageDefinition {
         findings,
         findingClusters: clusters,
         rankedActions,
+        ...(deepData === undefined
+          ? {}
+          : {
+              deepCoverage: deepData.deepCoverage.entries,
+              findingContextAssessments: deepData.findingContextAssessments,
+              staticHypotheses: deepData.staticHypotheses,
+              validationRecipes: deepData.validationRecipes,
+              hypothesisEnrichments: deepData.hypothesisEnrichments,
+              deepActionGroups: deepData.deepActionGroups,
+              repositoryMapArtifactRef: deepData.repositoryMapArtifactRef,
+              limitations: deepData.limitations,
+            }),
         generatedAt: new Date().toISOString(),
       });
 
       await mkdir(ctx.runDir, { recursive: true });
-      const json = jsonBytes({ runId: ctx.runId, assessment });
-      const markdown = encoder.encode(renderMarkdown(ctx.runId, assessment));
-      const html = encoder.encode(renderHtml(ctx.runId, assessment));
+      const json = jsonBytes(
+        options.deep
+          ? renderDeepReportJson(ctx.runId, assessment)
+          : { runId: ctx.runId, assessment },
+      );
+      const markdown = encoder.encode(
+        options.deep
+          ? renderDeepMarkdownReport(ctx.runId, assessment)
+          : renderMarkdown(ctx.runId, assessment),
+      );
+      const html = encoder.encode(
+        options.deep
+          ? renderDeepHtmlReport(ctx.runId, assessment)
+          : renderHtml(ctx.runId, assessment),
+      );
 
       await writeFile(path.join(ctx.runDir, "report.json"), json);
       await writeFile(path.join(ctx.runDir, "report.md"), markdown);
@@ -853,6 +897,7 @@ function reportStage(): StageDefinition {
             json: path.join(ctx.runDir, "report.json"),
             markdown: path.join(ctx.runDir, "report.md"),
             html: path.join(ctx.runDir, "report.html"),
+            ...(deepData === undefined ? {} : { repositoryMap: deepData.repositoryMapPath }),
           },
         } satisfies ReportData,
         reportArtifacts,

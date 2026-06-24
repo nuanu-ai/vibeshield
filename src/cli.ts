@@ -11,6 +11,7 @@ import {
 } from "./adapters/openrouter-model-provider.js";
 import { SqliteStateStore } from "./adapters/sqlite-state-store.js";
 import { ensureStateRoot, resolveStateRoot, stateDbPath } from "./adapters/state-root.js";
+import { parseScanArgs } from "./application/scan-args.js";
 import { runScan } from "./application/scan-service.js";
 import type { SourceInput } from "./domain/run.js";
 import {
@@ -48,7 +49,8 @@ try {
 }
 
 async function scan(args: string[]): Promise<void> {
-  const sourceArg = args[0];
+  const parsed = parseScanArgs(args);
+  const sourceArg = parsed.sourceArg;
   if (sourceArg === undefined) {
     throw new Error(
       "Tell me what to scan. For example: vibeshield scan https://github.com/owner/repo",
@@ -80,6 +82,7 @@ async function scan(args: string[]): Promise<void> {
         source,
         runRoot: path.join(stateRoot, "runs"),
         toolchainImage,
+        deep: parsed.deep,
       },
     );
     process.stdout.write(renderScanOutcome(outcome, { color: supportsAnsiColor(process.stdout) }));

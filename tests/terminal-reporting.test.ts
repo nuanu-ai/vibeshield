@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ScanOutcome } from "../src/application/scan-service.js";
 import type { SecurityAssessment } from "../src/domain/security-assessment.js";
-import { renderScanOutcome, TerminalEventSink } from "../src/reporting/terminal.js";
+import { renderHelp, renderScanOutcome, TerminalEventSink } from "../src/reporting/terminal.js";
 
 describe("terminal reporting", () => {
   it("renders a concise owner-facing receipt from the assessment contract", () => {
@@ -63,6 +63,12 @@ describe("terminal reporting", () => {
       timestamp: "2026-06-22T00:00:00.000Z",
     });
     sink.emit({
+      type: "stage-started",
+      stageId: "deep.static.compose",
+      message: "deep.static.compose",
+      timestamp: "2026-06-22T00:00:00.000Z",
+    });
+    sink.emit({
       type: "error",
       message: "sandbox unavailable",
       timestamp: "2026-06-22T00:00:00.000Z",
@@ -76,12 +82,21 @@ describe("terminal reporting", () => {
 
     expect(output).toContain("Preparing the repository");
     expect(output).toContain("Running security checks");
+    expect(output).toContain("Running Deep Static analysis");
     expect(output).toContain("sandbox unavailable");
     expect(output).not.toContain("source.resolve");
     expect(output).not.toContain("scan.secrets.gitleaks");
     expect(output).not.toContain("scan.code.opengrep");
+    expect(output).not.toContain("deep.static.compose");
     expect(output.match(/Running security checks/g)).toHaveLength(1);
     expect(output).not.toContain("Scan complete");
+  });
+
+  it("mentions the opt-in deep scan flag in help", () => {
+    const text = renderHelp({ color: false });
+
+    expect(text).toContain("[--deep]");
+    expect(text).toContain("vibeshield scan ./my-app --deep");
   });
 });
 

@@ -32,6 +32,7 @@ export interface ScanRequest {
   readonly source: SourceInput;
   readonly runRoot: string;
   readonly toolchainImage?: string;
+  readonly deep?: boolean;
 }
 
 export interface ScanOutcome {
@@ -85,7 +86,7 @@ export async function runScan(deps: ScanDeps, request: ScanRequest): Promise<Sca
       runDir,
       source: request.source,
       toolchainImageTag: imageTag,
-      stages: quickScanStages(),
+      stages: quickScanStages({ deep: request.deep ?? false }),
       session,
       state: deps.state,
       artifacts: deps.artifacts,
