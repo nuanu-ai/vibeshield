@@ -18,3 +18,4 @@ export * from "./manifest-summary.js";
 export * from "./run.js";
 export * from "./security-assessment.js";
 export * from "./security-graph.js";
+export * from "./static-hypothesis.js";
