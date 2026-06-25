@@ -9,6 +9,7 @@ export const STAGE2_HYPOTHESIS_FAMILIES = [
   "dependency_usage_path",
   "ci_supply_chain_path",
   "secret_impact_chain",
+  "content_resource_exposure_path",
 ] as const;
 
 export type Stage2HypothesisFamily = (typeof STAGE2_HYPOTHESIS_FAMILIES)[number];
@@ -101,6 +102,20 @@ export function stage2HypothesisRules(
       },
       coverageRefs: ["stage2:secret_impact", "stage2:ci_iac"],
       requiredValidation: ["secret_rotation_review", "integration_scope_review"],
+    },
+    {
+      id: "stage2.content-resource-exposure-path",
+      family: "content_resource_exposure_path",
+      title:
+        "Hidden content/resource exposure path: static content exposes hidden or private resources",
+      source: { kinds: ["Resource"], propertyEquals: { resourceType: "content_resource" } },
+      target: { kinds: ["Sink"], propertyEquals: { sinkType: "hidden_content_exposure" } },
+      path: {
+        allowedEdgeKinds: ["exposes"],
+        maxPathLength: 1,
+      },
+      coverageRefs: ["stage2:content_assets"],
+      requiredValidation: ["content_route_review", "asset_exposure_review"],
     },
   ];
 }

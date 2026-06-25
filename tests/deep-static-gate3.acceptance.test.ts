@@ -30,7 +30,7 @@ const SNAPSHOT_ID = "snapshot-gate3";
 const CREATED_AT = "2026-06-24T10:00:00.000Z";
 
 describe("Deep Static Gate 3 acceptance", () => {
-  it("supports all five planned families from deterministic graph evidence", () => {
+  it("supports all planned families from deterministic graph evidence", () => {
     const first = gate3Result();
     const second = gate3Result();
     const candidatesById = new Map(first.candidates.map((candidate) => [candidate.id, candidate]));
@@ -66,7 +66,10 @@ describe("Deep Static Gate 3 acceptance", () => {
       expect(candidate?.coverageRefs.length).toBeGreaterThan(0);
       expect(candidate?.requiredValidation.length).toBeGreaterThan(0);
       expect(hypothesis?.supportingEvidenceIds.length).toBeGreaterThan(0);
-      if (family !== "external_input_to_dangerous_operation") {
+      if (
+        family !== "external_input_to_dangerous_operation" &&
+        family !== "content_resource_exposure_path"
+      ) {
         expect(candidate?.findingIds.length).toBeGreaterThan(0);
       }
     }
@@ -191,6 +194,32 @@ function baseGraph(options: Gate3Options): SecurityGraph {
     properties: { serviceType: "payment_provider" },
     evidenceIds: ["ev-secret-impact"],
   });
+  const contentResource = node(
+    "Resource",
+    "ContentResource:obfuscated-token-route",
+    "Obfuscated token sale route",
+    {
+      repoPath: "src/app.ts",
+      properties: {
+        resourceType: "content_resource",
+        exposureType: "obfuscated_frontend_route",
+      },
+      evidenceIds: ["ev-content"],
+    },
+  );
+  const contentSink = node(
+    "Sink",
+    "ContentSink:obfuscated-token-route",
+    "Hidden content exposure",
+    {
+      repoPath: "src/app.ts",
+      properties: {
+        sinkType: "hidden_content_exposure",
+        exposureType: "obfuscated_frontend_route",
+      },
+      evidenceIds: ["ev-content"],
+    },
+  );
   const control =
     options.addExternalContradiction === true
       ? node("Control", "Control:destination-allowlist", "destination allowlist", {
@@ -220,6 +249,7 @@ function baseGraph(options: Gate3Options): SecurityGraph {
     edge("supported_by", findings.secret, service, "supported_by:finding-secret:stripe", [
       "ev-secret-impact",
     ]),
+    edge("exposes", contentResource, contentSink, "exposes:content:hidden-route", ["ev-content"]),
     ...(control === undefined
       ? []
       : [edge("protected_by", handler, control, "protected_by:handler:allowlist", ["ev-control"])]),
@@ -239,6 +269,8 @@ function baseGraph(options: Gate3Options): SecurityGraph {
       component,
       secret,
       service,
+      contentResource,
+      contentSink,
       ...(control === undefined ? [] : [control]),
       ...Object.values(findings),
     ],
@@ -400,6 +432,7 @@ function checkedCoverage(): GraphCoverage[] {
     "data_flow",
     "dependency_usage",
     "ci_iac",
+    "content_assets",
     "language_support",
   ].map((area) => ({
     area: area as GraphCoverage["area"],

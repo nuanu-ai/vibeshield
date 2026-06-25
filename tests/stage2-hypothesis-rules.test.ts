@@ -20,11 +20,11 @@ import {
 const GRAPH_VERSION = "1";
 
 describe("stage2HypothesisRules", () => {
-  it("defines exactly the five planned families in stable order", () => {
+  it("defines exactly the planned families in stable order", () => {
     const rules = stage2HypothesisRules();
 
     expect(rules.map((rule) => rule.family)).toEqual([...STAGE2_HYPOTHESIS_FAMILIES]);
-    expect(new Set(rules.map((rule) => rule.id)).size).toBe(5);
+    expect(new Set(rules.map((rule) => rule.id)).size).toBe(STAGE2_HYPOTHESIS_FAMILIES.length);
     expect(rules.every((rule) => rule.requiredValidation.length > 0)).toBe(true);
     expect(rules.every((rule) => (rule.coverageRefs ?? []).length > 0)).toBe(true);
   });
@@ -134,7 +134,14 @@ interface FamilyFixture {
 }
 
 function positiveFixtures(): FamilyFixture[] {
-  return [externalInputFixture(), sastFixture(), dependencyFixture(), ciFixture(), secretFixture()];
+  return [
+    externalInputFixture(),
+    sastFixture(),
+    dependencyFixture(),
+    ciFixture(),
+    secretFixture(),
+    contentResourceFixture(),
+  ];
 }
 
 function externalInputFixture(): FamilyFixture {
@@ -271,6 +278,29 @@ function secretFixture(): FamilyFixture {
   };
 }
 
+function contentResourceFixture(): FamilyFixture {
+  const resource = node("Resource", "ContentResource:obfuscated-route", "Obfuscated route", {
+    resourceType: "content_resource",
+    exposureType: "obfuscated_frontend_route",
+  });
+  const sink = node("Sink", "ContentSink:obfuscated-route", "Hidden content exposure", {
+    sinkType: "hidden_content_exposure",
+    exposureType: "obfuscated_frontend_route",
+  });
+  const exposes = edge("exposes", resource, sink, "exposes:content:sink");
+
+  return {
+    family: "content_resource_exposure_path",
+    graph: graph([resource, sink], [exposes]),
+    negativeGraph: graph([resource, sink], []),
+    contexts: [],
+    negativeContexts: [],
+    expectedNodeIds: [resource.id, sink.id],
+    expectedEdgeIds: [exposes.id],
+    contextRequired: false,
+  };
+}
+
 function familyCandidates(
   family: Stage2HypothesisFamily,
   sourceGraph: SecurityGraph,
@@ -308,6 +338,12 @@ function graph(
       },
       {
         area: "ci_iac",
+        state: "checked",
+        producer: "test-fixture",
+        producerVersion: GRAPH_VERSION,
+      },
+      {
+        area: "content_assets",
         state: "checked",
         producer: "test-fixture",
         producerVersion: GRAPH_VERSION,

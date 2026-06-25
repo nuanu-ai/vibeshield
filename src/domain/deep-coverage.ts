@@ -26,7 +26,8 @@ export type DeepCoverageArea =
   | "data_flow"
   | "component_usage"
   | "dependency_usage"
-  | "ci_iac";
+  | "ci_iac"
+  | "content_assets";
 
 export type DeepCoverageState = "checked" | "skipped" | "failed" | "degraded" | "partial";
 
@@ -40,6 +41,7 @@ const COVERAGE_AREAS = new Set<DeepCoverageArea>([
   "component_usage",
   "dependency_usage",
   "ci_iac",
+  "content_assets",
 ]);
 
 const COVERAGE_STATES = new Set<DeepCoverageState>([

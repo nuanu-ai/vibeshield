@@ -431,6 +431,8 @@ function joernProgressLabel(area: ProgramAnalysisCoverageArea): string {
       return "Checking dependency usage";
     case "ci_iac":
       return "Checking CI and IaC context";
+    case "content_assets":
+      return "Checking content and static assets";
     case "language_support":
       return "Checking language support";
   }

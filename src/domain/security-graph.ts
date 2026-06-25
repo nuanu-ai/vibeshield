@@ -112,6 +112,7 @@ export type GraphCoverageArea =
   | "data_flow"
   | "dependency_usage"
   | "ci_iac"
+  | "content_assets"
   | "language_support";
 
 export type GraphCoverageState = "checked" | "skipped" | "failed" | "degraded" | "partial";
@@ -169,6 +170,7 @@ const COVERAGE_AREAS = new Set<GraphCoverageArea>([
   "data_flow",
   "dependency_usage",
   "ci_iac",
+  "content_assets",
   "language_support",
 ]);
 

@@ -342,7 +342,7 @@ owner can act on. It still does not execute the application.
 #### Gate 3 - deterministic hypotheses from graph evidence
 
 Closes when: `vibeshield scan <real-repo-with-deep-fixtures> --deep` produces
-static hypotheses for all five rule families, and a negative fixture proves that
+static hypotheses for all six rule families, and a negative fixture proves that
 missing or contradicted graph evidence yields `inconclusive` or
 `statically_contradicted` instead of a high-confidence claim.
 
@@ -350,8 +350,9 @@ Status:
 
 - [ ] **Gate 3 acceptance.** A live fixture matrix produces at least one
   hypothesis for external input to dangerous operation, SAST reachable path,
-  dependency usage path, CI supply-chain path, and secret impact chain; every
-  hypothesis cites bounded graph paths and coverage; a control or missing edge
+  dependency usage path, CI supply-chain path, secret impact chain, and hidden
+  content/resource exposure; every hypothesis cites bounded graph paths and
+  coverage; a control or missing edge
   fixture blocks promotion.
 - [x] **Correlation rule engine.** In: `SecurityGraph`, contextual findings,
   coverage, and rule definitions. Do: implement deterministic rule evaluation
@@ -361,15 +362,16 @@ Status:
   same graph produces stable candidates in stable order without any model call.
   Evidence: `tests/correlation-rule-engine.test.ts` covers bounded path search,
   required edge kinds, contradiction capture, stable ids, and sink taxonomy.
-- [x] **Five rule families.** In: rule engine and graph facts. Do: implement:
+- [x] **Six rule families.** In: rule engine and graph facts. Do: implement:
   external input -> dangerous operation; Quick SAST finding -> reachable path;
   vulnerable component -> imported/used/reachable path; untrusted CI trigger ->
   mutable build dependency -> privileged credential -> artifact or repository
   write; secret finding -> configuration reference -> privileged integration ->
-  exposed service or build job. Out: candidate hypotheses for each family. Done:
-  each rule has a positive and negative fixture that fails if evidence is guessed.
+  exposed service or build job; hidden route/private asset/content clue ->
+  content exposure. Out: candidate hypotheses for each family. Done: each rule
+  has a positive and negative fixture that fails if evidence is guessed.
   Evidence: `tests/stage2-hypothesis-rules.test.ts` covers positive and negative
-  fixtures for all five families, context linking, determinism, and candidate
+  fixtures for all six families, context linking, determinism, and candidate
   bounds; `tests/deep-static-gate3.acceptance.test.ts` exercises all families
   together.
 - [x] **Static hypothesis validator.** In: candidates, graph paths, observed
@@ -538,7 +540,7 @@ continuous monitoring.
 
 - Which real repo or fixture proves Gate 1 with a boundary -> cross-file call ->
   dangerous sink path.
-- Which fixture proves all five deterministic rule families without turning the
+- Which fixture proves all six deterministic rule families without turning the
   test suite into a fake scanner.
 - How much of `repository-map.json` should be owner-visible versus kept as a
   debugging artifact.

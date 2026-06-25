@@ -46,6 +46,7 @@ const TERMINAL_COVERAGE_AREAS = [
   "data_flow",
   "dependency_usage",
   "ci_iac",
+  "content_assets",
 ] as const;
 
 // Friendly, deduplicated progress labels. Internal stage ids never reach the
@@ -498,6 +499,8 @@ function familyLabel(family: string): string {
       return "CI supply chain";
     case "secret_impact_chain":
       return "secret impact";
+    case "content_resource_exposure_path":
+      return "hidden content";
     default:
       return family.replaceAll("_", " ");
   }
@@ -513,6 +516,8 @@ function coverageLabel(area: string): string {
       return "dependency usage";
     case "ci_iac":
       return "CI/IaC";
+    case "content_assets":
+      return "content assets";
     default:
       return area.replaceAll("_", " ");
   }

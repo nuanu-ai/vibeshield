@@ -42,6 +42,13 @@ import {
   type ComponentUsageObservation,
   composeComponentReachability,
 } from "./component-reachability.js";
+import {
+  type ContentResourceObservation,
+  composeContentResourceContext,
+  contentResourceObservationsFromPath,
+  contentResourceObservationsFromText,
+  isContentResourceTextPath,
+} from "./content-resource-context.js";
 import { groupDeepActions } from "./deep-action-grouping.js";
 import { composeDeepCoverage } from "./deep-coverage.js";
 import { assessFindingContext, type FindingHypothesisLink } from "./finding-context-assessment.js";
@@ -295,6 +302,13 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     graph,
     failures: compositionFailures,
   });
+  const graphWithContentResources = await composeContentResourcesOrDegrade({
+    ctx,
+    sourceDir,
+    manifest,
+    graph: graphWithCiIac,
+    failures: compositionFailures,
+  });
   emitDeepProgress(ctx, "Checking reachability");
   const dependencyObservations = await componentDependencyObservationsFromEvidence({
     ctx,
@@ -304,7 +318,7 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     failures: compositionFailures,
   });
   const reachability = composeReachabilityOrDegrade({
-    graph: graphWithCiIac,
+    graph: graphWithContentResources,
     manifest,
     artifacts: programArtifacts,
     dependencyObservations,
@@ -575,6 +589,58 @@ async function composeCiIacOrDegrade(input: {
   }
 }
 
+async function composeContentResourcesOrDegrade(input: {
+  readonly ctx: StageContext;
+  readonly sourceDir: string;
+  readonly manifest: Manifest;
+  readonly graph: SecurityGraph;
+  readonly failures: ProgramAnalysisFailure[];
+}): Promise<SecurityGraph> {
+  try {
+    const scan = await contentResourceObservationsFromSnapshot(input);
+    return composeContentResourceContext({
+      graph: input.graph,
+      manifest: input.manifest,
+      observations: scan.observations,
+      scannedFileCount: scan.scannedFileCount,
+    });
+  } catch (error) {
+    input.failures.push({
+      area: "content_assets",
+      reason: publicReason("Deep Static content/resource projection failed", error),
+    });
+    return input.graph;
+  }
+}
+
+async function contentResourceObservationsFromSnapshot(input: {
+  readonly ctx: StageContext;
+  readonly sourceDir: string;
+  readonly manifest: Manifest;
+}): Promise<{
+  readonly observations: ReadonlyArray<ContentResourceObservation>;
+  readonly scannedFileCount: number;
+}> {
+  const observations: ContentResourceObservation[] = [];
+  let scannedFileCount = 0;
+
+  for (const file of input.manifest.files) {
+    const pathObservations = contentResourceObservationsFromPath(file);
+    const scanText = isContentResourceTextPath(file.path) && !isGeneratedContentPath(file.path);
+    if (pathObservations.length > 0 || scanText) {
+      scannedFileCount += 1;
+    }
+    observations.push(...pathObservations);
+    if (!scanText) {
+      continue;
+    }
+    const text = await readSnapshotText(input.ctx, input.sourceDir, file.path);
+    observations.push(...contentResourceObservationsFromText(file.path, text));
+  }
+
+  return { observations, scannedFileCount };
+}
+
 async function ciIacObservationsFromSnapshot(input: {
   readonly ctx: StageContext;
   readonly sourceDir: string;
@@ -610,6 +676,12 @@ async function readSnapshotText(
 ): Promise<string> {
   const bytes = await ctx.session.read(`${sourceDir}/${repoPath}`);
   return new TextDecoder().decode(bytes);
+}
+
+function isGeneratedContentPath(repoPath: string): boolean {
+  return /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|dist|build|coverage|vendor)\b/i.test(
+    repoPath,
+  );
 }
 
 function workflowObservationFromText(

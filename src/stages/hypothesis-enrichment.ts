@@ -611,6 +611,8 @@ function impactText(family: string, hypothesis: StaticHypothesis): string {
       return "Build automation may reach mutable or privileged resources and could affect release integrity.";
     case "secret_impact_chain":
       return "A secret context may reach a privileged integration or exposed resource, increasing operational impact.";
+    case "content_resource_exposure_path":
+      return "Hidden routes, private assets, or content clues may be exposed through static application content rather than protected by authorization.";
     default:
       return `Static graph evidence produced ${hypothesis.status} support for this hypothesis.`;
   }
@@ -649,6 +651,11 @@ const FAMILY_COPY: Readonly<Record<string, FamilyCopy>> = {
   secret_impact_chain: {
     concern: "A secret is connected to a privileged integration or an exposed resource.",
     fix: "Scope the secret down and make sure it cannot reach the exposed resource without a control in front of it.",
+  },
+  content_resource_exposure_path: {
+    concern:
+      "Static application content exposes a hidden route, private asset, or content clue that should not rely on obscurity.",
+    fix: "Protect the route or asset with an explicit authorization check, remove the exposed clue, or confirm the resource is intentionally public.",
   },
 };
 

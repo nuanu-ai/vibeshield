@@ -20,7 +20,8 @@ export type ProgramAnalysisCoverageArea =
   | "call_edges"
   | "flows"
   | "component_usage"
-  | "ci_iac";
+  | "ci_iac"
+  | "content_assets";
 
 export type ProgramAnalysisExtractionKind =
   | "entities"

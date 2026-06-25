@@ -604,6 +604,10 @@ function reasonNodeLabel(node: SecurityGraphNode | undefined): string | undefine
   if (node === undefined) {
     return undefined;
   }
+  const contentLabel = contentResourceReasonLabel(node);
+  if (contentLabel !== undefined) {
+    return contentLabel;
+  }
   const location = nodeLocationLabel(node);
   if (!isVerboseCodeLabel(node.label)) {
     const label = trimWhitespace(node.label);
@@ -616,6 +620,22 @@ function reasonNodeLabel(node: SecurityGraphNode | undefined): string | undefine
     return location;
   }
   return trimWhitespace(node.label).slice(0, 80);
+}
+
+function contentResourceReasonLabel(node: SecurityGraphNode): string | undefined {
+  if (node.properties.resourceType !== "content_resource") {
+    return undefined;
+  }
+  const value =
+    stringProperty(node.properties.route) ??
+    stringProperty(node.properties.assetPath) ??
+    stringProperty(node.properties.matcher) ??
+    stringProperty(node.properties.clue) ??
+    node.label;
+  const label = trimWhitespace(value);
+  const location = nodeLocationLabel(node);
+  const compact = label.length > 120 ? `${label.slice(0, 117).trimEnd()}...` : label;
+  return location === undefined ? compact : `${compact} (${location})`;
 }
 
 function nodeLocationLabel(node: SecurityGraphNode): string | undefined {

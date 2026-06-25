@@ -102,6 +102,12 @@ export function composeDeepCoverage(input: ComposeDeepCoverageInput): DeepCovera
     "CI/IaC context projection is not wired into Deep Static yet.",
     producerVersion,
   );
+  addKnownGap(
+    entries,
+    "content_assets",
+    "Content and static asset projection is not wired into Deep Static yet.",
+    producerVersion,
+  );
 
   return validateDeepCoverage({
     runId: input.runId,

@@ -22,6 +22,7 @@ const EXPECTED_COVERAGE_AREAS: ReadonlyArray<GraphCoverageArea> = [
   "data_flow",
   "dependency_usage",
   "ci_iac",
+  "content_assets",
   "language_support",
 ];
 
