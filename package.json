@@ -11,7 +11,7 @@
     "vibeshield": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/clean-build-output.mjs && tsc -p tsconfig.build.json",
     "cli": "tsx src/cli.ts",
     "scan": "tsx src/cli.ts scan",
     "resume": "tsx src/cli.ts resume",
