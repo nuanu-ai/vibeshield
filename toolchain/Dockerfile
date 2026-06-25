@@ -133,8 +133,10 @@ RUN printf '%s\n' \
   && test -x /opt/joern-cli/go2cpg.sh
 
 COPY vibeshield-joern-extract.mjs /usr/local/bin/vibeshield-joern-extract
-RUN chmod +x /usr/local/bin/vibeshield-joern-extract \
-  && vibeshield-joern-extract --help >/tmp/vibeshield-joern-extract-help.txt
+COPY vibeshield-osv-scan.mjs /usr/local/bin/vibeshield-osv-scan
+RUN chmod +x /usr/local/bin/vibeshield-joern-extract /usr/local/bin/vibeshield-osv-scan \
+  && vibeshield-joern-extract --help >/tmp/vibeshield-joern-extract-help.txt \
+  && vibeshield-osv-scan --help >/tmp/vibeshield-osv-scan-help.txt
 
 RUN curl -fsSL https://get.anchore.io/syft | sh -s -- -b /usr/local/bin \
   && curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \

@@ -58,6 +58,7 @@ import {
   OPENGREP_REPORT_PATH,
   OPENGREP_RULES_PATH,
   ORIGIN_PATH,
+  OSV_VULN_REPORT_PATH,
   SOURCE_DIR,
   SOURCE_FILTER_PATH,
   SYFT_SBOM_PATH,
@@ -85,6 +86,7 @@ const SCANNER_STAGE_IDS = [
   "scan.code.opengrep",
   "scan.sbom.syft",
   "scan.dependencies.trivy",
+  "scan.dependencies.osv",
   "scan.github-actions.actionlint",
   "scan.github-actions.zizmor",
   "scan.iac.trivy-config",
@@ -107,6 +109,7 @@ export function quickScanStages(options: QuickScanStagesOptions = {}): StageDefi
     opengrepStage(),
     syftStage(),
     trivyDependencyStage(),
+    osvDependencyStage(),
     actionlintStage(),
     zizmorStage(),
     trivyConfigStage(),
@@ -233,6 +236,11 @@ function sourceResolveStage(): StageDefinition {
       await execRequired(ctx, ["node", "--version"], "toolchain preflight: node");
       await execRequired(ctx, ["git", "--version"], "toolchain preflight: git");
       await execRequired(ctx, ["gitleaks", "version"], "toolchain preflight: gitleaks");
+      await execRequired(
+        ctx,
+        ["vibeshield-osv-scan", "--help"],
+        "toolchain preflight: osv scanner",
+      );
       await execRequired(ctx, ["mkdir", "-p", WORK_DIR], "create work directory");
       await execRequired(ctx, ["rm", "-rf", SOURCE_DIR], "clear previous source directory");
       if (ctx.source.kind === "github") {
@@ -509,7 +517,7 @@ function trivyDependencyStage(): StageDefinition {
   return {
     id: "scan.dependencies.trivy",
     version: "1",
-    dependencies: ["inventory.detect"],
+    dependencies: ["inventory.detect", "scan.sbom.syft"],
     inputs: [],
     outputs: ["scanner.raw"],
     required: true,
@@ -520,7 +528,7 @@ function trivyDependencyStage(): StageDefinition {
         tool: "trivy",
         command: [
           "trivy",
-          "fs",
+          "sbom",
           "--scanners",
           "vuln",
           "--format",
@@ -529,13 +537,36 @@ function trivyDependencyStage(): StageDefinition {
           TRIVY_VULN_REPORT_PATH,
           "--cache-dir",
           TRIVY_CACHE_DIR,
-          SOURCE_DIR,
+          SYFT_SBOM_PATH,
         ],
         outputPath: TRIVY_VULN_REPORT_PATH,
         format: "trivy-json",
         successfulExitCodes: [0],
         defaultOutput: "{}",
         candidatesFromRecords: candidatesFromTrivy,
+      }),
+  };
+}
+
+function osvDependencyStage(): StageDefinition {
+  return {
+    id: "scan.dependencies.osv",
+    version: "1",
+    dependencies: ["inventory.detect"],
+    inputs: [],
+    outputs: ["scanner.raw"],
+    required: true,
+    timeoutMs: SCANNER_TIMEOUT_MS,
+    run: (ctx) =>
+      runJsonScanner(ctx, {
+        check: "dependencies.osv",
+        tool: "osv",
+        command: ["vibeshield-osv-scan", "--source", SOURCE_DIR, "--output", OSV_VULN_REPORT_PATH],
+        outputPath: OSV_VULN_REPORT_PATH,
+        format: "osv-json",
+        successfulExitCodes: [0],
+        defaultOutput: "{}",
+        candidatesFromRecords: candidatesFromOsv,
       }),
   };
 }
@@ -1062,6 +1093,14 @@ function scanPlanFromInventory(inventory: RepositoryInventory): ScanPlan {
       ...(!hasPackageManifests ? { reason: "no dependency manifests found" } : {}),
     },
     {
+      check: "dependencies.osv",
+      tool: "osv",
+      applicable: hasPackageManifests,
+      required: true,
+      implemented: true,
+      ...(!hasPackageManifests ? { reason: "no dependency manifests found" } : {}),
+    },
+    {
       check: "github-actions.actionlint",
       tool: "actionlint",
       applicable: hasWorkflows,
@@ -1560,6 +1599,37 @@ function candidatesFromTrivy(
         installedVersion: stringFrom(item.InstalledVersion),
         fixedVersion: stringFrom(item.FixedVersion),
       }),
+    });
+  });
+}
+
+function candidatesFromOsv(
+  records: ReadonlyArray<unknown>,
+  check: string,
+  tool: string,
+): ScannerCandidate[] {
+  return records.flatMap((record) => {
+    const item = isRecord(record) ? record : {};
+    const packageName = stringFrom(item.packageName);
+    const version = stringFrom(item.version);
+    const filePath = normalizeCandidatePath(stringFrom(item.target));
+    const vulns = Array.isArray(item.vulns) ? item.vulns : [];
+    return vulns.map((vuln) => {
+      const vulnRecord = isRecord(vuln) ? vuln : {};
+      const id = stringFrom(vulnRecord.id) ?? "OSV";
+      return scannerCandidate(check, tool, {
+        ruleId: id,
+        message:
+          packageName === undefined || version === undefined
+            ? `OSV reports ${id}`
+            : `${packageName}@${version} is affected by ${id}`,
+        filePath,
+        severity: "medium",
+        metadata: compactMetadata({
+          packageName,
+          installedVersion: version,
+        }),
+      });
     });
   });
 }

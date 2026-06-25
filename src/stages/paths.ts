@@ -19,4 +19,5 @@ export const JOERN_COMPONENT_USAGE_SLICE_PATH = `${WORK_DIR}/joern-component-usa
 export const SYFT_SBOM_PATH = `${WORK_DIR}/syft-sbom.cdx.json`;
 export const TRIVY_CACHE_DIR = `${WORK_DIR}/trivy-cache`;
 export const TRIVY_VULN_REPORT_PATH = `${WORK_DIR}/trivy-vuln.json`;
+export const OSV_VULN_REPORT_PATH = `${WORK_DIR}/osv-vuln.json`;
 export const TRIVY_CONFIG_REPORT_PATH = `${WORK_DIR}/trivy-config.json`;

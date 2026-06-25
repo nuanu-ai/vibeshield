@@ -28,6 +28,7 @@ import {
   MANIFEST_PATH,
   MANIFEST_SCRIPT_PATH,
   OPENGREP_REPORT_PATH,
+  OSV_VULN_REPORT_PATH,
   SOURCE_DIR,
   TRIVY_CACHE_DIR,
   TRIVY_VULN_REPORT_PATH,
@@ -382,6 +383,50 @@ describe("runScan quick scan vertical slice", () => {
     expect(report.assessment.rankedActions.map((action) => action.candidate.findingIds)).toEqual([
       [secretFinding?.id],
       [dependencyFinding?.id],
+    ]);
+  });
+
+  it("turns OSV package manifest matches into dependency findings", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(manifestFor(source.path, gate2ManifestFiles()), [], {
+        osvVuln: {
+          results: [
+            {
+              target: "package.json",
+              packageName: "jsonwebtoken",
+              ecosystem: "npm",
+              version: "0.4.0",
+              dependencyScope: "dependencies",
+              vulns: [{ id: "GHSA-xxxx-yyyy-zzzz", modified: "2026-06-01T00:00:00Z" }],
+            },
+          ],
+        },
+      }),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const dependencyFinding = outcome.assessment.findings.find(
+      (finding) => finding.sourceTool === "osv",
+    );
+    expect(dependencyFinding).toMatchObject({
+      sourceTool: "osv",
+      ruleId: "GHSA-xxxx-yyyy-zzzz",
+      category: "dependency",
+      severity: "medium",
+      metadata: {
+        packageName: "jsonwebtoken",
+        installedVersion: "0.4.0",
+      },
+      remediationKey: "dependency-vulnerability",
+    });
+    expect(dependencyFinding?.locations).toEqual([
+      { filePath: "package.json", startLine: 1, endLine: 1 },
     ]);
   });
 
@@ -753,6 +798,7 @@ describe("runScan quick scan vertical slice", () => {
       "code-patterns.opengrep",
       "sbom.syft",
       "dependencies.trivy",
+      "dependencies.osv",
       "github-actions.actionlint",
       "github-actions.zizmor",
       "iac.trivy-config",
@@ -760,13 +806,21 @@ describe("runScan quick scan vertical slice", () => {
       expect(coverage.get(check)).toEqual({ check, status: "checked" });
     }
     expect(sandbox.invocations.map((i) => i.command[0])).toEqual(
-      expect.arrayContaining(["gitleaks", "opengrep", "syft", "trivy", "actionlint", "zizmor"]),
+      expect.arrayContaining([
+        "gitleaks",
+        "opengrep",
+        "syft",
+        "trivy",
+        "vibeshield-osv-scan",
+        "actionlint",
+        "zizmor",
+      ]),
     );
     expect(sandbox.invocations.filter((i) => i.command[0] === "trivy")).toHaveLength(3);
     expect(
       sandbox.invocations.findIndex((i) => i.command[0] === "trivy" && i.command[1] === "image"),
     ).toBeLessThan(
-      sandbox.invocations.findIndex((i) => i.command[0] === "trivy" && i.command[1] === "fs"),
+      sandbox.invocations.findIndex((i) => i.command[0] === "trivy" && i.command[1] === "sbom"),
     );
   });
 
@@ -1372,6 +1426,7 @@ interface FakeScannerOverrides {
     readonly metadata?: Record<string, unknown> | null;
   };
   readonly trivyVuln?: unknown;
+  readonly osvVuln?: unknown;
   readonly joern?: {
     readonly mode: "success" | "fail" | "data-flow-timeout";
   };
@@ -1397,6 +1452,9 @@ function fakeQuickScanExec(
     if (bin === "gitleaks" && command[1] === "version") {
       return { exitCode: 0, stdout: "8.30.1\n", stderr: "" };
     }
+    if (bin === "vibeshield-osv-scan" && command[1] === "--help") {
+      return { exitCode: 0, stdout: "usage: vibeshield-osv-scan\n", stderr: "" };
+    }
     if (bin === "gitleaks") {
       session.files.set(GITLEAKS_REPORT_PATH, jsonBytes(gitleaksRecords));
       return { exitCode: gitleaksRecords.length > 0 ? 1 : 0, stdout: "", stderr: "" };
@@ -1417,10 +1475,14 @@ function fakeQuickScanExec(
       }
       return override ?? { exitCode: 0, stdout: "", stderr: "" };
     }
-    if (bin === "trivy" && command[1] === "fs" && command.includes("vuln")) {
+    if (bin === "trivy" && command[1] === "sbom" && command.includes("vuln")) {
       if (overrides.trivyVuln !== undefined) {
         session.files.set(TRIVY_VULN_REPORT_PATH, jsonBytes(overrides.trivyVuln));
       }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
+    if (bin === "vibeshield-osv-scan") {
+      session.files.set(OSV_VULN_REPORT_PATH, jsonBytes(overrides.osvVuln ?? { results: [] }));
       return { exitCode: 0, stdout: "", stderr: "" };
     }
     if (bin === "actionlint" && command[1] !== "-version") {
