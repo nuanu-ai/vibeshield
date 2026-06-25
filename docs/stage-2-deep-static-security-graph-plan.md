@@ -189,9 +189,10 @@ Status:
   The curated ground-truth slice now passes in normal benchmark mode with known
   gaps surfaced: WebGoat covers 10/12 expectations and reports 2 known gaps
   (missing function-level access control classification and dependency
-  reachability for the Vulnerable Components lesson); Juice Shop covers 11/17
-  expectations and reports 6 known gaps (NoSQL, XXE, file exposure, upload
-  validation, dependency reachability, and SSTi classification).
+  reachability for the Vulnerable Components lesson); Juice Shop covers 15/17
+  expectations and reports 2 known gaps (XXE classification and dependency
+  reachability). Fresh run `20260625183825-9938a3b2` resolved the prior NoSQL,
+  file exposure, upload validation, and SSTi classification gaps.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
   forgery, cross-site scripting, code execution, IDOR, CSRF, and access-control)

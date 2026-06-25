@@ -195,8 +195,7 @@
           "title": "NoSQL injection challenges should be classified as NoSQL injection",
           "kind": "hypothesis",
           "titleIncludes": "NoSQL",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "juice.xxe",
@@ -211,16 +210,14 @@
           "title": "Confidential Document and Local File Read challenges should be classified as file exposure",
           "kind": "hypothesis",
           "titleIncludes": "Path traversal or file access",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "juice.upload-validation",
           "title": "Upload Size, Upload Type, and Poison Null Byte challenges should model upload validation bypasses",
           "kind": "hypothesis",
           "titleIncludes": "File upload",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "juice.vulnerable-components",
@@ -235,8 +232,7 @@
           "title": "SSTi challenge should be classified as server-side template injection",
           "kind": "hypothesis",
           "titleIncludes": "Server-side template injection",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         }
       ]
     }
