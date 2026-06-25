@@ -16,6 +16,7 @@ import {
 export type ContentResourceExposureType =
   | "hidden_server_route"
   | "obfuscated_frontend_route"
+  | "sensitive_frontend_route"
   | "private_asset_reference"
   | "steganography_asset"
   | "steganography_content_clue";
@@ -87,6 +88,7 @@ export function contentResourceObservationsFromText(
   return [
     ...hiddenServerRouteObservations(repoPath, text),
     ...obfuscatedFrontendRouteObservations(repoPath, text),
+    ...sensitiveFrontendRouteObservations(repoPath, text),
     ...privateAssetReferenceObservations(repoPath, text),
     ...steganographyContentClueObservations(repoPath, text),
   ];
@@ -257,6 +259,33 @@ function obfuscatedFrontendRouteObservations(
   });
 }
 
+function sensitiveFrontendRouteObservations(
+  repoPath: string,
+  text: string,
+): ContentResourceObservation[] {
+  if (!isRuntimeCodePath(repoPath) || !/\bpath\s*:/.test(text)) {
+    return [];
+  }
+  const lines = splitLines(text);
+  return lines.flatMap((line, index) => {
+    const route = line.match(/\bpath\s*:\s*(['"`])([^'"`]+)\1/)?.[2];
+    if (route === undefined || !looksLikeSensitiveFrontendRoute(route, routeBlock(lines, index))) {
+      return [];
+    }
+    const lineNumber = index + 1;
+    return [
+      {
+        repoPath,
+        exposureType: "sensitive_frontend_route",
+        label: `Sensitive frontend route ${route}`,
+        route,
+        evidenceIds: [contentResourceEvidenceId("sensitive-frontend-route", repoPath, line)],
+        lineRange: { startLine: lineNumber, endLine: lineNumber },
+      },
+    ];
+  });
+}
+
 function privateAssetReferenceObservations(
   repoPath: string,
   text: string,
@@ -350,6 +379,28 @@ function looksLikeHiddenRoute(route: string): boolean {
   }
   const segmentCount = normalized.split("/").filter(Boolean).length;
   return segmentCount >= 8 && normalized.length >= 72;
+}
+
+function looksLikeSensitiveFrontendRoute(route: string, block: string): boolean {
+  const normalizedRoute = route.toLowerCase();
+  const normalizedBlock = block.toLowerCase();
+  if (
+    /\b(?:admin|administration|backoffice|debug|sandbox|devtools|internal|console|superuser)\b/.test(
+      normalizedRoute,
+    )
+  ) {
+    return true;
+  }
+  return (
+    /\bcanactivate\s*:/.test(normalizedBlock) &&
+    /\b(?:adminguard|roleguard|permissionguard|rbac|acl|authorization)\b/.test(normalizedBlock)
+  );
+}
+
+function routeBlock(lines: ReadonlyArray<string>, routeLineIndex: number): string {
+  const start = Math.max(0, routeLineIndex - 2);
+  const end = Math.min(lines.length, routeLineIndex + 5);
+  return lines.slice(start, end).join("\n");
 }
 
 function isImagePath(repoPath: string): boolean {

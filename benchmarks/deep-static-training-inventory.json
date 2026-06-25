@@ -10,11 +10,13 @@
       },
       "categoryCoverage": {
         "Broken Access Control": {
-          "groundTruthIds": ["juice.access-control", "juice.ssrf"],
-          "challengeGaps": [
-            "Challenge-level UI and discovery expectations for access-control goals are not individually mapped yet."
+          "groundTruthIds": [
+            "juice.access-control",
+            "juice.bac-admin-section-route-discovery",
+            "juice.bac-web3-sandbox-route-discovery",
+            "juice.ssrf"
           ],
-          "note": "Covers route/resource authorization and SSRF challenge classes."
+          "note": "Covers route/resource authorization, sensitive frontend route discovery, and SSRF challenge classes."
         },
         "Broken Anti Automation": {
           "groundTruthIds": [

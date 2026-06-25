@@ -239,6 +239,22 @@
           "statusIn": ["statically_supported"]
         },
         {
+          "id": "juice.bac-admin-section-route-discovery",
+          "title": "Admin Section challenge should classify sensitive frontend route discovery",
+          "kind": "hypothesis",
+          "titleIncludes": "Hidden content/resource",
+          "candidateReasonIncludes": "administration",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.bac-web3-sandbox-route-discovery",
+          "title": "Web3 Sandbox challenge should classify sensitive frontend route discovery",
+          "kind": "hypothesis",
+          "titleIncludes": "Hidden content/resource",
+          "candidateReasonIncludes": "web3-sandbox",
+          "statusIn": ["statically_supported"]
+        },
+        {
           "id": "juice.open-redirect",
           "title": "Open redirect challenges should be classified as open redirect",
           "kind": "hypothesis",

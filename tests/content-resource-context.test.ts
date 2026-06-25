@@ -36,6 +36,38 @@ describe("content resource observations", () => {
     expect(observations.map((item) => item.label).join("\n")).toContain("pickle rick");
   });
 
+  it("extracts sensitive frontend routes from route configuration", () => {
+    const observations = contentResourceObservationsFromText(
+      "frontend/src/app/app.routing.ts",
+      [
+        "const routes = [",
+        "  {",
+        "    path: 'administration',",
+        "    component: AdministrationComponent,",
+        "    canActivate: [AdminGuard]",
+        "  },",
+        "  {",
+        "    path: 'web3-sandbox',",
+        "    loadChildren: async () => await loadWeb3SandboxModule()",
+        "  }",
+        "]",
+      ].join("\n"),
+    );
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        exposureType: "sensitive_frontend_route",
+        label: "Sensitive frontend route administration",
+        route: "administration",
+      }),
+      expect.objectContaining({
+        exposureType: "sensitive_frontend_route",
+        label: "Sensitive frontend route web3-sandbox",
+        route: "web3-sandbox",
+      }),
+    ]);
+  });
+
   it("extracts suspicious uploaded image paths without reading binary content", () => {
     const observations = contentResourceObservationsFromPath({
       path: "frontend/src/assets/public/images/uploads/cat-#hidden-123.jpg",
