@@ -265,7 +265,10 @@ function nodesForPath(
 }
 
 function isAccessControlDataAccessPath(pathNodes: ReadonlyArray<SecurityGraphNode>): boolean {
-  const descriptors = pathNodes.flatMap(nodeDescriptors).map(normalizeDescriptor);
+  const descriptors = pathNodes
+    .filter((node) => node.kind === "Boundary" || node.kind === "Source")
+    .flatMap(nodeDescriptors)
+    .map(normalizeDescriptor);
   if (descriptors.some(isFixedOrSafeDescriptor)) {
     return false;
   }

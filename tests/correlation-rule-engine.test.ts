@@ -160,6 +160,20 @@ describe("correlateGraphRules candidates", () => {
     ).toMatchObject({
       title: "SQL injection path: external input reaches SQL execution",
     });
+
+    expect(
+      correlateGraphRules({
+        graph: graphFixture({
+          boundaryLabel: "/mail",
+          sinkRepoPath:
+            "src/main/java/org/owasp/webgoat/lessons/missingac/MissingAccessControlUserRepository.java",
+          sinkType: "sql_execution",
+        }),
+        rules: [sqlRule],
+      })[0],
+    ).toMatchObject({
+      title: "SQL injection path: external input reaches SQL execution",
+    });
   });
 
   it("labels server-side HTTP client paths as SSRF candidates", () => {
@@ -401,6 +415,7 @@ function graphFixture(
     readonly branches?: number;
     readonly sinkType?: string;
     readonly sinkLabel?: string;
+    readonly sinkRepoPath?: string;
     readonly boundaryLabel?: string;
   } = {},
 ): SecurityGraph {
@@ -423,6 +438,9 @@ function graphFixture(
     {
       sinkType: opts.sinkType ?? "command_exec",
     },
+    opts.sinkRepoPath === undefined
+      ? undefined
+      : { repoPath: opts.sinkRepoPath, lineRange: { startLine: 1, endLine: 1 } },
   );
   const nodes = [boundary, handler, dangerous];
   const edges = [
