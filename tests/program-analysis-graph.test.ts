@@ -244,7 +244,7 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(graph.flows).toHaveLength(1);
   });
 
-  it("marks HTML and trusted-HTML output calls as cross-site scripting sinks", () => {
+  it("marks HTML output as XSS and server-side template compile as template rendering", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", crossSiteScriptingSlices())] }),
     );
@@ -256,7 +256,7 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(sinkLabels).toEqual([
       ["append", "cross_site_scripting"],
       ["bypassSecurityTrustHtml", "cross_site_scripting"],
-      ["compile", "cross_site_scripting"],
+      ["compile", "template_render"],
       ["replace", "cross_site_scripting"],
     ]);
     expect(graph.flows).toHaveLength(4);
@@ -325,6 +325,34 @@ describe("composeProgramAnalysisGraph path", () => {
       "template_render",
     ]);
     expect(graph.flows).toHaveLength(5);
+  });
+
+  it("marks JavaScript web handler calls to NoSQL, XML, file, upload, and template sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", javascriptSpecialSinkSlices())] }),
+    );
+    const sinkTypes = graph.nodes
+      .filter((node) => node.kind === "Sink")
+      .map((node) => node.properties.sinkType)
+      .sort();
+
+    expect(sinkTypes).toEqual([
+      "file_system",
+      "file_upload_validation",
+      "no_sql_execution",
+      "template_render",
+      "xml_processing",
+    ]);
+    expect(graph.flows).toHaveLength(5);
+  });
+
+  it("does not mark generic JavaScript array searches as NoSQL sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", genericArrayFindSlices())] }),
+    );
+
+    expect(graph.nodes.filter((node) => node.kind === "Sink")).toHaveLength(0);
+    expect(graph.flows).toHaveLength(0);
   });
 
   it("marks Go web handler calls to dangerous sinks", () => {
@@ -1192,6 +1220,100 @@ function pythonWebSinkSlices() {
               code: "render_template_string(template)",
               label: "CALL",
               lineNumber: 18,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function javascriptSpecialSinkSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "src/routes/upload.ts::program:handleUpload",
+        fileName: "src/routes/upload.ts",
+        lineNumber: 10,
+        boundary: {
+          boundaryType: "javascript-web",
+          routeOrName: "/upload",
+          method: "POST",
+          sourceName: "req",
+        },
+        usages: [
+          {
+            targetObj: {
+              name: "find",
+              resolvedMethod: "mongodb.Collection.find",
+              code: "db.reviewsCollection.find({ $where: 'this.product == ' + req.params.id })",
+              label: "CALL",
+              lineNumber: 14,
+            },
+          },
+          {
+            targetObj: {
+              name: "parseXmlString",
+              resolvedMethod: "src/lib/xml.ts::program:parseXmlString",
+              code: "parseXmlString(file.buffer.toString())",
+              label: "CALL",
+              lineNumber: 18,
+            },
+          },
+          {
+            targetObj: {
+              name: "sendFile",
+              resolvedMethod: "express.Response.sendFile",
+              code: 'res.sendFile(path.resolve("ftp/", req.params.file))',
+              label: "CALL",
+              lineNumber: 22,
+            },
+          },
+          {
+            targetObj: {
+              name: "endsWith",
+              resolvedMethod: "String.prototype.endsWith",
+              code: 'file.originalname.toLowerCase().endsWith(".pdf")',
+              label: "CALL",
+              lineNumber: 26,
+            },
+          },
+          {
+            targetObj: {
+              name: "compile",
+              resolvedMethod: "pug.compile",
+              code: "pug.compile(req.body.template)",
+              label: "CALL",
+              lineNumber: 30,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function genericArrayFindSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "src/routes/upload.ts::program:listVisible",
+        fileName: "src/routes/upload.ts",
+        lineNumber: 40,
+        boundary: {
+          boundaryType: "javascript-web",
+          routeOrName: "/visible",
+          method: "GET",
+          sourceName: "req",
+        },
+        usages: [
+          {
+            targetObj: {
+              name: "find",
+              resolvedMethod: "Array.prototype.find",
+              code: "items.find((item) => item.visible)",
+              label: "CALL",
+              lineNumber: 43,
             },
           },
         ],

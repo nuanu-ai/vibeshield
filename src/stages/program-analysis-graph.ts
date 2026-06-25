@@ -103,6 +103,8 @@ const CSRF_STATE_CHANGE_PATTERN =
   /\b(?:setvalue|put|save|update|destroy|delete|remove|insert|create|persist|merge|flush|commit|push|add|send|post|write|collection\.update|collection\.insert|model\.create|model\.update)\b/i;
 const FILE_METHOD_NAMES = new Set([
   "create",
+  "createreadstream",
+  "createwritestream",
   "copy",
   "delete",
   "deleteifexists",
@@ -129,6 +131,29 @@ const PYTHON_SUBPROCESS_METHODS = new Set([
   "getstatusoutput",
   "popen",
   "run",
+]);
+
+const NOSQL_METHOD_NAMES = new Set([
+  "aggregate",
+  "bulkwrite",
+  "count",
+  "countdocuments",
+  "deletemany",
+  "deleteone",
+  "distinct",
+  "find",
+  "findone",
+  "findoneanddelete",
+  "findoneandremove",
+  "findoneandupdate",
+  "insert",
+  "insertmany",
+  "insertone",
+  "remove",
+  "replaceone",
+  "update",
+  "updatemany",
+  "updateone",
 ]);
 
 interface SinkClassification {
@@ -607,12 +632,20 @@ function classifySinkCandidate(
     return { label: httpLabel, sinkType: outboundHttpSinkType(repoPath, lower) };
   }
 
+  if (isNoSqlOperation(lower, methodName)) {
+    return { label, sinkType: "no_sql_execution" };
+  }
+
   if (isAccessControlSensitiveResourceUse(candidate, lower, methodName, entity)) {
     return { label: accessControlLabel(candidate, label, entity), sinkType: "access_control" };
   }
 
   if (isCsrfSensitiveStateChange(candidate, lower, methodName, entity)) {
     return { label, sinkType: "csrf_state_change" };
+  }
+
+  if (isTemplateRenderOperation(lower, methodName)) {
+    return { label, sinkType: "template_render" };
   }
 
   const xssLabel = crossSiteScriptingLabel(candidate, lower, methodName, label, entity);
@@ -648,6 +681,9 @@ function classifySinkCandidate(
   ) {
     return { label, sinkType: "xml_processing" };
   }
+  if (isXmlProcessingOperation(lower, methodName)) {
+    return { label, sinkType: "xml_processing" };
+  }
 
   if (
     (FILE_METHOD_NAMES.has(methodName) &&
@@ -660,12 +696,20 @@ function classifySinkCandidate(
         lower.includes("ioutil.") ||
         lower.includes("os.readfile") ||
         lower.includes("os.writefile") ||
+        lower.includes("fs.") ||
+        lower.includes("node:fs") ||
+        lower.includes("fs/promises") ||
         lower.includes("fileinputstream") ||
         lower.includes("fileoutputstream"))) ||
     (methodName === "open" && isBareFileOpen(repoPath, lower)) ||
+    (methodName === "sendfile" && (lower.includes("sendfile") || lower.includes("path."))) ||
     (methodName === "get" && (lower.includes("paths.get") || lower.includes("filesystems.getpath")))
   ) {
     return { label, sinkType: "file_system" };
+  }
+
+  if (isFileUploadValidationOperation(candidate, lower, methodName)) {
+    return { label: fileUploadLabel(candidate, label), sinkType: "file_upload_validation" };
   }
 
   if (
@@ -685,6 +729,90 @@ function classifySinkCandidate(
   }
 
   return undefined;
+}
+
+function isNoSqlOperation(lower: string, methodName: string): boolean {
+  if (!NOSQL_METHOD_NAMES.has(methodName)) {
+    return false;
+  }
+  if (
+    lower.includes("mongodb") ||
+    lower.includes("mongoose") ||
+    lower.includes("mongoclient") ||
+    lower.includes("nosql") ||
+    lower.includes("$where") ||
+    lower.includes("$set") ||
+    lower.includes("$ne") ||
+    lower.includes("$regex") ||
+    lower.includes("objectid") ||
+    /\b\w+collection\.(?:aggregate|count|countdocuments|deletemany|deleteone|distinct|find|findone|findoneanddelete|findoneandremove|findoneandupdate|insert|insertmany|insertone|remove|replaceone|update|updatemany|updateone)\s*\(/.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  return /\b(?:db|database)\.[\w$]+\.(?:aggregate|count|countdocuments|deletemany|deleteone|distinct|find|findone|findoneanddelete|findoneandremove|findoneandupdate|insert|insertmany|insertone|remove|replaceone|update|updatemany|updateone)\s*\(/.test(
+    lower,
+  );
+}
+
+function isXmlProcessingOperation(lower: string, methodName: string): boolean {
+  return (
+    methodName === "parsexmlstring" ||
+    lower.includes("xmldocument.fromstring") ||
+    lower.includes("libxml2.xmldocument.fromstring") ||
+    lower.includes("xml2js.parse") ||
+    lower.includes("xml2js.parseString".toLowerCase()) ||
+    lower.includes("fast-xml-parser") ||
+    lower.includes("xml_parse_noent") ||
+    lower.includes("xml_parse_dtdload") ||
+    (lower.includes("libxml2") && lower.includes("fromstring"))
+  );
+}
+
+function isFileUploadValidationOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+): boolean {
+  return (
+    lower.includes("multer") ||
+    lower.includes("filefilter") ||
+    lower.includes("originalname") ||
+    lower.includes("mimetype") ||
+    lower.includes("file-type") ||
+    lower.includes("filetype.frombuffer") ||
+    lower.includes("busboy") ||
+    lower.includes("formidable") ||
+    /\bfile\.(?:size|type|mimetype|originalname|buffer)\b/.test(lower) ||
+    (["endswith", "includes", "match", "test"].includes(methodName) &&
+      /\b(?:originalname|mimetype|filetype|file\.type|file\.size|upload)\b/i.test(candidate))
+  );
+}
+
+function fileUploadLabel(candidate: string, fallbackLabel: string): string {
+  if (/\b(?:originalname|extension|extname|mimetype|filetype|file-type)\b/i.test(candidate)) {
+    return "file upload type validation";
+  }
+  if (/\b(?:size|limit|limits)\b/i.test(candidate)) {
+    return "file upload size validation";
+  }
+  return fallbackLabel;
+}
+
+function isTemplateRenderOperation(lower: string, methodName: string): boolean {
+  return (
+    lower.includes("pug.compile") ||
+    lower.includes("jade.compile") ||
+    lower.includes("handlebars.compile") ||
+    lower.includes("mustache.render") ||
+    lower.includes("ejs.render") ||
+    lower.includes("nunjucks.renderstring") ||
+    lower.includes("jinja2.template") ||
+    methodName === "renderstring" ||
+    (methodName === "compile" &&
+      /\b(?:pug|jade|handlebars|mustache|ejs|nunjucks|template)\b/.test(lower))
+  );
 }
 
 function isAccessControlSensitiveResourceUse(

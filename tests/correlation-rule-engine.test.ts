@@ -136,6 +136,36 @@ describe("correlateGraphRules candidates", () => {
     });
   });
 
+  it("labels external-input paths for NoSQL, upload validation, and SSTI taxonomy", () => {
+    for (const { sinkType, title } of [
+      {
+        sinkType: "no_sql_execution",
+        title: "NoSQL injection path: external input reaches NoSQL query execution",
+      },
+      {
+        sinkType: "file_upload_validation",
+        title: "File upload validation path: external input reaches upload validation logic",
+      },
+      {
+        sinkType: "template_render",
+        title: "Server-side template injection path: external input reaches template rendering",
+      },
+    ]) {
+      const candidates = correlateGraphRules({
+        graph: graphFixture({ sinkType }),
+        rules: [
+          {
+            ...rule(),
+            target: { kinds: ["Sink"], propertyEquals: { sinkType } },
+          },
+        ],
+      });
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]?.title).toBe(title);
+    }
+  });
+
   it("labels HTML and script output paths as XSS candidates", () => {
     const graph = graphFixture({ sinkType: "cross_site_scripting" });
     const candidates = correlateGraphRules({

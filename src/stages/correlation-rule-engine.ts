@@ -215,16 +215,20 @@ function candidateTitle(
   switch (sinkType) {
     case "sql_execution":
       return "SQL injection path: external input reaches SQL execution";
+    case "no_sql_execution":
+      return "NoSQL injection path: external input reaches NoSQL query execution";
     case "xml_processing":
       return "XXE path: external input reaches XML processing";
     case "deserialization":
       return "Insecure deserialization path: external input reaches deserialization";
     case "file_system":
       return "Path traversal or file access path: external input reaches filesystem access";
+    case "file_upload_validation":
+      return "File upload validation path: external input reaches upload validation logic";
     case "redirect":
       return "Open redirect path: external input reaches a redirect";
     case "template_render":
-      return "Template injection path: external input reaches template rendering";
+      return "Server-side template injection path: external input reaches template rendering";
     case "code_execution":
       return "Code execution path: external input reaches command or code execution";
     case "server_side_request":
