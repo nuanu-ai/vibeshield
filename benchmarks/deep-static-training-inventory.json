@@ -14,9 +14,13 @@
           "note": "Covers route/resource authorization and SSRF challenge classes; UI-only discovery remains a later challenge-level gate."
         },
         "Broken Anti Automation": {
-          "groundTruthIds": ["juice.password-reset-security-questions"],
-          "limitation": "CAPTCHA bypass and timing abuse require runtime behavior; static coverage currently reaches only the password-reset overlap.",
-          "note": "Keep this mixed category visible until challenge-level inventory separates static and runtime-only items."
+          "groundTruthIds": [
+            "juice.anti-automation-captcha-rate",
+            "juice.anti-automation-extra-language",
+            "juice.anti-automation-multiple-likes",
+            "juice.password-reset-security-questions"
+          ],
+          "note": "Covers CAPTCHA rate abuse, hidden language resource enumeration, duplicate-like race behavior, and the password-reset brute-force overlap."
         },
         "Broken Authentication": {
           "groundTruthIds": [

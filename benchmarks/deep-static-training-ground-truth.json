@@ -306,6 +306,30 @@
           "statusIn": ["statically_supported"]
         },
         {
+          "id": "juice.anti-automation-captcha-rate",
+          "title": "CAPTCHA bypass challenge should classify weak rate or automation controls",
+          "kind": "hypothesis",
+          "titleIncludes": "Anti-automation",
+          "candidateReasonIncludes": "CAPTCHA rate bypass",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.anti-automation-extra-language",
+          "title": "Extra Language challenge should classify hidden resource enumeration as anti-automation bypass",
+          "kind": "hypothesis",
+          "titleIncludes": "Anti-automation",
+          "candidateReasonIncludes": "hidden resource enumeration",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.anti-automation-multiple-likes",
+          "title": "Multiple Likes challenge should classify duplicate-action race behavior",
+          "kind": "hypothesis",
+          "titleIncludes": "Anti-automation",
+          "candidateReasonIncludes": "routes/likeProductReviews.ts",
+          "statusIn": ["statically_supported"]
+        },
+        {
           "id": "juice.jwt-token-trust",
           "title": "Unsigned and forged JWT challenges should classify token trust",
           "kind": "hypothesis",
