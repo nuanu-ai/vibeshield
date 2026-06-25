@@ -189,6 +189,13 @@ Status:
   The curated ground-truth slice passes in both normal and
   `--strict-ground-truth` benchmark modes: WebGoat covers 21/21 expectations and
   Juice Shop covers 23/23 expectations, with 0 known gaps in both repositories.
+  The Juice Shop inventory audit
+  `pnpm benchmark:inventory --source juice-shop=/tmp/vibeshield-juice-shop-probe`
+  maps 113 challenges across 16 categories to curated ground truth or explicit
+  static-analysis limitations; the stricter
+  `pnpm benchmark:inventory --fail-on-limitations --source juice-shop=/tmp/vibeshield-juice-shop-probe`
+  gate is still intentionally red on Broken Anti Automation, Miscellaneous,
+  Security Misconfiguration, and Security through Obscurity.
   Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run

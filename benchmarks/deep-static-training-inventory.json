@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "repositories": [
+    {
+      "id": "juice-shop",
+      "name": "Juice Shop challenge category inventory",
+      "source": {
+        "kind": "juice-shop-challenges",
+        "relativePath": "data/static/challenges.yml"
+      },
+      "categoryCoverage": {
+        "Broken Access Control": {
+          "groundTruthIds": ["juice.access-control", "juice.ssrf"],
+          "note": "Covers route/resource authorization and SSRF challenge classes; UI-only discovery remains a later challenge-level gate."
+        },
+        "Broken Anti Automation": {
+          "groundTruthIds": ["juice.password-reset-security-questions"],
+          "limitation": "CAPTCHA bypass and timing abuse require runtime behavior; static coverage currently reaches only the password-reset overlap.",
+          "note": "Keep this mixed category visible until challenge-level inventory separates static and runtime-only items."
+        },
+        "Broken Authentication": {
+          "groundTruthIds": [
+            "juice.credential-trust",
+            "juice.password-reset-security-questions",
+            "juice.two-factor-token-trust"
+          ]
+        },
+        "Cryptographic Issues": {
+          "groundTruthIds": ["juice.coupon-encoding-trust", "juice.jwt-token-trust"],
+          "note": "Covers reversible coupon logic and JWT/token trust; challenge-level inventory still needs weird-crypto and paywall-specific expectations."
+        },
+        "Improper Input Validation": {
+          "groundTruthIds": [
+            "juice.access-control",
+            "juice.coupon-encoding-trust",
+            "juice.upload-validation"
+          ]
+        },
+        "Injection": {
+          "groundTruthIds": [
+            "juice.sql-injection",
+            "juice.nosql",
+            "juice.ssti",
+            "juice.llm-tool-prompt-trust"
+          ]
+        },
+        "Insecure Deserialization": {
+          "groundTruthIds": ["juice.insecure-deserialization-rce"]
+        },
+        "Miscellaneous": {
+          "limitation": "Scoreboard, privacy-policy acknowledgement, notification clearing, and CSAF discovery are runtime or non-vulnerability product goals, not static code-path vulnerabilities yet."
+        },
+        "Observability Failures": {
+          "groundTruthIds": ["juice.file-exposure", "juice.ssrf"],
+          "note": "Covers log/file exposure and metrics fetch paths; leaked-log semantics should become a challenge-level expectation."
+        },
+        "Security Misconfiguration": {
+          "groundTruthIds": ["juice.file-exposure", "juice.xss"],
+          "limitation": "Deprecated-interface, error-handling, support-login, and SVG imaging need explicit security-misconfiguration taxonomy before this category can be called fully covered."
+        },
+        "Security through Obscurity": {
+          "groundTruthIds": ["juice.file-exposure"],
+          "limitation": "Obfuscated route discovery and steganography require asset/UI analysis beyond the current static code graph."
+        },
+        "Sensitive Data Exposure": {
+          "groundTruthIds": [
+            "juice.hardcoded-secrets",
+            "juice.file-exposure",
+            "juice.credential-trust",
+            "juice.password-reset-security-questions"
+          ]
+        },
+        "Unvalidated Redirects": {
+          "groundTruthIds": ["juice.open-redirect"]
+        },
+        "Vulnerable Components": {
+          "groundTruthIds": [
+            "juice.vulnerable-components",
+            "juice.jwt-token-trust",
+            "juice.file-exposure"
+          ]
+        },
+        "XSS": {
+          "groundTruthIds": ["juice.xss"]
+        },
+        "XXE": {
+          "groundTruthIds": ["juice.xxe"]
+        }
+      }
+    }
+  ]
+}

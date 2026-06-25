@@ -49,6 +49,25 @@ pnpm benchmark:deep \
   /Users/dmitry/.vibeshield/runs/20260625200500-77bfa880
 ```
 
+Audit the Juice Shop challenge inventory separately. This checks that every
+challenge category in `data/static/challenges.yml` is either mapped to one or
+more curated ground-truth expectations or is explicitly documented as a static
+analysis limitation:
+
+```bash
+pnpm benchmark:inventory \
+  --source juice-shop=/tmp/vibeshield-juice-shop-probe
+```
+
+Use the stricter inventory mode when evaluating whether the current benchmark is
+ready to claim category-level completeness:
+
+```bash
+pnpm benchmark:inventory \
+  --fail-on-limitations \
+  --source juice-shop=/tmp/vibeshield-juice-shop-probe
+```
+
 ## Current Baseline
 
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |
@@ -96,6 +115,14 @@ Current strict result passes on WebGoat and Juice Shop. Future `known_gap`
 entries should be temporary, explicit backlog items and must fail under
 `--strict-ground-truth`.
 
+Current Juice Shop inventory audit result:
+
+- default mode passes with 113 challenges across 16 categories; 15 categories
+  map to curated ground-truth expectations and 4 categories carry explicit
+  limitations;
+- `--fail-on-limitations` is intentionally red on Broken Anti Automation,
+  Miscellaneous, Security Misconfiguration, and Security through Obscurity.
+
 Optional `groundTruth` entries are reserved for curated expected vulnerability
 classes. They should describe product-observable signals or documented
 limitations and must stay outside the scanner runtime.
@@ -118,14 +145,15 @@ documented static-analysis limitation.
 ## Next Gate
 
 The next quality gate should continue expanding the curated file into
-lesson/CWE-level coverage for WebGoat and Juice Shop. Each expected item should
-map to one of:
+lesson/CWE-level coverage for WebGoat and challenge-level coverage for Juice
+Shop. Each expected item should map to one of:
 
 - a direct Quick Scan finding;
 - a supported static hypothesis family;
 - a documented limitation when static-only analysis cannot observe the runtime
   behavior.
 
-The goal is to reduce `known_gap` entries by improving Joern extraction, graph
-construction, rule taxonomy, and validation logic. Do not close a gap by adding
-repository-specific detector behavior.
+The goal is to reduce `known_gap` entries and inventory limitations by improving
+Joern extraction, graph construction, rule taxonomy, validation logic, and asset
+or UI inventory where needed. Do not close a gap by adding repository-specific
+detector behavior.
