@@ -231,6 +231,8 @@ function candidateTitle(
       return "Insecure deserialization path: external input reaches deserialization";
     case "file_system":
       return "Path traversal or file access path: external input reaches filesystem access";
+    case "log_disclosure":
+      return "Log disclosure path: external input reaches exposed server log access";
     case "file_upload_validation":
       return "File upload validation path: external input reaches upload validation logic";
     case "redirect":

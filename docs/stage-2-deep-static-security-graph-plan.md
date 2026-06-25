@@ -173,7 +173,7 @@ Status:
   WebGoat (Java, run `20260625194251-245a4c68`, 616 supported static
   hypotheses, `data_flow` checked 290/290, `component_usage` checked 3086/3086,
   `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
-  `20260625213623-574312f3`, 1787, `data_flow` checked 728/728,
+  `20260625214557-7b87f6a7`, 1787, `data_flow` checked 728/728,
   `component_usage` checked 2194/2194, `dependency_usage` checked 12/12,
   `ci_iac` checked 18/18, `content_assets` checked 1067/1067,
   `smart_contracts` checked 17/17), Freeland (JS/TS,
@@ -188,14 +188,14 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625213623-574312f3 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625214557-7b87f6a7 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
   The curated ground-truth slice passes in normal and strict benchmark modes:
-  WebGoat covers 21/21 expectations and Juice Shop covers 36/36 expectations
+  WebGoat covers 21/21 expectations and Juice Shop covers 37/37 expectations
   with no known gaps.
   The Juice Shop inventory audit
   `pnpm benchmark:inventory --source juice-shop=/tmp/vibeshield-juice-shop-probe`
   maps 113 challenges across 16 categories to curated ground truth with 0
-  explicit static-analysis limitations and 2 open challenge-level recall gaps.
+  explicit static-analysis limitations and 1 open challenge-level recall gap.
   The stricter category-completeness command
   `pnpm benchmark:inventory --fail-on-limitations --source juice-shop=/tmp/vibeshield-juice-shop-probe`
   gate passes with no limitations; the challenge-recall command
@@ -234,7 +234,10 @@ Status:
   due-diligence goals are documented as non-static/non-vulnerability category
   notes rather than strict limitations. Fresh run `20260625213623-574312f3`
   resolved the Weird Crypto challenge expectation by detecting request-reachable
-  weak crypto indicator verifier logic in `routes/verify.ts`.
+  weak crypto indicator verifier logic in `routes/verify.ts`. Fresh run
+  `20260625214557-7b87f6a7` resolved Observability Leaked Access Logs by
+  classifying request-reachable `sendFile(path.resolve('logs/', ...))` as
+  exposed server log access in `routes/logfileServer.ts`.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
   forgery, cross-site scripting, code execution, IDOR, CSRF, access-control, JWT
@@ -381,7 +384,7 @@ Status:
   Evidence: `tests/deep-static-gate3.acceptance.test.ts` proves all seven rule
   families from deterministic graph evidence, stable ordering, dependency
   missing-edge suppression, and contradicted control handling. The fresh WebGoat
-  and Juice Shop ground-truth benchmark runs cover 21/21 and 36/36 expectations,
+  and Juice Shop ground-truth benchmark runs cover 21/21 and 37/37 expectations,
   including `content_resource_exposure_path=11` and
   `smart_contract_risk_path=1`.
 - [x] **Correlation rule engine.** In: `SecurityGraph`, contextual findings,
@@ -447,7 +450,7 @@ Status:
   recipes, coverage, and repository map, and separately proves invalid model
   output falls back to catalog hypothesis enrichments. `pnpm scan
   /tmp/vibeshield-juice-shop-probe --deep` with `OPENROUTER_API_KEY=` produced
-  run `20260625213623-574312f3` with deterministic catalog enrichments for all
+  run `20260625214557-7b87f6a7` with deterministic catalog enrichments for all
   1787 supported static hypotheses.
 - [x] **hypotheses.enrich.** In: bounded `StaticHypothesis` batches, graph paths,
   Quick Scan findings, evidence snippets, observed controls, coverage gaps, and

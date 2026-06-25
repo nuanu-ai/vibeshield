@@ -257,6 +257,19 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(graph.flows).toHaveLength(1);
   });
 
+  it("marks HTTP-served log files as log disclosure sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", logDisclosureSlices())] }),
+    );
+
+    expect(graph.nodes.find((node) => node.kind === "Sink")).toMatchObject({
+      label: "access log disclosure",
+      repoPath: "routes/logfileServer.ts",
+      properties: { sinkType: "log_disclosure" },
+    });
+    expect(graph.flows).toHaveLength(1);
+  });
+
   it("marks JWT token operations and auth-bypass verification as semantic sinks", () => {
     const jwtGraph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", jwtTokenTrustSlices())] }),
@@ -1563,6 +1576,35 @@ function redirectSlices() {
   };
 }
 
+function logDisclosureSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "routes/logfileServer.ts::program:serveLogFiles",
+        fileName: "routes/logfileServer.ts",
+        lineNumber: 8,
+        boundary: {
+          boundaryType: "javascript-web",
+          routeOrName: "/support/logs/:file",
+          method: "GET",
+          sourceName: "req.params.file",
+        },
+        usages: [
+          {
+            targetObj: {
+              name: "sendFile",
+              resolvedMethod: "express.Response.sendFile",
+              code: "res.sendFile(path.resolve('logs/', file))",
+              label: "CALL",
+              lineNumber: 14,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function nestedLambdaSqlSlices() {
   return {
     objectSlices: [
@@ -2413,6 +2455,7 @@ function manifest(): Manifest {
       { path: "routes/profile.ts", size: 100, sha256: "profile-sha" },
       { path: "routes/basket.ts", size: 100, sha256: "basket-sha" },
       { path: "routes/basketItems.ts", size: 100, sha256: "basket-items-sha" },
+      { path: "routes/logfileServer.ts", size: 100, sha256: "logfile-server-sha" },
       { path: "routes/redirect.ts", size: 100, sha256: "redirect-sha" },
       { path: "routes/search.ts", size: 100, sha256: "search-sha" },
       { path: "frontend/src/app/search.component.ts", size: 100, sha256: "search-component-sha" },

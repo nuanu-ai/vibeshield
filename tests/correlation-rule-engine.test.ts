@@ -210,6 +210,10 @@ describe("correlateGraphRules candidates", () => {
         sinkType: "template_render",
         title: "Server-side template injection path: external input reaches template rendering",
       },
+      {
+        sinkType: "log_disclosure",
+        title: "Log disclosure path: external input reaches exposed server log access",
+      },
     ]) {
       const candidates = correlateGraphRules({
         graph: graphFixture({ sinkType }),

@@ -960,6 +960,10 @@ function classifySinkCandidate(
     return { label: logInjectionLabel(candidate, label), sinkType: "log_injection" };
   }
 
+  if (isLogDisclosureOperation(candidate, lower, methodName, entity)) {
+    return { label: "access log disclosure", sinkType: "log_disclosure" };
+  }
+
   if (isAccessControlSensitiveResourceUse(candidate, lower, methodName, entity)) {
     return { label: accessControlLabel(candidate, label, entity), sinkType: "access_control" };
   }
@@ -1849,6 +1853,28 @@ function logInjectionLabel(candidate: string, fallbackLabel: string): string {
     return "Log injection";
   }
   return fallbackLabel;
+}
+
+function isLogDisclosureOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  if (!["sendfile", "readfile", "createreadstream"].includes(methodName)) {
+    return false;
+  }
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  return hasLogDisclosurePath(context) || hasLogDisclosurePath(lower);
+}
+
+function hasLogDisclosurePath(value: string): boolean {
+  return (
+    /(?:^|[/'"`])(?:access[-_.]?log|access[-_.]?logs|logs?)(?:[/'"`]|$)/i.test(value) ||
+    value.includes("/support/logs") ||
+    value.includes("accesslogdisclosure") ||
+    value.includes("logfileserver")
+  );
 }
 
 function isCsrfSensitiveStateChange(

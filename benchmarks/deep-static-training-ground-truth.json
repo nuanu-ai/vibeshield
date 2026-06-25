@@ -425,6 +425,14 @@
           "statusIn": ["statically_supported"]
         },
         {
+          "id": "juice.observability-access-log-disclosure",
+          "title": "Leaked Access Logs challenge should classify exposed server log access",
+          "kind": "hypothesis",
+          "titleIncludes": "Log disclosure",
+          "candidateReasonIncludes": "routes/logfileServer.ts",
+          "statusIn": ["statically_supported"]
+        },
+        {
           "id": "juice.upload-validation",
           "title": "Upload Size, Upload Type, and Poison Null Byte challenges should model upload validation bypasses",
           "kind": "hypothesis",

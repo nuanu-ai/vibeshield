@@ -64,11 +64,12 @@
           "note": "Covers the security-relevant Wallet Depletion smart-contract withdrawal risk; scoreboard, privacy-policy acknowledgement, security.txt etiquette, notification clearing, and CSAF checksum submission are product discovery or runtime/due-diligence goals rather than static code-path vulnerabilities."
         },
         "Observability Failures": {
-          "groundTruthIds": ["juice.file-exposure", "juice.ssrf"],
-          "challengeGaps": [
-            "Leaked Access Logs OSINT credential flow is not an explicit ground-truth expectation yet."
+          "groundTruthIds": [
+            "juice.file-exposure",
+            "juice.observability-access-log-disclosure",
+            "juice.ssrf"
           ],
-          "note": "Covers log/file exposure and metrics fetch paths."
+          "note": "Covers log/file exposure, explicit access-log disclosure paths, and metrics fetch paths."
         },
         "Security Misconfiguration": {
           "groundTruthIds": [
