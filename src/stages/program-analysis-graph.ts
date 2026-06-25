@@ -494,6 +494,7 @@ function addObservedCalls(
       continue;
     }
     addRouteRegistrationHandlerCalls(builder, graphVersion, entity, owner, target);
+    addJavascriptSocketEventBoundary(builder, graphVersion, entity, owner, target);
     const targetNode =
       findTargetCodeEntity(builder, name) ??
       addSinkIfKnown(builder, graphVersion, entity, target, name);
@@ -512,6 +513,82 @@ function addObservedCalls(
       producerVersion: entity.producerVersion,
     });
   }
+}
+
+function addJavascriptSocketEventBoundary(
+  builder: GraphBuilder,
+  graphVersion: string,
+  entity: ObservedEntity,
+  owner: SecurityGraphNode,
+  target: ProgramAnalysisObject,
+): void {
+  const code = stringValue(target.code);
+  const eventName = code === undefined ? undefined : javascriptSocketEventName(code);
+  if (eventName === undefined) {
+    return;
+  }
+
+  const lineNumber = positiveInteger(target.lineNumber) ?? entity.lineRange.startLine;
+  const lineRange = { startLine: lineNumber, endLine: lineNumber };
+  const sourceName = javascriptSocketPayloadName(code ?? "") ?? "socket payload";
+  const boundary = addNode(builder, graphVersion, {
+    kind: "Boundary",
+    stableKey: `Boundary:socket-event::${eventName}:${entity.fullName}:${lineNumber}`,
+    label: eventName,
+    repoPath: entity.repoPath,
+    lineRange,
+    symbol: entity.fullName,
+    properties: {
+      boundaryType: "socket-event",
+      routeOrName: eventName,
+    },
+    evidenceIds: [entity.evidenceId],
+    producerVersion: entity.producerVersion,
+  });
+  const source = addNode(builder, graphVersion, {
+    kind: "Source",
+    stableKey: `Source:${boundary.stableKey}:${sourceName}`,
+    label: sourceName,
+    repoPath: entity.repoPath,
+    lineRange,
+    symbol: sourceName,
+    properties: {
+      sourceType: "external_input",
+      boundaryNodeId: boundary.id,
+    },
+    evidenceIds: [entity.evidenceId],
+    producerVersion: entity.producerVersion,
+  });
+
+  addEdge(builder, graphVersion, {
+    kind: "receives",
+    stableKey: `receives:${source.id}:${boundary.id}`,
+    fromNodeId: source.id,
+    toNodeId: boundary.id,
+    properties: {},
+    evidenceIds: [entity.evidenceId],
+    producerVersion: entity.producerVersion,
+  });
+  addEdge(builder, graphVersion, {
+    kind: "registers",
+    stableKey: `registers:${boundary.id}:${owner.id}`,
+    fromNodeId: boundary.id,
+    toNodeId: owner.id,
+    properties: {},
+    evidenceIds: [entity.evidenceId],
+    producerVersion: entity.producerVersion,
+  });
+}
+
+function javascriptSocketEventName(code: string): string | undefined {
+  if (!/\b(?:socket|io)\.(?:on|once)\s*\(/i.test(code)) {
+    return undefined;
+  }
+  return code.match(/\b(?:socket|io)\.(?:on|once)\s*\(\s*["'`]([^"'`]+)["'`]\s*,/i)?.[1];
+}
+
+function javascriptSocketPayloadName(code: string): string | undefined {
+  return code.match(/,\s*(?:async\s*)?\(?\s*([A-Za-z_$][\w$]*)\s*(?::[^)=]+)?\)?\s*=>/i)?.[1];
 }
 
 function addRouteRegistrationHandlerCalls(

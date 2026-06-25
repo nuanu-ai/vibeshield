@@ -303,6 +303,15 @@ describe("composeProgramAnalysisGraph path", () => {
         ["SVG redirect policy trust", "security_misconfiguration"],
       ]),
     );
+    expect(graph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "Boundary",
+          label: "verifySvgInjectionChallenge",
+          properties: expect.objectContaining({ boundaryType: "socket-event" }),
+        }),
+      ]),
+    );
     expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(10);
   });
 
@@ -1139,15 +1148,26 @@ function juiceShopTrustSemanticsSlices() {
         ],
       },
       {
+        fullName: "lib/startup/registerWebsocketEvents.ts::program:<lambda>0:<lambda>1",
+        fileName: "lib/startup/registerWebsocketEvents.ts",
+        lineNumber: 23,
+        usages: [
+          {
+            targetObj: {
+              name: "on",
+              resolvedMethod: "socket.io:Socket:on",
+              code: "socket.on('verifySvgInjectionChallenge', (data: any) => { challengeUtils.solveIf(challenges.svgInjectionChallenge, () => { return data?.match(/.*\\.\\.\\/\\.\\.\\/\\.\\.[\\w/-]*?\\/redirect\\?to=https?:\\/\\/cataas.com\\/cat.*/) && security.isRedirectAllowed(data) }) })",
+              label: "CALL",
+              lineNumber: 45,
+            },
+          },
+        ],
+      },
+      {
         fullName:
           "lib/startup/registerWebsocketEvents.ts::program:<lambda>0:<lambda>1:<lambda>8:<lambda>9",
         fileName: "lib/startup/registerWebsocketEvents.ts",
         lineNumber: 46,
-        boundary: {
-          boundaryType: "socket-event",
-          routeOrName: "verifySvgInjectionChallenge",
-          sourceName: "data",
-        },
         parameters: [{ name: "data", typeFullName: "socket.payload" }],
         usages: [
           {
