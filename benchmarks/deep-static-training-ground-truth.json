@@ -98,8 +98,7 @@
           "title": "Vulnerable Components lesson should produce dependency reachability",
           "kind": "family",
           "family": "dependency_usage_path",
-          "minCount": 1,
-          "expected": "known_gap"
+          "minCount": 1
         }
       ]
     },
@@ -223,8 +222,7 @@
           "title": "Vulnerable component challenges should produce dependency reachability",
           "kind": "family",
           "family": "dependency_usage_path",
-          "minCount": 1,
-          "expected": "known_gap"
+          "minCount": 1
         },
         {
           "id": "juice.ssti",

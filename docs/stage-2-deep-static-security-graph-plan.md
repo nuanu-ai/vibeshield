@@ -169,11 +169,11 @@ Status:
   Joern CPG artifact is stored as a blob; no path step is created without a
   `SecurityGraphEdge` and evidence.
   Evidence: current live `--deep` runs produced supported attack paths on
-  WebGoat (Java, run `20260625175941-5634a440`, 258 supported static
+  WebGoat (Java, run `20260625190836-4b827481`, 294 supported static
   hypotheses, `data_flow` checked 129/222, `component_usage` checked 3086/3086,
-  `dependency_usage` checked 0/0, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
-  `20260625184641-02d6d398`, 773, `data_flow` checked 333/333,
-  `component_usage` checked 2194/2194, `dependency_usage` checked 0/0,
+  `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
+  `20260625190926-0443bfe2`, 804, `data_flow` checked 333/333,
+  `component_usage` checked 2194/2194, `dependency_usage` checked 12/12,
   `ci_iac` checked 18/18), Freeland (JS/TS, run `20260625164008-81d5eb5a`,
   164, `data_flow` checked 62/380, `component_usage` checked 883/883,
   `dependency_usage` checked 0/0, `ci_iac` checked 7/7), Vulnerable-Flask-App
@@ -185,16 +185,18 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625175941-5634a440 /Users/dmitry/.vibeshield/runs/20260625184641-02d6d398 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625190836-4b827481 /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
   The curated ground-truth slice now passes in normal benchmark mode with known
-  gaps surfaced: WebGoat covers 10/12 expectations and reports 2 known gaps
-  (missing function-level access control classification and dependency
-  reachability for the Vulnerable Components lesson); Juice Shop covers 16/17
-  expectations and reports 1 known gap (dependency reachability). Fresh run
+  gaps surfaced: WebGoat covers 11/12 expectations and reports 1 known gap
+  (missing function-level access control classification); Juice Shop covers
+  17/17 expectations and reports 0 known gaps. Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run
   `20260625184641-02d6d398` resolved the prior XXE classification gap through
-  JavaScript route middleware registration linking.
+  JavaScript route middleware registration linking; fresh runs
+  `20260625190836-4b827481` and `20260625190926-0443bfe2` resolved dependency
+  reachability by scanning Syft SBOMs with Trivy and exact package manifests
+  with OSV.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
   forgery, cross-site scripting, code execution, IDOR, CSRF, and access-control)
