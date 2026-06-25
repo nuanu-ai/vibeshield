@@ -28,6 +28,7 @@ interface InventoryRepository {
 interface InventoryCategoryCoverage {
   readonly groundTruthIds?: ReadonlyArray<string>;
   readonly limitation?: string;
+  readonly challengeGaps?: ReadonlyArray<string>;
   readonly note?: string;
 }
 
@@ -39,6 +40,7 @@ export interface JuiceShopChallenge {
 
 interface InventoryAuditOptions {
   readonly failOnLimitations: boolean;
+  readonly failOnGaps: boolean;
   readonly sources: Readonly<Record<string, string>>;
   readonly expectationIds: ReadonlySet<string>;
 }
@@ -50,6 +52,8 @@ interface InventoryAuditSummary {
   readonly categoryCount: number;
   readonly coveredCategories: number;
   readonly limitationCategories: number;
+  readonly challengeGapCategories: number;
+  readonly challengeGaps: number;
   readonly errors: ReadonlyArray<string>;
 }
 
@@ -59,6 +63,7 @@ interface CliOptions {
   readonly sources: Readonly<Record<string, string>>;
   readonly jsonOutput: boolean;
   readonly failOnLimitations: boolean;
+  readonly failOnGaps: boolean;
 }
 
 const mainModulePath = process.argv[1] === undefined ? undefined : path.resolve(process.argv[1]);
@@ -68,6 +73,7 @@ if (mainModulePath !== undefined && fileURLToPath(import.meta.url) === mainModul
   const inventory = await loadInventory(options.inventoryPath);
   const summaries = await auditInventory(inventory, {
     failOnLimitations: options.failOnLimitations,
+    failOnGaps: options.failOnGaps,
     sources: options.sources,
     expectationIds,
   });
@@ -79,7 +85,7 @@ if (mainModulePath !== undefined && fileURLToPath(import.meta.url) === mainModul
     for (const summary of summaries) {
       const status = summary.errors.length === 0 ? "PASS" : "FAIL";
       process.stdout.write(
-        `${status} ${summary.name} challenges=${summary.challengeCount} categories=${summary.categoryCount} coveredCategories=${summary.coveredCategories} limitationCategories=${summary.limitationCategories}\n`,
+        `${status} ${summary.name} challenges=${summary.challengeCount} categories=${summary.categoryCount} coveredCategories=${summary.coveredCategories} limitationCategories=${summary.limitationCategories} challengeGapCategories=${summary.challengeGapCategories} challengeGaps=${summary.challengeGaps}\n`,
       );
       for (const error of summary.errors) {
         process.stdout.write(`  error: ${error}\n`);
@@ -144,6 +150,8 @@ function auditRepository(
   const errors: string[] = [];
   let coveredCategories = 0;
   let limitationCategories = 0;
+  let challengeGapCategories = 0;
+  let challengeGaps = 0;
 
   for (const [category, count] of [...categories.entries()].sort((a, b) =>
     a[0].localeCompare(b[0]),
@@ -172,6 +180,18 @@ function auditRepository(
         errors.push(`category ${category} has documented limitation: ${coverage.limitation}`);
       }
     }
+    const gaps = coverage.challengeGaps ?? [];
+    if (gaps.length > 0) {
+      challengeGapCategories += 1;
+      challengeGaps += gaps.length;
+      for (const gap of gaps) {
+        if (gap.trim().length === 0) {
+          errors.push(`category ${category} has an empty challenge gap`);
+        } else if (options.failOnGaps) {
+          errors.push(`category ${category} has open challenge gap: ${gap}`);
+        }
+      }
+    }
   }
 
   for (const category of Object.keys(repository.categoryCoverage).sort()) {
@@ -187,6 +207,8 @@ function auditRepository(
     categoryCount: categories.size,
     coveredCategories,
     limitationCategories,
+    challengeGapCategories,
+    challengeGaps,
     errors,
   };
 }
@@ -202,6 +224,8 @@ function summaryWithErrors(
     categoryCount: 0,
     coveredCategories: 0,
     limitationCategories: 0,
+    challengeGapCategories: 0,
+    challengeGaps: 0,
     errors,
   };
 }
@@ -255,6 +279,7 @@ function parseArgs(args: ReadonlyArray<string>): CliOptions {
   let inventoryPath = "benchmarks/deep-static-training-inventory.json";
   let jsonOutput = false;
   let failOnLimitations = false;
+  let failOnGaps = false;
   const sources: Record<string, string> = {};
 
   for (let index = 0; index < args.length; index += 1) {
@@ -265,6 +290,10 @@ function parseArgs(args: ReadonlyArray<string>): CliOptions {
     }
     if (arg === "--fail-on-limitations") {
       failOnLimitations = true;
+      continue;
+    }
+    if (arg === "--fail-on-gaps") {
+      failOnGaps = true;
       continue;
     }
     if (arg === "--expect") {
@@ -304,7 +333,7 @@ function parseArgs(args: ReadonlyArray<string>): CliOptions {
     throw new Error(`Unexpected positional argument: ${arg}`);
   }
 
-  return { expectPath, inventoryPath, sources, jsonOutput, failOnLimitations };
+  return { expectPath, inventoryPath, sources, jsonOutput, failOnLimitations, failOnGaps };
 }
 
 function addSource(sources: Record<string, string>, raw: string): void {

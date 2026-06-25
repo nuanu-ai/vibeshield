@@ -195,9 +195,13 @@ Status:
   The Juice Shop inventory audit
   `pnpm benchmark:inventory --source juice-shop=/tmp/vibeshield-juice-shop-probe`
   maps 113 challenges across 16 categories to curated ground truth with 0
-  explicit static-analysis limitations; the stricter
+  explicit static-analysis limitations and 3 open challenge-level recall gaps.
+  The stricter category-completeness command
   `pnpm benchmark:inventory --fail-on-limitations --source juice-shop=/tmp/vibeshield-juice-shop-probe`
-  gate passes with no limitations.
+  gate passes with no limitations; the challenge-recall command
+  `pnpm benchmark:inventory --fail-on-gaps --source juice-shop=/tmp/vibeshield-juice-shop-probe`
+  intentionally fails until the remaining challenge gaps are covered by
+  detector improvements and ground-truth expectations.
   Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run

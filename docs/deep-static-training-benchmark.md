@@ -68,6 +68,15 @@ pnpm benchmark:inventory \
   --source juice-shop=/tmp/vibeshield-juice-shop-probe
 ```
 
+Use the challenge-gap mode when evaluating whether the current benchmark is
+ready to claim challenge-level recall completeness:
+
+```bash
+pnpm benchmark:inventory \
+  --fail-on-gaps \
+  --source juice-shop=/tmp/vibeshield-juice-shop-probe
+```
+
 ## Current Baseline
 
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |
@@ -120,8 +129,10 @@ Current Juice Shop inventory audit result:
 
 - default mode passes with 113 challenges across 16 categories; all 16
   categories map to curated ground-truth expectations and 0 categories carry an
-  explicit limitation;
-- `--fail-on-limitations` passes with 0 inventory limitations.
+  explicit limitation; 3 categories still carry open challenge-level recall gaps;
+- `--fail-on-limitations` passes with 0 inventory limitations;
+- `--fail-on-gaps` is intentionally red until the remaining challenge-level gaps
+  are converted into covered ground-truth expectations.
 
 Optional `groundTruth` entries are reserved for curated expected vulnerability
 classes. They should describe product-observable signals or documented
@@ -155,5 +166,6 @@ Shop. Each expected item should map to one of:
 
 The goal is to reduce `known_gap` entries and inventory limitations by improving
 Joern extraction, graph construction, rule taxonomy, validation logic, and asset
-or UI inventory where needed. Do not close a gap by adding repository-specific
-detector behavior.
+or UI inventory where needed. Challenge gaps in
+`benchmarks/deep-static-training-inventory.json` are the current recall backlog;
+do not close a gap by adding repository-specific detector behavior.

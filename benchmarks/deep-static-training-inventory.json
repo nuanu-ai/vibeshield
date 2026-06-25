@@ -11,7 +11,10 @@
       "categoryCoverage": {
         "Broken Access Control": {
           "groundTruthIds": ["juice.access-control", "juice.ssrf"],
-          "note": "Covers route/resource authorization and SSRF challenge classes; UI-only discovery remains a later challenge-level gate."
+          "challengeGaps": [
+            "Challenge-level UI and discovery expectations for access-control goals are not individually mapped yet."
+          ],
+          "note": "Covers route/resource authorization and SSRF challenge classes."
         },
         "Broken Anti Automation": {
           "groundTruthIds": [
@@ -31,7 +34,10 @@
         },
         "Cryptographic Issues": {
           "groundTruthIds": ["juice.coupon-encoding-trust", "juice.jwt-token-trust"],
-          "note": "Covers reversible coupon logic and JWT/token trust; challenge-level inventory still needs weird-crypto and paywall-specific expectations."
+          "challengeGaps": [
+            "Weird Crypto and Premium Paywall challenge-specific cryptographic clues are not individually mapped yet."
+          ],
+          "note": "Covers reversible coupon logic and JWT/token trust."
         },
         "Improper Input Validation": {
           "groundTruthIds": [
@@ -57,7 +63,10 @@
         },
         "Observability Failures": {
           "groundTruthIds": ["juice.file-exposure", "juice.ssrf"],
-          "note": "Covers log/file exposure and metrics fetch paths; leaked-log semantics should become a challenge-level expectation."
+          "challengeGaps": [
+            "Leaked Access Logs OSINT credential flow is not an explicit ground-truth expectation yet."
+          ],
+          "note": "Covers log/file exposure and metrics fetch paths."
         },
         "Security Misconfiguration": {
           "groundTruthIds": [

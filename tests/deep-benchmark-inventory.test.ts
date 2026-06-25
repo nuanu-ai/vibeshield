@@ -66,6 +66,7 @@ describe("deep benchmark inventory", () => {
       },
       {
         failOnLimitations: false,
+        failOnGaps: false,
         sources: { "juice-shop": sourceRoot },
         expectationIds: new Set(["juice.sql-injection"]),
       },
@@ -79,6 +80,8 @@ describe("deep benchmark inventory", () => {
         categoryCount: 2,
         coveredCategories: 1,
         limitationCategories: 1,
+        challengeGapCategories: 0,
+        challengeGaps: 0,
         errors: [],
       },
     ]);
@@ -113,6 +116,7 @@ describe("deep benchmark inventory", () => {
       },
       {
         failOnLimitations: true,
+        failOnGaps: false,
         sources: { "juice-shop": sourceRoot },
         expectationIds: new Set(),
       },
@@ -120,6 +124,61 @@ describe("deep benchmark inventory", () => {
 
     expect(summaries[0]?.errors).toEqual([
       "category Miscellaneous has documented limitation: runtime-only product goal",
+    ]);
+  });
+
+  it("can report and fail open challenge-level gaps separately from limitations", async () => {
+    const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "vibeshield-inventory-"));
+    await writeFile(
+      path.join(sourceRoot, "challenges.yml"),
+      `
+---
+-
+  name: 'Login Admin'
+  category: 'Injection'
+  key: loginAdminChallenge
+`,
+    );
+
+    const inventory = {
+      version: 1 as const,
+      repositories: [
+        {
+          id: "juice-shop",
+          name: "Juice Shop fixture",
+          source: { kind: "juice-shop-challenges" as const, relativePath: "challenges.yml" },
+          categoryCoverage: {
+            Injection: {
+              groundTruthIds: ["juice.sql-injection"],
+              challengeGaps: ["NoSQL and SSTi challenge-level expectations are not mapped yet."],
+            },
+          },
+        },
+      ],
+    };
+
+    const defaultSummaries = await auditInventory(inventory, {
+      failOnLimitations: false,
+      failOnGaps: false,
+      sources: { "juice-shop": sourceRoot },
+      expectationIds: new Set(["juice.sql-injection"]),
+    });
+    const strictSummaries = await auditInventory(inventory, {
+      failOnLimitations: false,
+      failOnGaps: true,
+      sources: { "juice-shop": sourceRoot },
+      expectationIds: new Set(["juice.sql-injection"]),
+    });
+
+    expect(defaultSummaries[0]).toMatchObject({
+      coveredCategories: 1,
+      limitationCategories: 0,
+      challengeGapCategories: 1,
+      challengeGaps: 1,
+      errors: [],
+    });
+    expect(strictSummaries[0]?.errors).toEqual([
+      "category Injection has open challenge gap: NoSQL and SSTi challenge-level expectations are not mapped yet.",
     ]);
   });
 });
