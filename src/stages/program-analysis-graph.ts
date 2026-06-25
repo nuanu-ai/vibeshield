@@ -874,6 +874,13 @@ function classifySinkCandidate(
     };
   }
 
+  if (isAntiAutomationBypassOperation(candidate, lower, methodName, entity)) {
+    return {
+      label: antiAutomationBypassLabel(candidate, label, entity),
+      sinkType: "anti_automation_bypass",
+    };
+  }
+
   if (isNoSqlOperation(lower, methodName)) {
     return { label, sinkType: "no_sql_execution" };
   }
@@ -1261,6 +1268,78 @@ function couponEncodingTrustLabel(candidate: string, fallbackLabel: string): str
     return "Coupon encoding trust";
   }
   return fallbackLabel;
+}
+
+function isAntiAutomationBypassOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (isCaptchaBypassContext(context)) {
+    return (
+      methodName === "solve" ||
+      methodName === "solveif" ||
+      lower.includes("captchabypasschallenge") ||
+      lower.includes("captchareqid") ||
+      lower.includes("captchabypassreqtimes")
+    );
+  }
+  if (isHiddenResourceAutomationContext(context)) {
+    return (
+      methodName === "solveif" ||
+      lower.includes("extralanguagechallenge") ||
+      lower.includes("tlh_aa.json")
+    );
+  }
+  if (isDuplicateActionRaceContext(context)) {
+    return (
+      methodName === "solveif" ||
+      lower.includes("timingattackchallenge") ||
+      lower.includes("count > 2") ||
+      lower.includes("likedby")
+    );
+  }
+  return false;
+}
+
+function antiAutomationBypassLabel(
+  candidate: string,
+  fallbackLabel: string,
+  entity: ObservedEntity,
+): string {
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (isCaptchaBypassContext(context)) {
+    return "CAPTCHA rate bypass";
+  }
+  if (isHiddenResourceAutomationContext(context)) {
+    return "hidden resource enumeration";
+  }
+  if (isDuplicateActionRaceContext(context)) {
+    return "duplicate action race";
+  }
+  return fallbackLabel;
+}
+
+function isCaptchaBypassContext(context: string): boolean {
+  return (
+    context.includes("captchabypasschallenge") ||
+    context.includes("captchareqid") ||
+    context.includes("captchabypassreqtimes")
+  );
+}
+
+function isHiddenResourceAutomationContext(context: string): boolean {
+  return context.includes("extralanguagechallenge") || context.includes("tlh_aa.json");
+}
+
+function isDuplicateActionRaceContext(context: string): boolean {
+  return (
+    context.includes("timingattackchallenge") ||
+    (context.includes("routes/likeproductreviews.ts") &&
+      (context.includes("likedby") || context.includes("count > 2")))
+  );
 }
 
 function isNoSqlOperation(lower: string, methodName: string): boolean {

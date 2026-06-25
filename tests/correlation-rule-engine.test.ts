@@ -266,7 +266,7 @@ describe("correlateGraphRules candidates", () => {
     }
   });
 
-  it("labels Juice Shop auth, LLM, coupon, and misconfiguration paths by sink or route semantics", () => {
+  it("labels Juice Shop auth, LLM, coupon, anti-automation, and misconfiguration paths by sink or route semantics", () => {
     for (const { boundaryLabel, sinkType, title } of [
       {
         boundaryLabel: "jwtChallenge",
@@ -301,6 +301,18 @@ describe("correlateGraphRules candidates", () => {
         sinkType: "coupon_encoding_trust",
         title:
           "Coupon encoding trust path: request-controlled coupon data reaches reversible discount logic",
+      },
+      {
+        boundaryLabel: "routes/verify.ts::program:captchaBypassChallenge",
+        sinkType: "anti_automation_bypass",
+        title:
+          "Anti-automation bypass path: request-controlled action reaches weak rate, replay, or duplicate-action control",
+      },
+      {
+        boundaryLabel: "routes/likeProductReviews.ts::program:likeProductReviews",
+        sinkType: "no_sql_execution",
+        title:
+          "Anti-automation bypass path: request-controlled action reaches weak rate, replay, or duplicate-action control",
       },
       {
         boundaryLabel: "routes/verify.ts::program:errorHandlingChallenge",

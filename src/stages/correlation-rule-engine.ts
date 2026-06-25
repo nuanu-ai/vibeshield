@@ -259,6 +259,8 @@ function candidateTitle(
       return "LLM prompt/tool trust path: request-controlled chat data reaches model tools or prompt policy";
     case "coupon_encoding_trust":
       return "Coupon encoding trust path: request-controlled coupon data reaches reversible discount logic";
+    case "anti_automation_bypass":
+      return "Anti-automation bypass path: request-controlled action reaches weak rate, replay, or duplicate-action control";
     case "session_cookie_trust":
       return "Cookie trust path: request-controlled cookie or session token reaches trusted session logic";
     case "credential_trust":
@@ -322,6 +324,9 @@ function routeSemanticTitleForPath(
   }
   if (descriptors.some(hasCouponEncodingDescriptor)) {
     return "Coupon encoding trust path: request-controlled coupon data reaches reversible discount logic";
+  }
+  if (descriptors.some(hasAntiAutomationDescriptor)) {
+    return "Anti-automation bypass path: request-controlled action reaches weak rate, replay, or duplicate-action control";
   }
   if (descriptors.some(hasClientSideTrustDescriptor)) {
     return "Client-side trust path: request-controlled client-side value reaches server-side trust decision";
@@ -425,6 +430,19 @@ function hasLlmToolDescriptor(value: string): boolean {
 
 function hasCouponEncodingDescriptor(value: string): boolean {
   return value.includes("coupon") || value.includes("discountfromcoupon");
+}
+
+function hasAntiAutomationDescriptor(value: string): boolean {
+  return (
+    value.includes("captchabypasschallenge") ||
+    value.includes("captcha-bypass-challenge") ||
+    value.includes("extralanguagechallenge") ||
+    value.includes("extra-language-challenge") ||
+    value.includes("timingattackchallenge") ||
+    value.includes("timing-attack-challenge") ||
+    value.includes("likeproductreviews") ||
+    value.includes("like-product-reviews")
+  );
 }
 
 function hasClientSideTrustDescriptor(value: string): boolean {

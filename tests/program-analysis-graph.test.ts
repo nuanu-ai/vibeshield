@@ -280,7 +280,7 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(5);
   });
 
-  it("marks Juice Shop auth, LLM, coupon, and misconfiguration lesson semantics as sinks", () => {
+  it("marks Juice Shop auth, LLM, coupon, anti-automation, and misconfiguration lesson semantics as sinks", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", juiceShopTrustSemanticsSlices())] }),
     );
@@ -297,6 +297,9 @@ describe("composeProgramAnalysisGraph path", () => {
         ["TOTP token trust", "two_factor_token_trust"],
         ["LLM tool trust", "llm_tool_trust"],
         ["Coupon encoding trust", "coupon_encoding_trust"],
+        ["CAPTCHA rate bypass", "anti_automation_bypass"],
+        ["hidden resource enumeration", "anti_automation_bypass"],
+        ["duplicate action race", "anti_automation_bypass"],
         ["deprecated interface exposure", "security_misconfiguration"],
         ["verbose error exposure", "security_misconfiguration"],
         ["support account hardcoded login", "security_misconfiguration"],
@@ -312,7 +315,7 @@ describe("composeProgramAnalysisGraph path", () => {
         }),
       ]),
     );
-    expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(10);
+    expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(13);
   });
 
   it("connects route handlers to sinks inside nested Joern lambda entities", () => {
@@ -1177,6 +1180,72 @@ function juiceShopTrustSemanticsSlices() {
               code: "security.isRedirectAllowed(data)",
               label: "CALL",
               lineNumber: 46,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/verify.ts::program:captchaBypassChallenge",
+        fileName: "routes/verify.ts",
+        lineNumber: 38,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/verify.ts::program:captchaBypassChallenge",
+          sourceName: "request",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "solve",
+              resolvedMethod: "lib/challengeUtils.solve",
+              code: "challengeUtils.solve(challenges.captchaBypassChallenge)",
+              label: "CALL",
+              lineNumber: 42,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/verify.ts::program:accessControlChallenges:<lambda>33",
+        fileName: "routes/verify.ts",
+        lineNumber: 71,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/verify.ts::program:accessControlChallenges",
+          sourceName: "url",
+        },
+        parameters: [{ name: "url", typeFullName: "string" }],
+        usages: [
+          {
+            targetObj: {
+              name: "solveIf",
+              resolvedMethod: "lib/challengeUtils.solveIf",
+              code: "challengeUtils.solveIf(challenges.extraLanguageChallenge, () => { return utils.endsWith(url, '/tlh_AA.json') })",
+              label: "CALL",
+              lineNumber: 71,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/likeProductReviews.ts::program:likeProductReviews:<lambda>2",
+        fileName: "routes/likeProductReviews.ts",
+        lineNumber: 17,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/likeProductReviews.ts::program:likeProductReviews",
+          sourceName: "req",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "solveIf",
+              resolvedMethod: "lib/challengeUtils.solveIf",
+              code: "challengeUtils.solveIf(challenges.timingAttackChallenge, () => count > 2)",
+              label: "CALL",
+              lineNumber: 48,
             },
           },
         ],
@@ -2264,6 +2333,7 @@ function manifest(): Manifest {
       { path: "routes/2fa.ts", size: 100, sha256: "juice-2fa-sha" },
       { path: "routes/chat.ts", size: 100, sha256: "juice-chat-sha" },
       { path: "routes/coupon.ts", size: 100, sha256: "juice-coupon-sha" },
+      { path: "routes/likeProductReviews.ts", size: 100, sha256: "juice-likes-sha" },
       { path: "routes/login.ts", size: 100, sha256: "juice-login-sha" },
       { path: "routes/resetPassword.ts", size: 100, sha256: "juice-reset-password-sha" },
       { path: "routes/verify.ts", size: 100, sha256: "juice-verify-sha" },
