@@ -169,10 +169,10 @@ Status:
   Joern CPG artifact is stored as a blob; no path step is created without a
   `SecurityGraphEdge` and evidence.
   Evidence: current live `--deep` runs produced supported attack paths on
-  WebGoat (Java, run `20260625193151-0e533df6`, 466 supported static
-  hypotheses, `data_flow` checked 215/222, `component_usage` checked 3086/3086,
+  WebGoat (Java, run `20260625194251-245a4c68`, 616 supported static
+  hypotheses, `data_flow` checked 290/290, `component_usage` checked 3086/3086,
   `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
-  `20260625190926-0443bfe2`, 804, `data_flow` checked 333/333,
+  `20260625200500-77bfa880`, 1667, `data_flow` checked 690/690,
   `component_usage` checked 2194/2194, `dependency_usage` checked 12/12,
   `ci_iac` checked 18/18), Freeland (JS/TS, run `20260625164008-81d5eb5a`,
   164, `data_flow` checked 62/380, `component_usage` checked 883/883,
@@ -185,13 +185,11 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
-  The curated ground-truth slice now passes in normal benchmark mode with the
-  next Juice Shop semantic gaps surfaced: WebGoat covers 21/21 expectations and
-  reports 0 known gaps; Juice Shop covers 17/23 expectations and reports 6 known
-  gaps (JWT token trust, credential trust, password-reset security questions,
-  two-factor token trust, LLM prompt/tool trust, and coupon encoding trust).
-  Strict ground truth currently fails on those six Juice Shop gaps. Fresh run
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625200500-77bfa880 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  The curated ground-truth slice passes in both normal and
+  `--strict-ground-truth` benchmark modes: WebGoat covers 21/21 expectations and
+  Juice Shop covers 23/23 expectations, with 0 known gaps in both repositories.
+  Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run
   `20260625184641-02d6d398` resolved the prior XXE classification gap through
@@ -205,11 +203,14 @@ Status:
   password-reset/account-recovery semantic gaps. Fresh run
   `20260625194251-245a4c68` resolved cookie/session trust, hardcoded/default
   credential trust, client-side trust, security misconfiguration, and logging
-  semantic gaps.
+  semantic gaps. Fresh run `20260625200500-77bfa880` resolved Juice Shop JWT
+  token trust, credential trust, password-reset security questions, two-factor
+  token trust, LLM prompt/tool trust, and coupon encoding trust.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
-  forgery, cross-site scripting, code execution, IDOR, CSRF, and access-control)
-  instead of one generic title.
+  forgery, cross-site scripting, code execution, IDOR, CSRF, access-control, JWT
+  token trust, credential trust, password reset, two-factor authentication, LLM
+  prompt/tool trust, and coupon encoding) instead of one generic title.
   Current benchmark scope and the next lesson-level recall gate are documented in
   `docs/deep-static-training-benchmark.md`.
   These runs use bounded Joern CPG flow seeds rather than whole-program
