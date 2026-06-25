@@ -772,6 +772,31 @@ function classifySinkCandidate(
     return { label: jwtTokenTrustLabel(candidate, label), sinkType: "jwt_token_trust" };
   }
 
+  if (isPasswordResetTrustOperation(candidate, lower, methodName, entity)) {
+    return {
+      label: passwordResetTrustLabel(candidate, label),
+      sinkType: "password_reset_trust",
+    };
+  }
+
+  if (isTwoFactorTokenTrustOperation(candidate, lower, methodName, entity)) {
+    return {
+      label: twoFactorTokenTrustLabel(candidate, label),
+      sinkType: "two_factor_token_trust",
+    };
+  }
+
+  if (isLlmToolTrustOperation(candidate, lower, methodName, entity)) {
+    return { label: llmToolTrustLabel(candidate, label), sinkType: "llm_tool_trust" };
+  }
+
+  if (isCouponEncodingTrustOperation(candidate, lower, methodName, entity)) {
+    return {
+      label: couponEncodingTrustLabel(candidate, label),
+      sinkType: "coupon_encoding_trust",
+    };
+  }
+
   if (isNoSqlOperation(lower, methodName)) {
     return { label, sinkType: "no_sql_execution" };
   }
@@ -910,7 +935,7 @@ function isCryptographicOperation(
   methodName: string,
   entity: ObservedEntity,
 ): boolean {
-  const context = entityContext(entity, candidate).toLowerCase();
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
   const cryptoContext =
     context.includes("/crypto/") ||
     context.includes("lessons.cryptography") ||
@@ -960,10 +985,12 @@ function isJwtTokenTrustOperation(
   methodName: string,
   entity: ObservedEntity,
 ): boolean {
-  const context = entityContext(entity, candidate).toLowerCase();
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
   const jwtContext =
     context.includes("/jwt/") ||
     context.includes("lessons.jwt") ||
+    context.includes("routes/verify.ts") ||
+    context.includes("lib/insecurity.ts") ||
     lower.includes("jsonwebtoken") ||
     lower.includes("io.jsonwebtoken") ||
     lower.includes("jwts.") ||
@@ -979,11 +1006,25 @@ function isJwtTokenTrustOperation(
     lower.includes("jwt.decode") ||
     lower.includes("jsonwebtoken.") ||
     lower.includes("signwith") ||
+    lower.includes("jwtfrom") ||
+    lower.includes("hasalgorithm") ||
+    lower.includes("hasemail") ||
     lower.includes("parseclaimsjws") ||
     lower.includes("parseclaimsjwt") ||
     lower.includes("parse(") ||
     lower.includes("setSigningKey".toLowerCase()) ||
-    ["decode", "sign", "verify", "parse", "signwith", "setsigningkey"].includes(methodName)
+    [
+      "authorize",
+      "decode",
+      "sign",
+      "verify",
+      "parse",
+      "jwtfrom",
+      "hasalgorithm",
+      "hasemail",
+      "signwith",
+      "setsigningkey",
+    ].includes(methodName)
   );
 }
 
@@ -997,6 +1038,150 @@ function jwtTokenTrustLabel(candidate: string, fallbackLabel: string): string {
   }
   if (lower.includes("decode")) {
     return "JWT decode";
+  }
+  return fallbackLabel;
+}
+
+function isPasswordResetTrustOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (!(context.includes("routes/resetpassword.ts") || context.includes("resetpassword"))) {
+    return false;
+  }
+  return (
+    ["findone", "hmac", "update", "solveif"].includes(methodName) ||
+    lower.includes("securityanswermodel") ||
+    lower.includes("security answer") ||
+    lower.includes("verifysecurityanswerchallenges") ||
+    lower.includes("newpassword")
+  );
+}
+
+function passwordResetTrustLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (lower.includes("securityanswer") || lower.includes("hmac")) {
+    return "security-question reset";
+  }
+  if (lower.includes("update") || lower.includes("newpassword")) {
+    return "password update";
+  }
+  return fallbackLabel;
+}
+
+function isTwoFactorTokenTrustOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (!context.includes("routes/2fa.ts")) {
+    return false;
+  }
+  return (
+    ["verifysync", "generatesecret", "authorize", "verify", "decode", "save"].includes(
+      methodName,
+    ) ||
+    lower.includes("totp") ||
+    lower.includes("setuptoken") ||
+    lower.includes("initialtoken") ||
+    lower.includes("epochTolerance".toLowerCase())
+  );
+}
+
+function twoFactorTokenTrustLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (lower.includes("verifysync") || lower.includes("totp")) {
+    return "TOTP token trust";
+  }
+  if (lower.includes("generatesecret") || lower.includes("setuptoken")) {
+    return "TOTP setup-token trust";
+  }
+  return fallbackLabel;
+}
+
+function isLlmToolTrustOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (
+    !(
+      context.includes("routes/chat.ts") ||
+      context.includes("chatbotpromptinjectionchallenge") ||
+      context.includes("chatbotgreedyinjectionchallenge")
+    )
+  ) {
+    return false;
+  }
+  return (
+    [
+      "tool",
+      "generatecoupon",
+      "buildsystemprompt",
+      "streamtext",
+      "createopenaicompatible",
+    ].includes(methodName) ||
+    lower.includes("generatecoupon") ||
+    lower.includes("system prompt") ||
+    lower.includes("coupon policy") ||
+    lower.includes("llm") ||
+    lower.includes("tool(")
+  );
+}
+
+function llmToolTrustLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (lower.includes("generatecoupon") || lower.includes("tool(")) {
+    return "LLM tool trust";
+  }
+  if (lower.includes("systemprompt") || lower.includes("system prompt")) {
+    return "LLM prompt trust";
+  }
+  return fallbackLabel;
+}
+
+function isCouponEncodingTrustOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (!(context.includes("routes/coupon.ts") || context.includes("lib/insecurity.ts"))) {
+    return false;
+  }
+  return (
+    [
+      "generatecoupon",
+      "discountfromcoupon",
+      "encode",
+      "decode",
+      "parseint",
+      "hasvalidformat",
+    ].includes(methodName) ||
+    lower.includes("z85.encode") ||
+    lower.includes("z85.decode") ||
+    lower.includes("discountfromcoupon") ||
+    lower.includes("coupon") ||
+    lower.includes("hasvalidformat")
+  );
+}
+
+function couponEncodingTrustLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (
+    lower.includes("z85") ||
+    lower.includes("generatecoupon") ||
+    lower.includes("discountfromcoupon")
+  ) {
+    return "Coupon encoding trust";
   }
   return fallbackLabel;
 }
@@ -1131,7 +1316,7 @@ function isAuthenticationBypassOperation(
   methodName: string,
   entity: ObservedEntity,
 ): boolean {
-  const context = entityContext(entity, candidate).toLowerCase();
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
   if (
     !(
       context.includes("/auth-bypass/") ||
@@ -1159,7 +1344,7 @@ function isSessionCookieTrustOperation(
   methodName: string,
   entity: ObservedEntity,
 ): boolean {
-  const context = entityContext(entity, candidate).toLowerCase();
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
   if (
     !(
       context.includes("/hijacksession/") ||
@@ -1206,14 +1391,24 @@ function isCredentialTrustOperation(
   methodName: string,
   entity: ObservedEntity,
 ): boolean {
-  const context = entityContext(entity, candidate).toLowerCase();
-  if (!(context.includes("/insecurelogin/") || context.includes("lessons.insecurelogin"))) {
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (
+    !(
+      context.includes("/insecurelogin/") ||
+      context.includes("lessons.insecurelogin") ||
+      context.includes("routes/login.ts")
+    )
+  ) {
     return false;
   }
   return (
     methodName === "equals" ||
+    methodName === "solveif" ||
     lower.includes("captainjack") ||
     lower.includes("blackpearl") ||
+    lower.includes("admin123") ||
+    lower.includes("iamusedfortesting") ||
+    lower.includes("password spraying") ||
     (lower.includes("username") && lower.includes("password"))
   );
 }
@@ -1223,8 +1418,14 @@ function credentialTrustLabel(
   fallbackLabel: string,
   entity: ObservedEntity,
 ): string {
-  const lower = entityContext(entity, candidate).toLowerCase();
-  if (lower.includes("password") || lower.includes("blackpearl")) {
+  const lower = candidate.toLowerCase();
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (
+    context.includes("routes/login.ts") ||
+    context.includes("/insecurelogin/") ||
+    lower.includes("password") ||
+    lower.includes("blackpearl")
+  ) {
     return "Credential trust";
   }
   return fallbackLabel;
@@ -1236,7 +1437,7 @@ function isClientSideTrustOperation(
   methodName: string,
   entity: ObservedEntity,
 ): boolean {
-  const context = entityContext(entity, candidate).toLowerCase();
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
   if (
     !(
       context.includes("/clientsidefiltering/") ||
@@ -1279,7 +1480,7 @@ function isSecurityMisconfigurationOperation(
   methodName: string,
   entity: ObservedEntity,
 ): boolean {
-  const context = entityContext(entity, candidate).toLowerCase();
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
   if (
     !(
       context.includes("/securitymisconfiguration/") ||
@@ -1307,8 +1508,10 @@ function securityMisconfigurationLabel(
   fallbackLabel: string,
   entity: ObservedEntity,
 ): string {
-  const lower = entityContext(entity, candidate).toLowerCase();
+  const lower = entityDescriptorContext(entity, candidate).toLowerCase();
   if (
+    lower.includes("/securitymisconfiguration/") ||
+    lower.includes("lessons.securitymisconfiguration") ||
     lower.includes("default_") ||
     lower.includes("spring.security.user") ||
     lower.includes("management.endpoint")
@@ -1327,7 +1530,7 @@ function isLogInjectionOperation(
   methodName: string,
   entity: ObservedEntity,
 ): boolean {
-  const context = entityContext(entity, candidate).toLowerCase();
+  const context = entityDescriptorContext(entity, candidate).toLowerCase();
   if (!(context.includes("/logspoofing/") || context.includes("lessons.logging"))) {
     return false;
   }
@@ -1493,6 +1696,19 @@ function entityContext(entity: ObservedEntity, candidate: string): string {
         stringValue(target.code) ?? "",
       ];
     }),
+    candidate,
+  ].join("\n");
+}
+
+function entityDescriptorContext(entity: ObservedEntity, candidate: string): string {
+  return [
+    entity.fullName,
+    entity.repoPath,
+    JSON.stringify(entity.slice.boundary ?? {}),
+    ...asObjectArray(entity.slice.parameters).flatMap((parameter) => [
+      stringValue(parameter.name) ?? "",
+      stringValue(parameter.typeFullName) ?? "",
+    ]),
     candidate,
   ].join("\n");
 }

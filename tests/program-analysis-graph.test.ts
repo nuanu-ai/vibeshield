@@ -280,6 +280,28 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(5);
   });
 
+  it("marks Juice Shop auth, LLM, and coupon lesson semantics as sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", juiceShopTrustSemanticsSlices())] }),
+    );
+    const sinks = graph.nodes
+      .filter((node) => node.kind === "Sink")
+      .map((node) => [node.label, node.properties.sinkType])
+      .sort();
+
+    expect(sinks).toEqual(
+      expect.arrayContaining([
+        ["JWT verification", "jwt_token_trust"],
+        ["Credential trust", "credential_trust"],
+        ["security-question reset", "password_reset_trust"],
+        ["TOTP token trust", "two_factor_token_trust"],
+        ["LLM tool trust", "llm_tool_trust"],
+        ["Coupon encoding trust", "coupon_encoding_trust"],
+      ]),
+    );
+    expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(6);
+  });
+
   it("connects route handlers to sinks inside nested Joern lambda entities", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", nestedLambdaSqlSlices())] }),
@@ -1004,6 +1026,145 @@ function webGoatTrustSemanticsSlices() {
               code: 'username.replace("\\n", "<br/>")',
               label: "CALL",
               lineNumber: 27,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function juiceShopTrustSemanticsSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "routes/verify.ts::program:jwtChallenge",
+        fileName: "routes/verify.ts",
+        lineNumber: 111,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "jwtChallenge",
+          sourceName: "request",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "hasAlgorithm",
+              resolvedMethod: "routes/verify.ts::program:hasAlgorithm",
+              code: "hasAlgorithm(token, algorithm) && hasEmail(decoded, email)",
+              label: "CALL",
+              lineNumber: 123,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/login.ts::program:login:verifyPreLoginChallenges",
+        fileName: "routes/login.ts",
+        lineNumber: 58,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/login.ts::program:login:verifyPreLoginChallenges",
+          sourceName: "request",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "solveIf",
+              resolvedMethod: "lib/challengeUtils.solveIf",
+              code: "challengeUtils.solveIf(challenges.weakPasswordChallenge, () => req.body.email === 'admin@example.com' && req.body.password === 'admin123')",
+              label: "CALL",
+              lineNumber: 59,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/resetPassword.ts::program:resetPassword",
+        fileName: "routes/resetPassword.ts",
+        lineNumber: 16,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/resetPassword.ts::program:resetPassword",
+          sourceName: "request",
+        },
+        parameters: [{ name: "body", typeFullName: "express.Request.body" }],
+        usages: [
+          {
+            targetObj: {
+              name: "hmac",
+              resolvedMethod: "lib/insecurity.hmac",
+              code: "security.hmac(answer) === data.answer",
+              label: "CALL",
+              lineNumber: 41,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/2fa.ts::program:verify",
+        fileName: "routes/2fa.ts",
+        lineNumber: 16,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/2fa.ts::program:verify",
+          sourceName: "request",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "verifySync",
+              resolvedMethod: "otplib.verifySync",
+              code: "verifySync({ secret: user.totpSecret, token: totpToken, epochTolerance: 30 })",
+              label: "CALL",
+              lineNumber: 31,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/chat.ts::program:chat:<lambda>0",
+        fileName: "routes/chat.ts",
+        lineNumber: 175,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/chat.ts::program:chat",
+          sourceName: "request",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "generateCoupon",
+              resolvedMethod: "lib/insecurity.generateCoupon",
+              code: "const couponCode = security.generateCoupon(discount)",
+              label: "CALL",
+              lineNumber: 184,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/coupon.ts::program:applyCoupon:<lambda>0",
+        fileName: "routes/coupon.ts",
+        lineNumber: 10,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/coupon.ts::program:applyCoupon",
+          sourceName: "request",
+        },
+        parameters: [{ name: "params", typeFullName: "express.Request.params" }],
+        usages: [
+          {
+            targetObj: {
+              name: "discountFromCoupon",
+              resolvedMethod: "lib/insecurity.discountFromCoupon",
+              code: "const discount = security.discountFromCoupon(coupon)",
+              label: "CALL",
+              lineNumber: 15,
             },
           },
         ],
@@ -2000,6 +2161,12 @@ function manifest(): Manifest {
       { path: "src/main/java/example/Controller.java", size: 100, sha256: "controller-sha" },
       { path: "src/app/service.ts", size: 100, sha256: "service-sha" },
       { path: "apps/web/src/lib/api-client.ts", size: 100, sha256: "web-client-sha" },
+      { path: "routes/2fa.ts", size: 100, sha256: "juice-2fa-sha" },
+      { path: "routes/chat.ts", size: 100, sha256: "juice-chat-sha" },
+      { path: "routes/coupon.ts", size: 100, sha256: "juice-coupon-sha" },
+      { path: "routes/login.ts", size: 100, sha256: "juice-login-sha" },
+      { path: "routes/resetPassword.ts", size: 100, sha256: "juice-reset-password-sha" },
+      { path: "routes/verify.ts", size: 100, sha256: "juice-verify-sha" },
       { path: "apps/web/src/lib/external-links.ts", size: 100, sha256: "external-links-sha" },
       { path: "routes/proxy.ts", size: 100, sha256: "proxy-ts-sha" },
       { path: "routes/api.ts", size: 100, sha256: "api-sha" },

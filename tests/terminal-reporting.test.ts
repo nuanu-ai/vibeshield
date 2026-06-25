@@ -137,6 +137,89 @@ describe("terminal reporting", () => {
     expect(text).not.toContain("candidate_input_sql");
   });
 
+  it("deduplicates terminal attack-path counts without hiding source locations", () => {
+    const base = sampleOutcome({ fromCatalog: false });
+    const outcome: ScanOutcome = {
+      ...base,
+      assessment: {
+        ...base.assessment,
+        deepCoverage: [
+          {
+            area: "data_flow",
+            state: "checked",
+            coveredCount: 2,
+            totalCount: 2,
+            producer: "joern",
+            producerVersion: "4.0.565",
+          },
+        ],
+        hypothesisCandidates: [
+          {
+            id: "candidate_a",
+            ruleId: "stage2.external-input-dangerous-operation",
+            family: "external_input_to_dangerous_operation",
+            title: "Credential trust path",
+            findingIds: [],
+            supportingNodeIds: ["node_a"],
+            supportingEdgeIds: ["edge_a"],
+            contradictingNodeIds: [],
+            contradictingEdgeIds: [],
+            coverageRefs: ["data_flow:checked"],
+            requiredValidation: ["dangerous_operation_repro"],
+            candidateReason:
+              "Credential trust path: req (routes/login.ts:58) reaches Credential trust (routes/login.ts:42) across 4 graph edges",
+          },
+          {
+            id: "candidate_b",
+            ruleId: "stage2.external-input-dangerous-operation",
+            family: "external_input_to_dangerous_operation",
+            title: "Credential trust path",
+            findingIds: [],
+            supportingNodeIds: ["node_b"],
+            supportingEdgeIds: ["edge_b"],
+            contradictingNodeIds: [],
+            contradictingEdgeIds: [],
+            coverageRefs: ["data_flow:checked"],
+            requiredValidation: ["dangerous_operation_repro"],
+            candidateReason:
+              "Credential trust path: req (routes/login.ts:91) reaches Credential trust (routes/login.ts:42) across 4 graph edges",
+          },
+        ],
+        staticHypotheses: [
+          {
+            id: "hypothesis_a",
+            candidateId: "candidate_a",
+            status: "statically_supported",
+            staticConfidence: 0.95,
+            title: "Credential trust path",
+            pathSummary: "Static path reaches credential trust.",
+            supportingEvidenceIds: ["ev_1"],
+            contradictingEvidenceIds: [],
+            coverageState: "checked",
+            runtimeValidationRequired: true,
+          },
+          {
+            id: "hypothesis_b",
+            candidateId: "candidate_b",
+            status: "statically_supported",
+            staticConfidence: 0.94,
+            title: "Credential trust path",
+            pathSummary: "Static path reaches credential trust.",
+            supportingEvidenceIds: ["ev_1"],
+            contradictingEvidenceIds: [],
+            coverageState: "checked",
+            runtimeValidationRequired: true,
+          },
+        ],
+      },
+    };
+
+    const text = renderScanOutcome(outcome);
+
+    expect(text).toContain("1 unique likely attack path traced from 2 static traces");
+    expect(text).toContain("req (routes/login.ts:58) reaches Credential trust");
+  });
+
   it("prints owner-facing progress events without requiring a live scan", () => {
     let output = "";
     const sink = new TerminalEventSink(

@@ -112,7 +112,7 @@ describe("correlateGraphRules candidates", () => {
     expect(candidates[0]).toMatchObject({
       title: "SQL injection path: external input reaches SQL execution",
       candidateReason:
-        "SQL injection path: external input reaches SQL execution: POST /submit reaches dangerousOperation across 2 graph edges",
+        "SQL injection path: external input reaches SQL execution: POST /submit (src/server.ts:10) reaches dangerousOperation (src/app.ts:1) across 2 graph edges",
     });
   });
 
@@ -134,7 +134,7 @@ describe("correlateGraphRules candidates", () => {
       title:
         "Access control path: public route reaches SQL-backed data access without observed authorization",
       candidateReason:
-        "Access control path: public route reaches SQL-backed data access without observed authorization: access-control/users reaches dangerousOperation across 2 graph edges",
+        "Access control path: public route reaches SQL-backed data access without observed authorization: access-control/users (src/server.ts:10) reaches dangerousOperation (src/app.ts:1) across 2 graph edges",
     });
 
     expect(
@@ -192,7 +192,7 @@ describe("correlateGraphRules candidates", () => {
     expect(candidates[0]).toMatchObject({
       title: "Server-side request forgery path: external input reaches a server-side HTTP client",
       candidateReason:
-        "Server-side request forgery path: external input reaches a server-side HTTP client: POST /submit reaches dangerousOperation across 2 graph edges",
+        "Server-side request forgery path: external input reaches a server-side HTTP client: POST /submit (src/server.ts:10) reaches dangerousOperation (src/app.ts:1) across 2 graph edges",
     });
   });
 
@@ -249,6 +249,58 @@ describe("correlateGraphRules candidates", () => {
         sinkType: "authentication_bypass",
         title:
           "Authentication bypass path: request-controlled verification data reaches account verification logic",
+      },
+    ]) {
+      const candidates = correlateGraphRules({
+        graph: graphFixture({ boundaryLabel, sinkType }),
+        rules: [
+          {
+            ...rule(),
+            target: { kinds: ["Sink"], propertyEquals: { sinkType } },
+          },
+        ],
+      });
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]?.title).toBe(title);
+    }
+  });
+
+  it("labels Juice Shop auth, LLM, and coupon trust paths by sink or route semantics", () => {
+    for (const { boundaryLabel, sinkType, title } of [
+      {
+        boundaryLabel: "jwtChallenge",
+        sinkType: "jwt_token_trust",
+        title: "JWT token trust path: external input reaches JWT signing or parsing logic",
+      },
+      {
+        boundaryLabel: "routes/login.ts::program:login:verifyPreLoginChallenges",
+        sinkType: "credential_trust",
+        title:
+          "Credential trust path: request-controlled login data reaches hardcoded or default credential logic",
+      },
+      {
+        boundaryLabel: "routes/resetPassword.ts::program:resetPassword",
+        sinkType: "password_reset_trust",
+        title: "Password reset path: request-controlled recovery data reaches password reset flow",
+      },
+      {
+        boundaryLabel: "routes/2fa.ts::program:verify",
+        sinkType: "two_factor_token_trust",
+        title:
+          "Two-factor authentication path: request-controlled token data reaches TOTP or setup-token trust",
+      },
+      {
+        boundaryLabel: "routes/chat.ts::program:chat",
+        sinkType: "llm_tool_trust",
+        title:
+          "LLM prompt/tool trust path: request-controlled chat data reaches model tools or prompt policy",
+      },
+      {
+        boundaryLabel: "routes/coupon.ts::program:applyCoupon",
+        sinkType: "coupon_encoding_trust",
+        title:
+          "Coupon encoding trust path: request-controlled coupon data reaches reversible discount logic",
       },
     ]) {
       const candidates = correlateGraphRules({
@@ -348,7 +400,7 @@ describe("correlateGraphRules candidates", () => {
     expect(candidates[0]).toMatchObject({
       title: "Cross-site scripting path: external input reaches HTML or script output",
       candidateReason:
-        "Cross-site scripting path: external input reaches HTML or script output: POST /submit reaches dangerousOperation across 2 graph edges",
+        "Cross-site scripting path: external input reaches HTML or script output: POST /submit (src/server.ts:10) reaches dangerousOperation (src/app.ts:1) across 2 graph edges",
     });
   });
 
@@ -396,7 +448,7 @@ describe("correlateGraphRules candidates", () => {
     const candidates = correlateGraphRules({ graph, rules: [rule()] });
 
     expect(candidates[0]?.candidateReason).toBe(
-      "External input reaches dangerous operation: src/server.ts:10 reaches dangerousOperation across 2 graph edges",
+      "External input reaches dangerous operation: src/server.ts:10 reaches dangerousOperation (src/app.ts:1) across 2 graph edges",
     );
   });
 });

@@ -249,8 +249,16 @@ function candidateTitle(
       return "Cryptographic weakness path: external input reaches cryptographic or encoding logic";
     case "jwt_token_trust":
       return "JWT token trust path: external input reaches JWT signing or parsing logic";
+    case "password_reset_trust":
+      return "Password reset path: request-controlled recovery data reaches password reset flow";
     case "authentication_bypass":
       return "Authentication bypass path: request-controlled verification data reaches account verification logic";
+    case "two_factor_token_trust":
+      return "Two-factor authentication path: request-controlled token data reaches TOTP or setup-token trust";
+    case "llm_tool_trust":
+      return "LLM prompt/tool trust path: request-controlled chat data reaches model tools or prompt policy";
+    case "coupon_encoding_trust":
+      return "Coupon encoding trust path: request-controlled coupon data reaches reversible discount logic";
     case "session_cookie_trust":
       return "Cookie trust path: request-controlled cookie or session token reaches trusted session logic";
     case "credential_trust":
@@ -305,6 +313,15 @@ function routeSemanticTitleForPath(
   }
   if (descriptors.some(hasCredentialTrustDescriptor)) {
     return "Credential trust path: request-controlled login data reaches hardcoded or default credential logic";
+  }
+  if (descriptors.some(hasTwoFactorDescriptor)) {
+    return "Two-factor authentication path: request-controlled token data reaches TOTP or setup-token trust";
+  }
+  if (descriptors.some(hasLlmToolDescriptor)) {
+    return "LLM prompt/tool trust path: request-controlled chat data reaches model tools or prompt policy";
+  }
+  if (descriptors.some(hasCouponEncodingDescriptor)) {
+    return "Coupon encoding trust path: request-controlled coupon data reaches reversible discount logic";
   }
   if (descriptors.some(hasClientSideTrustDescriptor)) {
     return "Client-side trust path: request-controlled client-side value reaches server-side trust decision";
@@ -381,9 +398,33 @@ function hasCredentialTrustDescriptor(value: string): boolean {
   return (
     value.includes("insecurelogin") ||
     value.includes("insecure-login") ||
+    value.includes("routes-login") ||
     value.includes("default-credential") ||
     value.includes("defaultcredentials")
   );
+}
+
+function hasTwoFactorDescriptor(value: string): boolean {
+  return (
+    value.includes("2fa") ||
+    value.includes("two-factor") ||
+    value.includes("totp") ||
+    value.includes("twofactorauth")
+  );
+}
+
+function hasLlmToolDescriptor(value: string): boolean {
+  return (
+    value.includes("routes-chat") ||
+    value.includes("chatbot") ||
+    value.includes("llm") ||
+    value.includes("buildsystemprompt") ||
+    value.includes("prompt-injection")
+  );
+}
+
+function hasCouponEncodingDescriptor(value: string): boolean {
+  return value.includes("coupon") || value.includes("discountfromcoupon");
 }
 
 function hasClientSideTrustDescriptor(value: string): boolean {
@@ -532,13 +573,25 @@ function reasonNodeLabel(node: SecurityGraphNode | undefined): string | undefine
   if (node === undefined) {
     return undefined;
   }
+  const location = nodeLocationLabel(node);
   if (!isVerboseCodeLabel(node.label)) {
-    return node.label;
+    const label = trimWhitespace(node.label);
+    if (location !== undefined && !label.includes(location)) {
+      return `${label} (${location})`;
+    }
+    return label;
   }
-  if (node.repoPath !== undefined && node.lineRange !== undefined) {
-    return `${node.repoPath}:${node.lineRange.startLine}`;
+  if (location !== undefined) {
+    return location;
   }
   return trimWhitespace(node.label).slice(0, 80);
+}
+
+function nodeLocationLabel(node: SecurityGraphNode): string | undefined {
+  if (node.repoPath === undefined || node.lineRange === undefined) {
+    return undefined;
+  }
+  return `${node.repoPath}:${node.lineRange.startLine}`;
 }
 
 function isVerboseCodeLabel(label: string): boolean {

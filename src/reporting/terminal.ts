@@ -399,7 +399,7 @@ function terminalAttackPaths(assessment: SecurityAssessment): TerminalAttackPath
     const candidate = candidates.get(hypothesis.candidateId);
     const family = candidate?.family ?? "static_analysis";
     const reason = candidate?.candidateReason ?? hypothesis.pathSummary;
-    const key = `${family}\0${reason}`;
+    const key = `${family}\0${terminalAttackPathDedupReason(reason)}`;
     if (seen.has(key)) {
       continue;
     }
@@ -408,6 +408,10 @@ function terminalAttackPaths(assessment: SecurityAssessment): TerminalAttackPath
   }
 
   return out;
+}
+
+function terminalAttackPathDedupReason(reason: string): string {
+  return reason.replace(/\s\([^()\n]+:\d+\)/g, "");
 }
 
 function attackPathCountLabel(uniqueCount: number, rawCount: number): string {
