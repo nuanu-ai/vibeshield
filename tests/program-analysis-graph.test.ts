@@ -158,9 +158,21 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(graph.flows).toHaveLength(0);
   });
 
-  it("does not mark generic update calls as SQL sinks without database context", () => {
+  it("marks Java crypto operations as cryptographic sinks", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", genericUpdateSlices())] }),
+    );
+
+    expect(graph.nodes.find((node) => node.kind === "Sink")).toMatchObject({
+      label: "cryptographic digest",
+      properties: { sinkType: "crypto_weakness" },
+    });
+    expect(graph.flows).toHaveLength(1);
+  });
+
+  it("does not mark generic update calls as sinks without a dangerous context", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", nonDangerousUpdateSlices())] }),
     );
 
     expect(graph.nodes.filter((node) => node.kind === "Sink")).toHaveLength(0);
@@ -225,6 +237,26 @@ describe("composeProgramAnalysisGraph path", () => {
       properties: { sinkType: "redirect" },
     });
     expect(graph.flows).toHaveLength(1);
+  });
+
+  it("marks JWT token operations and auth-bypass verification as semantic sinks", () => {
+    const jwtGraph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", jwtTokenTrustSlices())] }),
+    );
+    const authGraph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", authBypassSlices())] }),
+    );
+
+    expect(jwtGraph.nodes.find((node) => node.kind === "Sink")).toMatchObject({
+      label: "JWT signing",
+      properties: { sinkType: "jwt_token_trust" },
+    });
+    expect(authGraph.nodes.find((node) => node.kind === "Sink")).toMatchObject({
+      label: "account verification",
+      properties: { sinkType: "authentication_bypass" },
+    });
+    expect(jwtGraph.flows).toHaveLength(1);
+    expect(authGraph.flows).toHaveLength(1);
   });
 
   it("connects route handlers to sinks inside nested Joern lambda entities", () => {
@@ -718,6 +750,94 @@ function genericUpdateSlices() {
               code: "digest.update(bytes)",
               label: "CALL",
               lineNumber: 9,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function nonDangerousUpdateSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "example.Profile.updateDisplayName:<unresolvedSignature>(1)",
+        fileName: "src/main/java/example/Profile.java",
+        lineNumber: 7,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "profile",
+          sourceName: "request",
+        },
+        usages: [
+          {
+            targetObj: {
+              name: "update",
+              resolvedMethod: "example.ProfileService.update:void(example.Profile)",
+              code: "profileService.update(profile)",
+              label: "CALL",
+              lineNumber: 9,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function jwtTokenTrustSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "example.jwt.JwtController.login:<unresolvedSignature>(1)",
+        fileName: "src/main/java/example/jwt/JwtController.java",
+        lineNumber: 7,
+        boundary: {
+          boundaryType: "spring",
+          routeOrName: "/JWT/refresh/login",
+          method: "POST",
+          sourceName: "request",
+        },
+        usages: [
+          {
+            targetObj: {
+              name: "signWith",
+              resolvedMethod:
+                "io.jsonwebtoken.JwtBuilder.signWith:io.jsonwebtoken.JwtBuilder(io.jsonwebtoken.SignatureAlgorithm,java.lang.String)",
+              code: "Jwts.builder().signWith(SignatureAlgorithm.HS512, JWT_PASSWORD)",
+              label: "CALL",
+              lineNumber: 12,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function authBypassSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "example.auth.VerifyAccount.completed:<unresolvedSignature>(1)",
+        fileName: "src/main/java/example/auth/VerifyAccount.java",
+        lineNumber: 7,
+        boundary: {
+          boundaryType: "spring",
+          routeOrName: "/auth-bypass/verify-account",
+          method: "POST",
+          sourceName: "request",
+        },
+        usages: [
+          {
+            targetObj: {
+              name: "verifyAccount",
+              resolvedMethod:
+                "example.auth.AccountVerificationHelper.verifyAccount:boolean(java.lang.Integer,java.util.HashMap)",
+              code: "verificationHelper.verifyAccount(Integer.valueOf(userId), submittedAnswers)",
+              label: "CALL",
+              lineNumber: 14,
             },
           },
         ],
@@ -1675,6 +1795,17 @@ function manifest(): Manifest {
       { path: "src/main/java/example/ForgedReviews.java", size: 140, sha256: "csrf-sha" },
       { path: "src/main/java/example/Job.java", size: 90, sha256: "job-sha" },
       { path: "src/main/java/example/Crypto.java", size: 90, sha256: "crypto-sha" },
+      { path: "src/main/java/example/Profile.java", size: 90, sha256: "profile-java-sha" },
+      {
+        path: "src/main/java/example/jwt/JwtController.java",
+        size: 90,
+        sha256: "jwt-java-sha",
+      },
+      {
+        path: "src/main/java/example/auth/VerifyAccount.java",
+        size: 90,
+        sha256: "auth-java-sha",
+      },
       { path: "src/main/java/example/Controller.java", size: 100, sha256: "controller-sha" },
       { path: "src/app/service.ts", size: 100, sha256: "service-sha" },
       { path: "apps/web/src/lib/api-client.ts", size: 100, sha256: "web-client-sha" },

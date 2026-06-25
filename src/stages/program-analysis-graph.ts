@@ -764,8 +764,23 @@ function classifySinkCandidate(
     return { label: httpLabel, sinkType: outboundHttpSinkType(repoPath, lower) };
   }
 
+  if (isCryptographicOperation(candidate, lower, methodName, entity)) {
+    return { label: cryptographicLabel(candidate, label), sinkType: "crypto_weakness" };
+  }
+
+  if (isJwtTokenTrustOperation(candidate, lower, methodName, entity)) {
+    return { label: jwtTokenTrustLabel(candidate, label), sinkType: "jwt_token_trust" };
+  }
+
   if (isNoSqlOperation(lower, methodName)) {
     return { label, sinkType: "no_sql_execution" };
+  }
+
+  if (isAuthenticationBypassOperation(candidate, lower, methodName, entity)) {
+    return {
+      label: authenticationBypassLabel(candidate, label),
+      sinkType: "authentication_bypass",
+    };
   }
 
   if (isAccessControlSensitiveResourceUse(candidate, lower, methodName, entity)) {
@@ -861,6 +876,103 @@ function classifySinkCandidate(
   }
 
   return undefined;
+}
+
+function isCryptographicOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityContext(entity, candidate).toLowerCase();
+  const cryptoContext =
+    context.includes("/crypto/") ||
+    context.includes("lessons.cryptography") ||
+    context.includes("java.security.") ||
+    context.includes("javax.crypto") ||
+    context.includes("crypto.");
+  if (!cryptoContext) {
+    return false;
+  }
+  return (
+    lower.includes("messagedigest") ||
+    lower.includes("base64") ||
+    lower.includes("keypairgenerator") ||
+    lower.includes("signature.getinstance") ||
+    lower.includes("signature.sign") ||
+    lower.includes("signature.verify") ||
+    lower.includes("javax.crypto") ||
+    lower.includes("cipher.getinstance") ||
+    (methodName === "getinstance" &&
+      /\b(?:md5|sha1|sha-1|des|rc4|rsa|aes|cipher|signature|messagedigest)\b/i.test(candidate))
+  );
+}
+
+function cryptographicLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (lower.includes("messagedigest")) {
+    return "cryptographic digest";
+  }
+  if (lower.includes("base64")) {
+    return "encoding operation";
+  }
+  if (lower.includes("signature")) {
+    return "signature operation";
+  }
+  if (lower.includes("keypairgenerator") || lower.includes("keyfactory")) {
+    return "key generation operation";
+  }
+  if (lower.includes("cipher")) {
+    return "cipher operation";
+  }
+  return fallbackLabel;
+}
+
+function isJwtTokenTrustOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityContext(entity, candidate).toLowerCase();
+  const jwtContext =
+    context.includes("/jwt/") ||
+    context.includes("lessons.jwt") ||
+    lower.includes("jsonwebtoken") ||
+    lower.includes("io.jsonwebtoken") ||
+    lower.includes("jwts.") ||
+    lower.includes("com.auth0.jwt") ||
+    lower.includes("signwith") ||
+    lower.includes("setsigningkey");
+  if (!jwtContext) {
+    return false;
+  }
+  return (
+    lower.includes("jwts.") ||
+    lower.includes("io.jsonwebtoken") ||
+    lower.includes("jwt.decode") ||
+    lower.includes("jsonwebtoken.") ||
+    lower.includes("signwith") ||
+    lower.includes("parseclaimsjws") ||
+    lower.includes("parseclaimsjwt") ||
+    lower.includes("parse(") ||
+    lower.includes("setSigningKey".toLowerCase()) ||
+    ["decode", "sign", "verify", "parse", "signwith", "setsigningkey"].includes(methodName)
+  );
+}
+
+function jwtTokenTrustLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (lower.includes("signwith") || lower.includes(".sign")) {
+    return "JWT signing";
+  }
+  if (lower.includes("parse") || lower.includes("setsigningkey") || lower.includes("verify")) {
+    return "JWT verification";
+  }
+  if (lower.includes("decode")) {
+    return "JWT decode";
+  }
+  return fallbackLabel;
 }
 
 function isNoSqlOperation(lower: string, methodName: string): boolean {
@@ -985,6 +1097,34 @@ function isAccessControlSensitiveResourceUse(
     lower.includes("where:") ||
     lower.includes("collection.find")
   );
+}
+
+function isAuthenticationBypassOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityContext(entity, candidate).toLowerCase();
+  if (
+    !(
+      context.includes("/auth-bypass/") ||
+      context.includes("lessons.authbypass") ||
+      context.includes("verify-account")
+    )
+  ) {
+    return false;
+  }
+  return (
+    methodName === "verifyaccount" ||
+    lower.includes("verifyaccount") ||
+    lower.includes("accountverificationhelper") ||
+    (methodName === "setvalue" && context.includes("account-verified"))
+  );
+}
+
+function authenticationBypassLabel(candidate: string, fallbackLabel: string): string {
+  return candidate.toLowerCase().includes("verifyaccount") ? "account verification" : fallbackLabel;
 }
 
 function isCsrfSensitiveStateChange(

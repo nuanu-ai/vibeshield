@@ -226,6 +226,46 @@ describe("correlateGraphRules candidates", () => {
     }
   });
 
+  it("labels JWT, password reset, crypto, and auth-bypass paths by route semantics", () => {
+    for (const { boundaryLabel, sinkType, title } of [
+      {
+        boundaryLabel: "/JWT/refresh/newToken",
+        sinkType: "csrf_state_change",
+        title: "JWT token trust path: external input reaches JWT signing or parsing logic",
+      },
+      {
+        boundaryLabel: "/PasswordReset/reset/change-password",
+        sinkType: "server_side_request",
+        title: "Password reset path: request-controlled recovery data reaches password reset flow",
+      },
+      {
+        boundaryLabel: "/crypto/hashing/md5",
+        sinkType: "crypto_weakness",
+        title:
+          "Cryptographic weakness path: external input reaches cryptographic or encoding logic",
+      },
+      {
+        boundaryLabel: "/auth-bypass/verify-account",
+        sinkType: "authentication_bypass",
+        title:
+          "Authentication bypass path: request-controlled verification data reaches account verification logic",
+      },
+    ]) {
+      const candidates = correlateGraphRules({
+        graph: graphFixture({ boundaryLabel, sinkType }),
+        rules: [
+          {
+            ...rule(),
+            target: { kinds: ["Sink"], propertyEquals: { sinkType } },
+          },
+        ],
+      });
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]?.title).toBe(title);
+    }
+  });
+
   it("labels HTML and script output paths as XSS candidates", () => {
     const graph = graphFixture({ sinkType: "cross_site_scripting" });
     const candidates = correlateGraphRules({

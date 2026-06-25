@@ -213,6 +213,10 @@ function candidateTitle(
   }
   const sinkType = stringProperty(target.properties.sinkType);
   const pathNodes = nodesForPath(nodes, path);
+  const routeSemanticTitle = routeSemanticTitleForPath(pathNodes);
+  if (routeSemanticTitle !== undefined) {
+    return routeSemanticTitle;
+  }
   if (sinkType === "sql_execution" && isAccessControlDataAccessPath(pathNodes)) {
     return "Access control path: public route reaches SQL-backed data access without observed authorization";
   }
@@ -241,6 +245,12 @@ function candidateTitle(
       return "Outbound request path: external input reaches an HTTP client";
     case "cross_site_scripting":
       return "Cross-site scripting path: external input reaches HTML or script output";
+    case "crypto_weakness":
+      return "Cryptographic weakness path: external input reaches cryptographic or encoding logic";
+    case "jwt_token_trust":
+      return "JWT token trust path: external input reaches JWT signing or parsing logic";
+    case "authentication_bypass":
+      return "Authentication bypass path: request-controlled verification data reaches account verification logic";
     case "access_control":
       if (target.label.toLowerCase().includes("idor")) {
         return "IDOR path: request-controlled resource id reaches object access";
@@ -264,15 +274,37 @@ function nodesForPath(
   });
 }
 
+function routeSemanticTitleForPath(
+  pathNodes: ReadonlyArray<SecurityGraphNode>,
+): string | undefined {
+  const descriptors = entryNodeDescriptors(pathNodes).map(normalizeDescriptor);
+  if (descriptors.some(hasJwtDescriptor)) {
+    return "JWT token trust path: external input reaches JWT signing or parsing logic";
+  }
+  if (descriptors.some(hasPasswordResetDescriptor)) {
+    return "Password reset path: request-controlled recovery data reaches password reset flow";
+  }
+  if (descriptors.some(hasAuthenticationBypassDescriptor)) {
+    return "Authentication bypass path: request-controlled verification data reaches account verification logic";
+  }
+  if (descriptors.some(hasCryptographicDescriptor)) {
+    return "Cryptographic weakness path: external input reaches cryptographic or encoding logic";
+  }
+  return undefined;
+}
+
 function isAccessControlDataAccessPath(pathNodes: ReadonlyArray<SecurityGraphNode>): boolean {
-  const descriptors = pathNodes
-    .filter((node) => node.kind === "Boundary" || node.kind === "Source")
-    .flatMap(nodeDescriptors)
-    .map(normalizeDescriptor);
+  const descriptors = entryNodeDescriptors(pathNodes).map(normalizeDescriptor);
   if (descriptors.some(isFixedOrSafeDescriptor)) {
     return false;
   }
   return descriptors.some(hasAccessControlDescriptor);
+}
+
+function entryNodeDescriptors(pathNodes: ReadonlyArray<SecurityGraphNode>): string[] {
+  return pathNodes
+    .filter((node) => node.kind === "Boundary" || node.kind === "Source")
+    .flatMap(nodeDescriptors);
 }
 
 function nodeDescriptors(node: SecurityGraphNode): string[] {
@@ -297,6 +329,22 @@ function hasAccessControlDescriptor(value: string): boolean {
     value.includes("missing-function-ac") ||
     value.includes("missingac")
   );
+}
+
+function hasJwtDescriptor(value: string): boolean {
+  return value.includes("jwt") || value.includes("json-web-token");
+}
+
+function hasPasswordResetDescriptor(value: string): boolean {
+  return value.includes("passwordreset") || value.includes("password-reset");
+}
+
+function hasAuthenticationBypassDescriptor(value: string): boolean {
+  return value.includes("auth-bypass") || value.includes("authbypass");
+}
+
+function hasCryptographicDescriptor(value: string): boolean {
+  return value.includes("crypto") || value.includes("cryptography");
 }
 
 function isFixedOrSafeDescriptor(value: string): boolean {
