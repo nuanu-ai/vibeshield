@@ -186,9 +186,11 @@ Status:
   supported set).
   The fresh matrix passes
   `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625200500-77bfa880 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
-  The curated ground-truth slice passes in both normal and
-  `--strict-ground-truth` benchmark modes: WebGoat covers 21/21 expectations and
-  Juice Shop covers 23/23 expectations, with 0 known gaps in both repositories.
+  The curated ground-truth slice passes in normal benchmark mode: WebGoat covers
+  21/21 expectations and Juice Shop covers 23/27 expectations with 4 known gaps.
+  `--strict-ground-truth` is intentionally red on the four Juice Shop Security
+  Misconfiguration gaps: Deprecated Interface, Error Handling, Login Support
+  Team, and Cross-Site Imaging.
   The Juice Shop inventory audit
   `pnpm benchmark:inventory --source juice-shop=/tmp/vibeshield-juice-shop-probe`
   maps 113 challenges across 16 categories to curated ground truth or explicit

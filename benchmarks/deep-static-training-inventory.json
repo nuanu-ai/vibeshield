@@ -55,7 +55,12 @@
           "note": "Covers log/file exposure and metrics fetch paths; leaked-log semantics should become a challenge-level expectation."
         },
         "Security Misconfiguration": {
-          "groundTruthIds": ["juice.file-exposure", "juice.xss"],
+          "groundTruthIds": [
+            "juice.security-misconfiguration-deprecated-interface",
+            "juice.security-misconfiguration-error-handling",
+            "juice.security-misconfiguration-login-support",
+            "juice.security-misconfiguration-svg-imaging"
+          ],
           "limitation": "Deprecated-interface, error-handling, support-login, and SVG imaging need explicit security-misconfiguration taxonomy before this category can be called fully covered."
         },
         "Security through Obscurity": {

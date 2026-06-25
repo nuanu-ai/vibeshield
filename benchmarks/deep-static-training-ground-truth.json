@@ -274,6 +274,42 @@
           "statusIn": ["statically_supported"]
         },
         {
+          "id": "juice.security-misconfiguration-deprecated-interface",
+          "title": "Deprecated Interface challenge should classify deprecated upload interface behavior as security misconfiguration",
+          "kind": "hypothesis",
+          "titleIncludes": "Security misconfiguration",
+          "candidateReasonIncludes": "routes/fileUpload.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.security-misconfiguration-error-handling",
+          "title": "Error Handling challenge should classify verbose or permissive error behavior as security misconfiguration",
+          "kind": "hypothesis",
+          "titleIncludes": "Security misconfiguration",
+          "candidateReasonIncludes": "routes/verify.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.security-misconfiguration-login-support",
+          "title": "Login Support Team challenge should classify support default credentials as security misconfiguration",
+          "kind": "hypothesis",
+          "titleIncludes": "Security misconfiguration",
+          "candidateReasonIncludes": "routes/login.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.security-misconfiguration-svg-imaging",
+          "title": "Cross-Site Imaging challenge should classify permissive redirect/image policy as security misconfiguration",
+          "kind": "hypothesis",
+          "titleIncludes": "Security misconfiguration",
+          "candidateReasonIncludes": "registerWebsocketEvents.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
           "id": "juice.jwt-token-trust",
           "title": "Unsigned and forged JWT challenges should classify token trust",
           "kind": "hypothesis",

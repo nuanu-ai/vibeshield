@@ -109,11 +109,12 @@ vulnerability classes for WebGoat and Juice Shop as either:
 Current normal result on the latest WebGoat and Juice Shop runs:
 
 - WebGoat: 21/21 covered, 0 known gaps.
-- Juice Shop: 23/23 covered, 0 known gaps.
+- Juice Shop: 23/27 covered, 4 known gaps.
 
-Current strict result passes on WebGoat and Juice Shop. Future `known_gap`
-entries should be temporary, explicit backlog items and must fail under
-`--strict-ground-truth`.
+Current strict result fails on the four Juice Shop Security Misconfiguration
+known gaps: Deprecated Interface, Error Handling, Login Support Team, and
+Cross-Site Imaging. Future `known_gap` entries should be temporary, explicit
+backlog items and must fail under `--strict-ground-truth`.
 
 Current Juice Shop inventory audit result:
 
