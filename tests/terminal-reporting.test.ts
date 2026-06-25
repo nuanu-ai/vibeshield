@@ -31,6 +31,112 @@ describe("terminal reporting", () => {
     expect(text).toContain("Markdown and JSON are in the same folder.");
   });
 
+  it("renders a richer Deep Static summary without dumping full fix details", () => {
+    const base = sampleOutcome({ fromCatalog: false });
+    const outcome: ScanOutcome = {
+      ...base,
+      assessment: {
+        ...base.assessment,
+        deepCoverage: [
+          {
+            area: "language_support",
+            state: "checked",
+            coveredCount: 12,
+            totalCount: 12,
+            producer: "joern",
+            producerVersion: "4.0.565",
+          },
+          {
+            area: "data_flow",
+            state: "checked",
+            coveredCount: 4,
+            totalCount: 9,
+            producer: "joern",
+            producerVersion: "4.0.565",
+          },
+          {
+            area: "dependency_usage",
+            state: "checked",
+            coveredCount: 2,
+            totalCount: 2,
+            producer: "joern",
+            producerVersion: "4.0.565",
+          },
+        ],
+        hypothesisCandidates: [
+          {
+            id: "candidate_input_sql",
+            ruleId: "stage2.external-input-dangerous-operation",
+            family: "external_input_to_dangerous_operation",
+            title: "External input reaches a dangerous operation",
+            findingIds: [],
+            supportingNodeIds: ["node_1"],
+            supportingEdgeIds: ["edge_1"],
+            contradictingNodeIds: [],
+            contradictingEdgeIds: [],
+            coverageRefs: ["data_flow:checked"],
+            requiredValidation: ["dangerous_operation_repro"],
+            candidateReason: "/api/users reaches query across 3 graph edges",
+          },
+          {
+            id: "candidate_dep",
+            ruleId: "stage2.dependency-usage-path",
+            family: "dependency_usage_path",
+            title: "Vulnerable component is imported, used, or reachable in the dependency graph",
+            findingIds: ["finding_1"],
+            supportingNodeIds: ["node_2"],
+            supportingEdgeIds: ["edge_2"],
+            contradictingNodeIds: [],
+            contradictingEdgeIds: [],
+            coverageRefs: ["dependency_usage:checked"],
+            requiredValidation: ["dependency_usage_review"],
+            candidateReason: "src/server.ts reaches vulnerable package lodash",
+          },
+        ],
+        staticHypotheses: [
+          {
+            id: "hypothesis_input_sql",
+            candidateId: "candidate_input_sql",
+            status: "statically_supported",
+            staticConfidence: 0.84,
+            title: "External input reaches a dangerous operation",
+            pathSummary: "Static path reaches query.",
+            supportingEvidenceIds: ["ev_1"],
+            contradictingEvidenceIds: [],
+            coverageState: "checked",
+            runtimeValidationRequired: true,
+          },
+          {
+            id: "hypothesis_dep",
+            candidateId: "candidate_dep",
+            status: "statically_supported",
+            staticConfidence: 0.78,
+            title: "Vulnerable component is imported, used, or reachable in the dependency graph",
+            pathSummary: "Static path reaches vulnerable package.",
+            supportingEvidenceIds: ["ev_1"],
+            contradictingEvidenceIds: [],
+            coverageState: "checked",
+            runtimeValidationRequired: true,
+          },
+        ],
+      },
+    };
+
+    const text = renderScanOutcome(outcome);
+
+    expect(text).toContain("Deep Static");
+    expect(text).toContain("2 likely attack paths traced");
+    expect(text).toContain("2 with static support");
+    expect(text).toContain("input-to-danger 1");
+    expect(text).toContain("dependency usage 1");
+    expect(text).toContain("/api/users reaches query");
+    expect(text).toContain("src/server.ts reaches vulnerable package lodash");
+    expect(text).toContain("Coverage: languages checked 12/12");
+    expect(text).toContain("data flow checked 4/9");
+    expect(text).not.toContain("stage2.external-input-dangerous-operation");
+    expect(text).not.toContain("candidate_input_sql");
+  });
+
   it("prints owner-facing progress events without requiring a live scan", () => {
     let output = "";
     const sink = new TerminalEventSink(
@@ -69,6 +175,19 @@ describe("terminal reporting", () => {
       timestamp: "2026-06-22T00:00:00.000Z",
     });
     sink.emit({
+      type: "scan-progress",
+      stageId: "deep.static.compose",
+      message: "joern stderr: parsing internal slice",
+      details: { publicLabel: "Tracing data flow" },
+      timestamp: "2026-06-22T00:00:00.000Z",
+    });
+    sink.emit({
+      type: "stage-started",
+      stageId: "hypotheses.enrich",
+      message: "hypotheses.enrich",
+      timestamp: "2026-06-22T00:00:00.000Z",
+    });
+    sink.emit({
       type: "error",
       message: "sandbox unavailable",
       timestamp: "2026-06-22T00:00:00.000Z",
@@ -83,11 +202,15 @@ describe("terminal reporting", () => {
     expect(output).toContain("Preparing the repository");
     expect(output).toContain("Running security checks");
     expect(output).toContain("Running Deep Static analysis");
+    expect(output).toContain("Tracing data flow");
+    expect(output).toContain("Explaining likely attack paths");
     expect(output).toContain("sandbox unavailable");
     expect(output).not.toContain("source.resolve");
     expect(output).not.toContain("scan.secrets.gitleaks");
     expect(output).not.toContain("scan.code.opengrep");
     expect(output).not.toContain("deep.static.compose");
+    expect(output).not.toContain("hypotheses.enrich");
+    expect(output).not.toContain("joern stderr");
     expect(output.match(/Running security checks/g)).toHaveLength(1);
     expect(output).not.toContain("Scan complete");
   });

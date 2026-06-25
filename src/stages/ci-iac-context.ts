@@ -101,6 +101,7 @@ export function composeCiIacContext(input: ComposeCiIacContextInput): SecurityGr
       ...input.graph,
       nodes: builder.nodes,
       edges: builder.edges,
+      coverage: withCiIacCoverage(input.graph, input.workflows ?? [], input.iacResources ?? []),
     },
     {
       manifestPaths: input.manifest.files.map((file) => file.path),
@@ -408,6 +409,27 @@ function collectGraphEvidenceIds(graph: SecurityGraph): string[] {
     ...graph.edges.flatMap((edge) => edge.evidenceIds),
     ...graph.flows.flatMap((flow) => flow.evidenceIds),
   ]);
+}
+
+function withCiIacCoverage(
+  graph: SecurityGraph,
+  workflows: ReadonlyArray<CiWorkflowObservation>,
+  resources: ReadonlyArray<IacResourceObservation>,
+): SecurityGraph["coverage"] {
+  const coverage = {
+    area: "ci_iac" as const,
+    state: "checked" as const,
+    coveredCount: workflows.length + resources.length,
+    totalCount: workflows.length + resources.length,
+    producer: PRODUCER,
+    producerVersion: graph.graphVersion,
+  };
+  return [
+    ...graph.coverage.filter(
+      (entry) => !(entry.area === coverage.area && entry.producer === coverage.producer),
+    ),
+    coverage,
+  ];
 }
 
 function unique(values: ReadonlyArray<string>): string[] {

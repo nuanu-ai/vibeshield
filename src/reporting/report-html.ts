@@ -14,7 +14,6 @@ import type { DeepCoverageEntry } from "../domain/deep-coverage.js";
 import type { HypothesisEnrichment } from "../domain/hypothesis-enrichment.js";
 import type { RankedAction, SecurityAssessment } from "../domain/security-assessment.js";
 import type { StaticHypothesis } from "../domain/static-hypothesis.js";
-import type { ValidationRecipe } from "../domain/validation-recipe.js";
 
 export function escapeHtml(value: string): string {
   return value
@@ -149,21 +148,26 @@ export function actionCardHtml(
   ].join("");
 }
 
+// One concrete signal behind an attack path: which tool flagged which location.
+export interface AttackPathSignal {
+  readonly tool: string;
+  readonly location: string;
+}
+
 // One attack path as a card: plain "what could happen" + confidence, the agent
-// prompt to fix it, and a disclosure with how to confirm it. No graph ids, no
-// raw statuses - those stay in report.json.
+// prompt to fix it, and a collapsed "Technical details" disclosure for a more
+// advanced reader. No graph ids, no raw statuses - those stay in report.json.
 export function attackPathCardHtml(
   rank: number,
   hypothesis: StaticHypothesis,
   enrichment: HypothesisEnrichment | undefined,
-  recipe: ValidationRecipe | undefined,
+  signals: ReadonlyArray<AttackPathSignal>,
 ): string {
   const description = enrichment?.attackDescription ?? hypothesis.pathSummary;
   const impact = enrichment?.impact;
   const runtimePill = hypothesis.runtimeValidationRequired
     ? '<span class="pill pill--check">Needs a runtime check</span>'
     : "";
-  const howToConfirm = confirmDetailsHtml(hypothesis, enrichment, recipe);
   return [
     '<article class="action">',
     '<div class="action-head">',
@@ -179,26 +183,34 @@ export function attackPathCardHtml(
       ? ""
       : `<p class="why"><strong>If real, the impact:</strong> ${escapeHtml(impact)}</p>`,
     enrichment === undefined ? "" : promptBlockHtml(enrichment.agentPrompt),
-    howToConfirm,
+    technicalDetailsHtml(hypothesis, signals),
     "</article>",
   ].join("");
 }
 
-function confirmDetailsHtml(
+// Collapsed "Technical details" for a more advanced reader: exact static
+// confidence, the traced static path, and the concrete signals (which tool
+// flagged which file and line). The runtime validation recipe stays in
+// report.json - a vibe coder just hands the prompt above to their coding agent.
+function technicalDetailsHtml(
   hypothesis: StaticHypothesis,
-  enrichment: HypothesisEnrichment | undefined,
-  recipe: ValidationRecipe | undefined,
+  signals: ReadonlyArray<AttackPathSignal>,
 ): string {
-  const parts: string[] = [];
-  parts.push(`<p class="muted-line">Static path: ${escapeHtml(hypothesis.pathSummary)}</p>`);
-  if (recipe !== undefined) {
-    parts.push(renderHtmlList("What you'd need", recipe.requiredFixtures));
-    parts.push(renderOrderedHtmlList("How to check it", recipe.steps));
-    parts.push(`<p class="muted-line">Expected if safe: ${escapeHtml(recipe.expectedResult)}</p>`);
-  } else if (enrichment !== undefined && enrichment.validationRecipeText.trim() !== "") {
-    parts.push(`<p class="muted-line">${escapeHtml(enrichment.validationRecipeText)}</p>`);
+  const parts = [
+    `<p class="muted-line"><strong>Confidence:</strong> ${Math.round(
+      hypothesis.staticConfidence * 100,
+    )}% from static analysis — not runtime-confirmed.</p>`,
+    `<p class="muted-line"><strong>Static path:</strong> ${escapeHtml(hypothesis.pathSummary)}</p>`,
+  ];
+  if (signals.length > 0) {
+    parts.push(
+      renderHtmlList(
+        "Signals",
+        signals.map((signal) => `${signal.tool} — ${signal.location}`),
+      ),
+    );
   }
-  return `<details class="more"><summary>How to confirm this</summary>${parts.join("")}</details>`;
+  return `<details class="more"><summary>Technical details</summary>${parts.join("")}</details>`;
 }
 
 function promptBlockHtml(prompt: string): string {
@@ -275,14 +287,6 @@ export function renderHtmlList(heading: string, values: ReadonlyArray<string>): 
     return "";
   }
   return `<h4>${escapeHtml(heading)}</h4>${htmlList(values)}`;
-}
-
-function renderOrderedHtmlList(heading: string, values: ReadonlyArray<string>): string {
-  if (values.length === 0) {
-    return "";
-  }
-  const items = values.map((value) => `<li>${escapeHtml(value)}</li>`).join("");
-  return `<h4>${escapeHtml(heading)}</h4><ol class="steps">${items}</ol>`;
 }
 
 export function htmlList(values: ReadonlyArray<string>): string {

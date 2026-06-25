@@ -27,7 +27,7 @@ const describeLive =
   process.env.VIBESHIELD_LIVE_DEEP_STATIC_GATE1 === "1" ? describe : describe.skip;
 
 describeLive("Deep Static Gate 1 (live)", () => {
-  it("proves a real Atom boundary-to-sink path in Microsandbox", async () => {
+  it("proves a real Joern boundary-to-sink path in Microsandbox", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "vibeshield-gate1-"));
     const fixtureDir = path.join(root, "fixture");
     const stateRoot = path.join(root, "state");

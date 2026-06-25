@@ -3,6 +3,7 @@ import type { ScanOutcome } from "../application/scan-service.js";
 import type { Verdict } from "../domain/assessment.js";
 import { verdictLabel } from "../domain/assessment.js";
 import type { SecurityAssessment } from "../domain/security-assessment.js";
+import type { StaticHypothesis } from "../domain/static-hypothesis.js";
 import type { EventSink, ScanEvent } from "../ports/event-sink.js";
 
 interface RenderOptions {
@@ -25,6 +26,12 @@ interface Palette {
   readonly magenta: Paint;
 }
 
+interface TerminalAttackPath {
+  readonly hypothesis: StaticHypothesis;
+  readonly family: string;
+  readonly reason: string;
+}
+
 const glyph = {
   brand: "◆",
   ok: "✓",
@@ -32,6 +39,14 @@ const glyph = {
   warn: "⚠",
   step: "›",
 } as const;
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+const TERMINAL_COVERAGE_AREAS = [
+  "language_support",
+  "data_flow",
+  "dependency_usage",
+  "ci_iac",
+] as const;
 
 // Friendly, deduplicated progress labels. Internal stage ids never reach the
 // user; several scanner stages collapse into one "Running security checks" line.
@@ -52,18 +67,24 @@ const STAGE_PROGRESS_LABELS: Readonly<Record<string, string>> = {
   "actions.rank": "Prioritizing what matters",
   "remediation.generate": "Writing your fixes",
   "deep.static.compose": "Running Deep Static analysis",
+  "hypotheses.enrich": "Explaining likely attack paths",
   "report.compose": "Writing the report",
 };
 
 export class TerminalEventSink implements EventSink {
   private readonly palette: Palette;
+  private readonly tty: boolean;
   private readonly printedProgressLabels = new Set<string>();
+  private spinnerTimer: ReturnType<typeof setInterval> | undefined;
+  private spinnerFrame = 0;
+  private spinnerLabel: string | undefined;
 
   constructor(
     private readonly stream: TerminalStream = process.stderr,
     opts: RenderOptions = {},
   ) {
     this.palette = makePalette(opts.color ?? supportsAnsiColor(stream));
+    this.tty = Boolean(stream.isTTY);
   }
 
   emit(event: ScanEvent): void {
@@ -72,24 +93,96 @@ export class TerminalEventSink implements EventSink {
       this.write(`${p.magenta(glyph.brand)} ${p.bold("VibeShield")} ${p.dim("quick scan")}`);
       return;
     }
-    if (event.type === "stage-started") {
-      const label = progressLabel(event);
-      if (!this.printedProgressLabels.has(label)) {
-        this.printedProgressLabels.add(label);
-        this.write(`  ${p.cyan(glyph.step)} ${p.dim(label)}`);
-      }
+    if (event.type === "stage-started" || event.type === "scan-progress") {
+      this.showProgress(progressLabel(event));
       return;
     }
     if (event.type === "stage-failed" || event.type === "error") {
+      this.finishSpinnerLine();
       this.write(`  ${p.red(glyph.fail)} ${event.message}`);
       return;
     }
     if (event.type === "run-finished") {
       if (event.details?.status === "failed") {
+        this.clearSpinnerLine();
         return;
       }
+      this.finishSpinnerLine();
       this.write(`  ${p.green(glyph.ok)} ${p.dim("Scan complete")}`);
     }
+  }
+
+  private showProgress(label: string): void {
+    const trimmed = label.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    if (!this.tty) {
+      if (!this.printedProgressLabels.has(trimmed)) {
+        this.printedProgressLabels.add(trimmed);
+        this.write(`  ${this.palette.cyan(glyph.step)} ${this.palette.dim(trimmed)}`);
+      }
+      return;
+    }
+    if (this.spinnerLabel === trimmed) {
+      return;
+    }
+    this.finishSpinnerLine();
+    this.spinnerLabel = trimmed;
+    this.spinnerFrame = 0;
+    this.startSpinner();
+    this.renderSpinner();
+  }
+
+  private startSpinner(): void {
+    if (this.spinnerTimer !== undefined) {
+      return;
+    }
+    this.spinnerTimer = setInterval(() => {
+      this.renderSpinner();
+    }, 120);
+    this.spinnerTimer.unref();
+  }
+
+  private finishSpinnerLine(): void {
+    if (!this.tty || this.spinnerLabel === undefined) {
+      return;
+    }
+    const label = this.spinnerLabel;
+    this.clearSpinnerLine();
+    if (!this.printedProgressLabels.has(label)) {
+      this.printedProgressLabels.add(label);
+      this.write(`  ${this.palette.cyan(glyph.step)} ${this.palette.dim(label)}`);
+    }
+  }
+
+  private clearSpinnerLine(): void {
+    if (!this.tty) {
+      return;
+    }
+    this.stopSpinner();
+    if (this.spinnerLabel !== undefined) {
+      this.stream.write("\r\x1b[2K");
+      this.spinnerLabel = undefined;
+    }
+  }
+
+  private stopSpinner(): void {
+    if (this.spinnerTimer !== undefined) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = undefined;
+    }
+  }
+
+  private renderSpinner(): void {
+    if (!this.tty || this.spinnerLabel === undefined) {
+      return;
+    }
+    const frame = SPINNER_FRAMES[this.spinnerFrame % SPINNER_FRAMES.length] ?? SPINNER_FRAMES[0];
+    this.spinnerFrame += 1;
+    this.stream.write(
+      `\r\x1b[2K  ${this.palette.cyan(frame)} ${this.palette.dim(this.spinnerLabel)}`,
+    );
   }
 
   private write(line: string): void {
@@ -98,6 +191,10 @@ export class TerminalEventSink implements EventSink {
 }
 
 function progressLabel(event: ScanEvent): string {
+  const publicLabel = event.details?.publicLabel;
+  if (typeof publicLabel === "string" && publicLabel.trim().length > 0) {
+    return publicLabel;
+  }
   if (event.stageId !== undefined) {
     return STAGE_PROGRESS_LABELS[event.stageId] ?? humanizeStageId(event.stageId);
   }
@@ -132,6 +229,8 @@ export function renderScanOutcome(outcome: ScanOutcome, opts: RenderOptions = {}
   );
   lines.push(`    ${p.dim(verdictSubline(assessment))}`);
   lines.push("");
+
+  appendDeepStaticSummary(lines, assessment, p);
 
   const htmlPath = outcome.reportPaths.html;
   const markdownPath = outcome.reportPaths.markdown ?? outcome.reportPaths.md;
@@ -177,7 +276,8 @@ export function renderHelp(opts: RenderOptions = {}): string {
     "",
     heading("Setup"),
     `    ${p.dim("Needs Docker or Podman + Microsandbox. First run:")} ${p.cyan("pnpm toolchain:prepare")}`,
-    `    ${p.dim("Set OPENROUTER_API_KEY (optional) to improve how each fix is explained.")}`,
+    `    ${p.dim("Set OPENROUTER_API_KEY (optional) to improve how fixes are explained.")}`,
+    `    ${p.dim("Use VIBESHIELD_REMEDIATION_MODEL to try another OpenRouter model.")}`,
     "",
   ];
   return `${lines.join("\n")}\n`;
@@ -229,6 +329,197 @@ function repositoryLine(assessment: SecurityAssessment): string {
     return cleaned;
   }
   return `${cleaned} @ ${shortHash(commit)}`;
+}
+
+function appendDeepStaticSummary(
+  lines: string[],
+  assessment: SecurityAssessment,
+  palette: Palette,
+): void {
+  if (assessment.deepCoverage === undefined && assessment.staticHypotheses === undefined) {
+    return;
+  }
+
+  const rawAttackPathCount = (assessment.staticHypotheses ?? []).filter(
+    (hypothesis) => hypothesis.status !== "statically_contradicted",
+  ).length;
+  const attackPaths = terminalAttackPaths(assessment);
+  const supported = (assessment.staticHypotheses ?? []).filter(
+    (hypothesis) => hypothesis.status === "statically_supported",
+  ).length;
+  lines.push(`  ${palette.bold("Deep Static")}`);
+  lines.push(
+    `    ${attackPathCountLabel(attackPaths.length, rawAttackPathCount)}${
+      supported > 0 ? ` · ${supported} with static support` : ""
+    }`,
+  );
+
+  const families = familyCounts(attackPaths);
+  if (families.length > 0) {
+    lines.push(`    ${families.map(({ label, count }) => `${label} ${count}`).join(" · ")}`);
+  }
+
+  const examples = representativeAttackPaths(attackPaths, 3);
+  for (const path of examples) {
+    lines.push(`    ${glyph.step} ${trimForTerminal(path.reason, 100)}`);
+  }
+
+  const coverage = deepCoverageLine(assessment);
+  if (coverage !== undefined) {
+    lines.push(`    ${palette.dim(coverage)}`);
+  }
+
+  const limitations = assessment.limitations ?? [];
+  if (limitations.length > 0) {
+    lines.push(`    ${palette.yellow(glyph.warn)} ${trimForTerminal(limitations[0] ?? "", 110)}`);
+  } else if (attackPaths.length > 0) {
+    lines.push(
+      `    ${palette.dim("Static paths still need runtime validation before you treat them as confirmed exploits.")}`,
+    );
+  }
+  lines.push("");
+}
+
+function terminalAttackPaths(assessment: SecurityAssessment): TerminalAttackPath[] {
+  const candidates = new Map(
+    (assessment.hypothesisCandidates ?? []).map((candidate) => [candidate.id, candidate]),
+  );
+  const seen = new Set<string>();
+  const out: TerminalAttackPath[] = [];
+
+  for (const hypothesis of [...(assessment.staticHypotheses ?? [])].sort(
+    (a, b) =>
+      b.staticConfidence - a.staticConfidence ||
+      a.title.localeCompare(b.title) ||
+      a.id.localeCompare(b.id),
+  )) {
+    if (hypothesis.status === "statically_contradicted") {
+      continue;
+    }
+    const candidate = candidates.get(hypothesis.candidateId);
+    const family = candidate?.family ?? "static_analysis";
+    const reason = candidate?.candidateReason ?? hypothesis.pathSummary;
+    const key = `${family}\0${reason}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push({ hypothesis, family, reason });
+  }
+
+  return out;
+}
+
+function attackPathCountLabel(uniqueCount: number, rawCount: number): string {
+  const noun = uniqueCount === 1 ? "attack path" : "attack paths";
+  if (rawCount > uniqueCount) {
+    return `${uniqueCount} unique likely ${noun} traced from ${rawCount} static traces`;
+  }
+  return `${uniqueCount} likely ${noun} traced`;
+}
+
+function familyCounts(
+  paths: ReadonlyArray<TerminalAttackPath>,
+): ReadonlyArray<{ readonly label: string; readonly count: number }> {
+  const counts = new Map<string, number>();
+  for (const path of paths) {
+    counts.set(path.family, (counts.get(path.family) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 4)
+    .map(([family, count]) => ({ label: familyLabel(family), count }));
+}
+
+function representativeAttackPaths(
+  paths: ReadonlyArray<TerminalAttackPath>,
+  limit: number,
+): TerminalAttackPath[] {
+  const seenFamilies = new Set<string>();
+  const out: TerminalAttackPath[] = [];
+  for (const path of paths) {
+    if (seenFamilies.has(path.family)) {
+      continue;
+    }
+    seenFamilies.add(path.family);
+    out.push(path);
+    if (out.length >= limit) {
+      break;
+    }
+  }
+  if (out.length >= limit) {
+    return out;
+  }
+  for (const path of paths) {
+    if (out.includes(path)) {
+      continue;
+    }
+    out.push(path);
+    if (out.length >= limit) {
+      break;
+    }
+  }
+  return out;
+}
+
+function deepCoverageLine(assessment: SecurityAssessment): string | undefined {
+  const entries = assessment.deepCoverage ?? [];
+  if (entries.length === 0) {
+    return undefined;
+  }
+  const byArea = new Map(entries.map((entry) => [entry.area, entry]));
+  const parts = TERMINAL_COVERAGE_AREAS.flatMap((area) => {
+    const entry = byArea.get(area);
+    if (entry === undefined) {
+      return [];
+    }
+    const counts =
+      entry.coveredCount === undefined || entry.totalCount === undefined
+        ? ""
+        : ` ${entry.coveredCount}/${entry.totalCount}`;
+    return [`${coverageLabel(area)} ${entry.state}${counts}`];
+  });
+  return parts.length === 0 ? undefined : `Coverage: ${parts.join(" · ")}`;
+}
+
+function familyLabel(family: string): string {
+  switch (family) {
+    case "external_input_to_dangerous_operation":
+      return "input-to-danger";
+    case "sast_reachable_path":
+      return "reachable SAST";
+    case "dependency_usage_path":
+      return "dependency usage";
+    case "ci_supply_chain_path":
+      return "CI supply chain";
+    case "secret_impact_chain":
+      return "secret impact";
+    default:
+      return family.replaceAll("_", " ");
+  }
+}
+
+function coverageLabel(area: string): string {
+  switch (area) {
+    case "language_support":
+      return "languages";
+    case "data_flow":
+      return "data flow";
+    case "dependency_usage":
+      return "dependency usage";
+    case "ci_iac":
+      return "CI/IaC";
+    default:
+      return area.replaceAll("_", " ");
+  }
+}
+
+function trimForTerminal(value: string, maxLength: number): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+  return `${compact.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 function shortHash(value: string): string {

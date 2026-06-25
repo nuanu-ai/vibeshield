@@ -25,12 +25,12 @@ What Stage 2 builds and where the boundaries are.
 - One canonical entity, **SecurityGraph**, is the source of truth for Deep Static
   correlation. `repository-map.json` is a derived human view, not a pipeline
   truth source.
-- One `ProgramAnalysisBackend` behind an interface; the first backend is Atom.
-  The interface stays language-agnostic so a heavier backend (Joern) fits later
-  without changing callers. v1 prioritizes JavaScript/TypeScript and Python
-  extraction quality, where the audience lives; languages the backend cannot
-  analyze well are reported as `language_support` coverage degradation with the
-  language named.
+- One `ProgramAnalysisBackend` behind an interface; the backend is Joern. The
+  interface stays language-agnostic while VibeShield owns the extraction,
+  normalization, and hypothesis rules above the CPG. v1 prioritizes
+  JavaScript/TypeScript, Java, Python, and Go extraction quality; languages the
+  backend cannot analyze well are reported as `language_support` coverage
+  degradation with the language named.
 - Boundaries are generic: HTTP route, GraphQL operation, RPC method, CLI command,
   queue consumer, webhook, scheduled job, file parser, upload handler, and CI
   trigger. Framework-specific packs can raise coverage later without changing the
@@ -58,10 +58,12 @@ What Stage 2 builds and where the boundaries are.
   corroborated/weakened/contradicted context and richer action grouping is the
   deferrable part: in v1, import findings as nodes only where a rule needs them
   and keep the contextual-status UX thin.
-- Acceptance is by real-run demonstration on a real repo, not by precision or
-  recall metrics. Quantitative quality measurement (eval corpus, false-positive
-  gates) is a deliberate later phase; implementation cost is not the constraint
-  here, getting the whole path real is.
+- Acceptance starts with real-run demonstration on model repos and is tracked by
+  `pnpm benchmark:deep <run-dir...>`. That benchmark is the current regression
+  gate for supported hypotheses, machine-readable candidate families, failed
+  coverage, and complete dependency-usage coverage where dependency components
+  exist. Precision/recall against lesson-level ground truth remains a separate
+  quality gate before claiming exhaustive model-repo coverage.
 
 ## Invariants
 
@@ -101,6 +103,10 @@ safety rules that shape the code now, not quality tuning.
   budget, Deep Static degrades to `partial`/`degraded` coverage with a reason and
   still returns the Quick Scan Fix Pack; it never hangs, OOMs the run, or drops
   the whole scan.
+- **Model batching, not model truncation.** Deep enrichment is split into
+  per-action and per-hypothesis batches with bounded concurrency. One slow,
+  failed, or invalid model response falls back only for that item; it does not
+  truncate the whole Deep Static result.
 - **Truthful wording.** Claims say "not observed on the analyzed path", never
   "absent" or "the app has no X" unless the graph proves that exact claim.
 - **No fabricated facts.** Backend output comes only from the real backend binary
@@ -120,12 +126,12 @@ vibeshield scan <github-url | local-git-root> --deep
   actions.rank                existing deterministic actions + verdict
   remediation.generate        existing Fix Pack wording, catalog fallback
   quick.graph-import          immutable Quick Scan findings -> graph nodes/edges
-  program-analysis.model      Atom builds CPG/IR and stores the full artifact
+  program-analysis.model      Joern builds CPG/IR and stores the full artifact
   program-analysis.extract    entities, boundaries, calls, flows, component usage
   security-graph.compose      one SecurityGraph projection in SQLite
   graph.correlate             direct finding context + hypothesis candidates
   hypotheses.static-validate  supported / contradicted / inconclusive
-  hypotheses.enrich           one bounded agent call, catalog fallback
+  hypotheses.enrich           per-hypothesis model batches, catalog fallback
   report.compose              one SecurityAssessment with deep sections
   report.render               report.json / .md / .html + short terminal receipt
 ```
@@ -157,27 +163,74 @@ and every displayed path step backed by graph evidence.
 
 Status:
 
-- [ ] **Gate 1 acceptance.** A live Microsandbox run on a real fixture or owner
+- [x] **Gate 1 acceptance.** A live Microsandbox run on a real fixture or owner
   repo shows one boundary-to-sink path in `report.html` and `report.json`;
   `deep-coverage` reports boundary, call graph, and flow coverage; the raw
-  Atom/CPG artifact is stored as a blob; no path step is created without a
+  Joern CPG artifact is stored as a blob; no path step is created without a
   `SecurityGraphEdge` and evidence.
-- [ ] **SecurityGraph contracts + storage.** In: Stage 1 domain contracts and
+  Evidence: current live `--deep` runs produced supported attack paths on
+  WebGoat (Java, run `20260625175941-5634a440`, 258 supported static
+  hypotheses, `data_flow` checked 129/222, `component_usage` checked 3086/3086,
+  `dependency_usage` checked 0/0, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
+  `20260625175828-bc7db68e`, 239, `data_flow` checked 103/162,
+  `component_usage` checked 2194/2194, `dependency_usage` checked 0/0,
+  `ci_iac` checked 18/18), Freeland (JS/TS, run `20260625164008-81d5eb5a`,
+  164, `data_flow` checked 62/380, `component_usage` checked 883/883,
+  `dependency_usage` checked 0/0, `ci_iac` checked 7/7), Vulnerable-Flask-App
+  (Python, run `20260625164510-1cef7e1e`, 32, `data_flow` checked 16/36,
+  `component_usage` checked 28/28, `dependency_usage` checked 0/0, `ci_iac`
+  checked 0/0), and go-dvwa (Go, run `20260625164651-d290e2b7`, 88 supported
+  static hypotheses including 82 dependency hypotheses, `data_flow` checked 3/3,
+  `component_usage` checked 44/44, `dependency_usage` checked 82/82, `ci_iac`
+  checked 2/2, language support partial because one PHP file is outside the
+  supported set).
+  The fresh matrix passes
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625175941-5634a440 /Users/dmitry/.vibeshield/runs/20260625175828-bc7db68e /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  The curated ground-truth slice now passes in normal benchmark mode with known
+  gaps surfaced: WebGoat covers 10/12 expectations and reports 2 known gaps
+  (missing function-level access control classification and dependency
+  reachability for the Vulnerable Components lesson); Juice Shop covers 11/17
+  expectations and reports 6 known gaps (NoSQL, XXE, file exposure, upload
+  validation, dependency reachability, and SSTi classification).
+  Current WebGoat and Juice Shop runs label external-input paths by sink class
+  (for example SQL injection, XXE, file access, redirect, server-side request
+  forgery, cross-site scripting, code execution, IDOR, CSRF, and access-control)
+  instead of one generic title.
+  Current benchmark scope and the next lesson-level recall gate are documented in
+  `docs/deep-static-training-benchmark.md`.
+  These runs use bounded Joern CPG flow seeds rather than whole-program
+  `joern-slice`, so the prior long "Tracing data flow" hang is no longer
+  reproduced. Each run has matching deterministic hypothesis enrichments for
+  every static hypothesis; model wording is applied as per-hypothesis batches
+  with bounded concurrency so one failed or invalid model response falls back
+  only for that hypothesis. Regular Fix Pack remediation wording uses the same
+  per-action bounded model-call shape. Markdown deduplicates owner-facing cards
+  while JSON keeps the full machine-readable set. Python-only Deep Static paths
+  now raise the final verdict to `not-ready-to-deploy` instead of a green result.
+  Dependency reachability is now executed and reported separately from component
+  import extraction; Trivy package metadata and package dependency graph edges
+  are projected into Component reachability without running package managers.
+- [x] **SecurityGraph contracts + storage.** In: Stage 1 domain contracts and
   SQLite store. Do: add `SecurityGraph`, `SecurityGraphNode`,
   `SecurityGraphEdge`, `SecurityFlow`, and `GraphCoverage` contracts; add SQLite
   tables for `nodes`, `edges`, `flows`, and `coverage`; validate ids, evidence
   refs, producer refs, path safety, and coverage states. Out: persisted graph
   projection and test fixtures. Done: a graph with a missing evidence id,
   outside-snapshot path, duplicate stable id, or dangling edge is rejected.
-- [ ] **ProgramAnalysisBackend port + Atom adapter.** In: source dir inside
+  Evidence: `tests/sqlite-state-store.test.ts` covers table migration,
+  deterministic record/load replacement, and invalid graph rejection;
+  `tests/scan-service.quick-scan.test.ts` proves a deep scan persists the
+  composed `SecurityGraph` into SQLite state.
+- [x] **ProgramAnalysisBackend port + Joern adapter.** In: source dir inside
   Microsandbox and the manifest. Do: define `ProgramAnalysisBackend`
   (`buildModel`, `extractEntities`, `extractBoundaries`, `extractCallEdges`,
-  `extractFlows`, `extractComponentUsage`, `reportCoverage`); implement the Atom
-  adapter as a thin argv/parser wrapper; store the full CPG/IR as a CAS artifact.
+  `extractFlows`, `extractComponentUsage`, `reportCoverage`); implement the Joern
+  adapter as a thin argv/parser wrapper over `joern-parse` and VibeShield-owned
+  extraction; store the full CPG/IR as a CAS artifact.
   Out: raw backend artifact, normalized extraction artifacts, backend coverage.
-  Done: a live run proves Atom ran in the sandbox, produced parseable output, and
-  fails clearly instead of inventing entities when Atom is unavailable.
-- [ ] **Code entities, boundaries, calls, and flows.** In: Atom extraction output
+  Done: a live run proves Joern ran in the sandbox, produced parseable output, and
+  fails clearly instead of inventing entities when Joern is unavailable.
+- [x] **Code entities, boundaries, calls, and flows.** In: Joern extraction output
   plus manifest file hashes. Do: normalize functions, methods, modules,
   boundaries, sources, sinks, call edges, and cross-file flows into graph nodes
   and edges; record observed controls such as allowlists, auth guards, validators,
@@ -185,12 +238,16 @@ Status:
   graph projection with boundary, call, flow, source, sink, and control facts.
   Done: the owner can inspect one route -> handler -> helper -> sink path and one
   negative fixture where a missing edge keeps the path out of the report.
-- [ ] **Deep coverage truth.** In: manifest, inventory, backend coverage, and
+- [x] **Deep coverage truth.** In: manifest, inventory, backend coverage, and
   parser outcomes. Do: compute coverage for boundaries, call graph, data flows,
   component usage, CI/IaC context, and unsupported languages; mark `checked`,
   `skipped`, `failed`, `degraded`, or `partial` with reasons. Out:
   `deepCoverage` in SQLite and the report export. Done: killing the backend marks
   Deep Static incomplete while preserving the Quick Scan Fix Pack.
+  Evidence: `tests/deep-coverage.test.ts` covers stable coverage composition and
+  backend failure states; `tests/scan-service.quick-scan.test.ts` covers
+  preserving Quick Scan actions when Deep Static fails and persisting
+  `deepCoverage` into SQLite state.
 
 #### Gate 2 - Quick Scan findings become graph context
 
@@ -203,10 +260,11 @@ Status:
 
 - [ ] **Gate 2 acceptance.** A live fixture matrix shows Quick Scan findings in
   the normal Fix Pack and in the graph context; a secret remains a direct "Fix
-  now" action; a dependency finding receives `present`, `imported`, `used`, or
+  now" action; a dependency finding receives `present`,
+  `dependency_graph_reachable`, `imported`, `used`, or
   `reachable_from_boundary`; a CI or IaC finding contributes context without
   duplicating remediation actions.
-- [ ] **Quick Scan graph import.** In: Stage 1 `Evidence`, `Finding`,
+- [x] **Quick Scan graph import.** In: Stage 1 `Evidence`, `Finding`,
   `FindingCluster`, SBOM, dependency, GitHub Actions, and IaC outputs. Do:
   import `Finding`, `Secret`, `VulnerableComponent`, `CIWeakness`,
   `InfraWeakness`, `BuildStep`, and `Resource` nodes; connect them through
@@ -214,27 +272,39 @@ Status:
   edges. Out: graph nodes/edges for every Quick Scan finding. Done: every
   imported finding resolves back to the immutable Stage 1 finding id and evidence
   ids.
-- [ ] **Component usage + dependency reachability.** In: SBOM, dependency scanner
+  Evidence: `tests/quick-scan-graph-import.test.ts` covers immutable finding,
+  category, cluster, validation, and deterministic import.
+- [x] **Component usage + dependency reachability.** In: SBOM, dependency scanner
   output, import/call graph facts, and optional affected-symbol data when present.
-  Do: compute reachability levels `present`, `imported`, `used`,
-  `reachable_from_boundary`, and `affected_symbol_reachable`; store unknown
-  affected-symbol reachability as unknown, not as no. Out:
-  `ComponentReachability` records and graph edges from code to components. Done:
-  a dependency present only in the lockfile does not get boundary reachability,
-  while an imported package used on a public path does.
-- [ ] **CI/IaC context projection.** In: actionlint, zizmor, trivy config,
+  Do: compute reachability levels `present`, `dependency_graph_reachable`,
+  `imported`, `used`, `reachable_from_boundary`, and
+  `affected_symbol_reachable`; store unknown affected-symbol reachability as
+  unknown, not as no. Out: `ComponentReachability` records and graph edges from
+  code or package manifests to components. Done: a dependency present only in
+  the lockfile can receive package-graph reachability without boundary
+  reachability, while an imported package used on a public path is promoted to
+  boundary reachability.
+  Evidence: `tests/component-reachability.test.ts` covers reachability levels and
+  graph edges; `tests/scan-service.quick-scan.test.ts` covers package dependency
+  graph context without mutating Quick Scan findings.
+- [x] **CI/IaC context projection.** In: actionlint, zizmor, trivy config,
   workflow files, Dockerfiles, deployment manifests, and graph boundaries. Do:
   normalize CI triggers, build steps, action pins, token permissions, artifact
   writes, public ingress, and exposed resources into graph nodes and edges. Out:
   CI/IaC graph context linked to findings and boundaries. Done: an unpinned action
   on `pull_request` with write-capable token and artifact publication forms a
   traversable graph path.
-- [ ] **Finding contextual assessment.** In: immutable findings plus graph facts.
+  Evidence: `tests/ci-iac-context.test.ts` covers workflow trigger, unpinned
+  action, write token, artifact publication, IaC exposure, validation, and
+  deterministic projection.
+- [x] **Finding contextual assessment.** In: immutable findings plus graph facts.
   Do: compute `standalone`, `corroborated`, `weakened`, `contradicted`, and
   `linked_to_hypothesis`; keep original findings unchanged and write separate
   contextual records. Out: contextual assessment per finding. Done: a report can
   show "finding corroborated by reachable code path" without changing the
   finding's original severity or fingerprint.
+  Evidence: `tests/finding-context-assessment.test.ts` covers all context
+  statuses, immutable findings, invalid refs, and deterministic ordering.
 
 ### Stage 2B - Static hypotheses and owner-facing result
 
@@ -255,33 +325,45 @@ Status:
   dependency usage path, CI supply-chain path, and secret impact chain; every
   hypothesis cites bounded graph paths and coverage; a control or missing edge
   fixture blocks promotion.
-- [ ] **Correlation rule engine.** In: `SecurityGraph`, contextual findings,
+- [x] **Correlation rule engine.** In: `SecurityGraph`, contextual findings,
   coverage, and rule definitions. Do: implement deterministic rule evaluation
   with bounded path search, rule-specific required edge types, required node
   kinds, observed controls, contradiction checks, and max path length. Out:
   `HypothesisCandidate`s with supporting and contradicting graph refs. Done: the
   same graph produces stable candidates in stable order without any model call.
-- [ ] **Five rule families.** In: rule engine and graph facts. Do: implement:
+  Evidence: `tests/correlation-rule-engine.test.ts` covers bounded path search,
+  required edge kinds, contradiction capture, stable ids, and sink taxonomy.
+- [x] **Five rule families.** In: rule engine and graph facts. Do: implement:
   external input -> dangerous operation; Quick SAST finding -> reachable path;
   vulnerable component -> imported/used/reachable path; untrusted CI trigger ->
   mutable build dependency -> privileged credential -> artifact or repository
   write; secret finding -> configuration reference -> privileged integration ->
   exposed service or build job. Out: candidate hypotheses for each family. Done:
   each rule has a positive and negative fixture that fails if evidence is guessed.
-- [ ] **Static hypothesis validator.** In: candidates, graph paths, observed
+  Evidence: `tests/stage2-hypothesis-rules.test.ts` covers positive and negative
+  fixtures for all five families, context linking, determinism, and candidate
+  bounds; `tests/deep-static-gate3.acceptance.test.ts` exercises all families
+  together.
+- [x] **Static hypothesis validator.** In: candidates, graph paths, observed
   controls, contradictions, and coverage. Do: assign `candidate`,
   `statically_supported`, `statically_contradicted`, or `inconclusive`; compute
   static confidence from evidence strength and coverage, not from model wording.
   Out: validated `StaticHypothesis` records. Done: wording says "destination
   allowlist was not observed on the analyzed path", never "the app has no
   allowlist" unless the graph proves that exact claim.
-- [ ] **Validation recipes.** In: validated hypotheses, boundaries, required
+  Evidence: `tests/static-hypothesis-validator.test.ts` covers supported,
+  contradicted, inconclusive, candidate-only, invalid refs, conservative wording,
+  and determinism.
+- [x] **Validation recipes.** In: validated hypotheses, boundaries, required
   principals/resources, and observed test factories/seeds/auth fixtures when
   present. Do: write structured future runtime validation recipes with required
   fixtures, steps, expected result, and safety notes. Out: `ValidationRecipe`
   records linked to hypotheses. Done: a BOLA-like candidate can describe
   principal A/B and resource ownership requirements without claiming runtime
   confirmation.
+  Evidence: `tests/validation-recipes.test.ts` covers recipe composition,
+  fixture hints, contradicted-hypothesis suppression, validation, and
+  determinism.
 
 #### Gate 4 - enriched report and usable `--deep` UX
 
@@ -297,39 +379,58 @@ Status:
   finding ids, hypothesis ids, static statuses, action candidates, priorities,
   and verdict; the model only improves explanation, remediation wording, prompts,
   and recipes; invalid model output falls back to deterministic templates.
-- [ ] **hypotheses.enrich.** In: top bounded `StaticHypothesis` records, graph
-  paths, Quick Scan findings, evidence snippets, observed controls, coverage
-  gaps, and catalog entries. Do: make one bounded model call through the existing
-  model-provider port; validate ids, graph refs, paths, and schema; fall back to
-  deterministic templates on missing key, timeout, invalid JSON, or semantic
-  failure. Out: enriched attack description, assumptions, impact, remediation,
-  coding-agent prompt, acceptance criteria, and validation recipe text. Done: the
-  model cannot introduce a new path, finding, status, priority, or verdict.
-- [ ] **Action grouping.** In: direct findings, contextual assessments,
+- [x] **hypotheses.enrich.** In: bounded `StaticHypothesis` batches, graph paths,
+  Quick Scan findings, evidence snippets, observed controls, coverage gaps, and
+  catalog entries. Do: send every selected static hypothesis through small
+  model batches with bounded concurrency; validate ids, graph refs, paths, and
+  schema; fall back to deterministic templates for that hypothesis on missing
+  key, invalid JSON, transport failure, or semantic failure. Out: enriched
+  attack description, assumptions, impact, remediation, coding-agent prompt,
+  acceptance criteria, and validation recipe text. Done: the model cannot
+  introduce a new path, finding, status, priority, or verdict, and the default
+  path does not truncate the Deep Static hypothesis set.
+  Evidence: `tests/hypothesis-enrichment.test.ts` covers catalog fallback, valid
+  model copy, invalid model output fallback, validation recipe input, and
+  deterministic output; `tests/scan-service.quick-scan.test.ts` covers
+  per-hypothesis batching and invalid model fallback through the scan path.
+- [x] **Action grouping.** In: direct findings, contextual assessments,
   hypotheses, and remediation keys. Do: group direct findings and linked
   hypotheses into one owner-facing remediation action when they describe the same
   work; preserve separate machine-readable ids. Out: report action groups without
   duplicate owner work. Done: a secret action can include impact context while
   still leading with "rotate the key".
-- [ ] **Report contracts and renderers.** In: `SecurityAssessment`,
+  Evidence: `tests/deep-action-grouping.test.ts` covers direct-led groups,
+  context-only links, hypothesis-only groups, contradicted suppression,
+  validation, and deterministic ids.
+- [x] **Report contracts and renderers.** In: `SecurityAssessment`,
   `StaticHypothesis`, `FindingContextAssessment`, `DeepCoverage`, and enriched
   text. Do: extend `report.json`, Markdown, and HTML with Fix now, Likely attack
   paths, Deep analysis coverage, Quick finding context statuses, and validation
   recipes. Out: `report.json`, `report.md`, and `report.html` with deep sections.
   Done: the terminal stays short, while HTML/Markdown show paths and recipes
   without requiring the owner to understand graph tables.
-- [ ] **CLI flag and degradation.** In: existing scan command and stage registry.
+  Evidence: `tests/deep-report.test.ts`, `tests/terminal-reporting.test.ts`, and
+  `tests/scan-service.quick-scan.test.ts` cover deep sections in JSON/Markdown/HTML
+  and a short terminal summary.
+- [x] **CLI flag and degradation.** In: existing scan command and stage registry.
   Do: add `--deep`; when Deep Static fails, keep completed Quick Scan results,
   mark Deep Static coverage failed or degraded, and never present a backend error
   as a supported hypothesis. Out: usable CLI and truthful failure behavior. Done:
   the owner can run Quick Scan normally, opt into Deep Static, and see useful
   partial output when the deep backend fails.
-- [ ] **repository-map.json derived view.** In: `SecurityGraph` and coverage. Do:
+  Evidence: `tests/scan-args.test.ts` covers `--deep` parsing and Quick Scan as
+  the default; `tests/scan-service.quick-scan.test.ts` covers backend failure and
+  data-flow timeout degradation while keeping Quick Scan output.
+- [x] **repository-map.json derived view.** In: `SecurityGraph` and coverage. Do:
   render a compact human-oriented map view from graph facts only; include
   boundaries, key code entities, integrations, data stores, CI/IaC resources,
   coverage, and fact gaps. Out: `repository-map.json` as a derived artifact.
   Done: deleting the derived file and re-rendering it from SQLite produces the
   same view for the same run.
+  Evidence: `tests/repository-map.test.ts` covers grouping, deterministic output,
+  and fact gaps; `tests/scan-service.quick-scan.test.ts` deletes
+  `repository-map.json`, reloads `SecurityGraph` from SQLite, re-renders, and
+  compares the same view.
 
 ## Contracts
 
@@ -361,9 +462,9 @@ coherent.
 - **Boundary**: `id`, `boundaryType`, `routeOrName`, `method?`, `handlerNodeId?`,
   `sourceNodeIds`, `evidenceIds`, `coverageState`.
 - **ComponentReachability**: `componentId`, `packageName`, `version?`,
-  `findingIds`, `level` (`present`, `imported`, `used`,
-  `reachable_from_boundary`, `affected_symbol_reachable`), `pathEdgeIds`,
-  `affectedSymbol?`, `evidenceIds`, `coverageState`.
+  `findingIds`, `level` (`present`, `dependency_graph_reachable`, `imported`,
+  `used`, `reachable_from_boundary`, `affected_symbol_reachable`),
+  `pathEdgeIds`, `affectedSymbol?`, `evidenceIds`, `coverageState`.
 - **FindingContextAssessment**: `findingId`, `status` (`standalone`,
   `corroborated`, `weakened`, `contradicted`, `linked_to_hypothesis`),
   `graphNodeIds`, `graphEdgeIds`, `hypothesisIds`, `reason`, `coverageState`.
@@ -376,30 +477,31 @@ coherent.
 - **ValidationRecipe**: `id`, `hypothesisId`, `requiredFixtures`, `steps`,
   `expectedResult`, `safetyNotes`, `materializationHints`, `knownGaps`.
 - **DeepSecurityAssessment extension**: `deepCoverage`,
-  `findingContextAssessments`, `staticHypotheses`, `validationRecipes`,
-  `repositoryMapArtifactRef?`, `limitations`.
+  `findingContextAssessments`, `hypothesisCandidates`, `staticHypotheses`,
+  `validationRecipes`, `repositoryMapArtifactRef?`, `limitations`.
 - **Verdict and ranking**: Quick Scan verdict and blocking direct findings remain
   rule-computed before model enrichment. Static hypotheses can increase action
   priority only through deterministic rule outputs and recorded graph evidence.
-- **hypotheses.enrich**: one bounded model call over OpenRouter through the
-  existing model-provider port; input is bounded hypotheses, graph paths, evidence
-  snippets, controls, coverage gaps, and catalog entries; output is validated
-  structured JSON. Invalid output falls back to deterministic templates.
+- **hypotheses.enrich**: bounded static-hypothesis model batches over OpenRouter
+  through the existing model-provider port; each hypothesis input remains
+  bounded to its graph path, evidence snippets, controls, coverage gaps, and
+  catalog entry; output is validated structured JSON. Invalid output falls back
+  to deterministic templates for that hypothesis.
 - **Semantic validators**: graph refs resolve; evidence ids resolve; paths stay
   inside the snapshot; line ranges are valid; graph paths contain real connected
   edges; every hypothesis references a rule id; every supported hypothesis has at
   least one bounded path or CI/IaC chain; contradictions are displayed when they
   determine status.
 - **Storage**: SQLite stores graph projection and hypothesis records. Blob store
-  stores raw Atom/CPG artifact, redacted backend logs, repository-map derived
+  stores raw Joern CPG artifact, redacted backend logs, repository-map derived
   view, and rendered reports. The source tree itself is still not stored.
 
 ## Out of scope
 
 Not in Stage 2 (tracked in the roadmap, not here): resume; framework-specific
 authorization and ORM/data-access packs; runtime validation that materializes
-validation recipes and uses the `confirmed` status; a second backend (Joern)
-behind `ProgramAnalysisBackend`; richer affected-symbol reachability from
+validation recipes and uses the `confirmed` status; a second backend behind
+`ProgramAnalysisBackend`; richer affected-symbol reachability from
 advisory databases; framework query packs; offline/no-egress isolation and SaaS
 storage hardening; PDF report, private repos, zip upload, GitHub App, web UI, and
 continuous monitoring.
@@ -408,8 +510,6 @@ continuous monitoring.
 
 - Which real repo or fixture proves Gate 1 with a boundary -> cross-file call ->
   dangerous sink path.
-- Exact Atom command, version pin, output format, and raw artifact shape to store
-  as CAS proof.
 - Which fixture proves all five deterministic rule families without turning the
   test suite into a fake scanner.
 - How much of `repository-map.json` should be owner-visible versus kept as a

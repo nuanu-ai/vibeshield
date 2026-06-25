@@ -55,6 +55,7 @@ interface HypothesisContext {
 }
 
 const CORROBORATING_COMPONENT_LEVELS = new Set<ComponentReachability["level"]>([
+  "dependency_graph_reachable",
   "imported",
   "used",
   "reachable_from_boundary",

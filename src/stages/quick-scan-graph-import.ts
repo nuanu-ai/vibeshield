@@ -192,6 +192,7 @@ function addSubjectNode(
 ): SecurityGraphNode {
   const location = finding.locations[0];
   const subject = subjectFor(finding);
+  const metadata = componentMetadataFor(finding);
   return addNode(builder, graphVersion, {
     kind: subject.kind,
     stableKey: `QuickScanSubject:${finding.category}:${finding.id}`,
@@ -209,6 +210,7 @@ function addSubjectNode(
       category: finding.category,
       sourceTool: finding.sourceTool,
       ruleId: finding.ruleId,
+      ...metadata,
     },
     evidenceIds: finding.evidenceIds,
     producerVersion: graphVersion,
@@ -234,8 +236,8 @@ function subjectFor(finding: Finding): {
       return {
         kind: "Component",
         recordType: "component",
-        label: finding.ruleId,
-        symbol: finding.ruleId,
+        label: componentPackageName(finding) ?? finding.ruleId,
+        symbol: componentPackageName(finding) ?? finding.ruleId,
       };
     case "github-action":
       return {
@@ -259,6 +261,29 @@ function subjectFor(finding: Finding): {
         symbol: finding.ruleId,
       };
   }
+}
+
+function componentMetadataFor(finding: Finding): Readonly<Record<string, string>> {
+  if (finding.category !== "dependency" && finding.category !== "sbom") {
+    return {};
+  }
+  const metadata: Record<string, string> = {};
+  const packageName = componentPackageName(finding);
+  if (packageName !== undefined) {
+    metadata.packageName = packageName;
+  }
+  if (finding.metadata?.installedVersion !== undefined) {
+    metadata.version = finding.metadata.installedVersion;
+  }
+  if (finding.metadata?.fixedVersion !== undefined) {
+    metadata.fixedVersion = finding.metadata.fixedVersion;
+  }
+  return metadata;
+}
+
+function componentPackageName(finding: Finding): string | undefined {
+  const packageName = finding.metadata?.packageName;
+  return packageName === undefined || packageName.trim() === "" ? undefined : packageName;
 }
 
 function addCluster(

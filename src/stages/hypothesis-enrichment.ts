@@ -36,9 +36,18 @@ export interface EnrichStaticHypothesesInput {
   readonly findings?: ReadonlyArray<Finding>;
   readonly evidence?: ReadonlyArray<Evidence>;
   readonly maxHypotheses?: number;
+  readonly onModelProgress?: (progress: EnrichStaticHypothesesProgress) => void;
 }
 
-const DEFAULT_MAX_HYPOTHESES = 5;
+export interface EnrichStaticHypothesesProgress {
+  readonly completed: number;
+  readonly total: number;
+  readonly completedBatches: number;
+  readonly totalBatches: number;
+}
+
+const MODEL_HYPOTHESIS_BATCH_SIZE = 2;
+const MODEL_HYPOTHESIS_CONCURRENCY = 2;
 const MAX_GRAPH_REFS_PER_HYPOTHESIS = 20;
 const MAX_EVIDENCE_SNIPPETS_PER_HYPOTHESIS = 12;
 const MODEL_SNIPPET_CHAR_LIMIT = 500;
@@ -89,19 +98,22 @@ const PROHIBITED_MODEL_FIELDS = new Set([
 export async function enrichStaticHypotheses(
   input: EnrichStaticHypothesesInput,
 ): Promise<HypothesisEnrichment[]> {
-  const maxHypotheses = positiveInt(input.maxHypotheses ?? DEFAULT_MAX_HYPOTHESES, "maxHypotheses");
+  const maxHypotheses =
+    input.maxHypotheses === undefined
+      ? undefined
+      : positiveInt(input.maxHypotheses, "maxHypotheses");
   const graphNodeIds = new Set(input.graph.nodes.map((node) => node.id));
   const graphEdgeIds = new Set(input.graph.edges.map((edge) => edge.id));
   const candidates = validateHypothesisCandidates(input.candidates, { graphNodeIds, graphEdgeIds });
   const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  const staticHypotheses = selectHypotheses(
-    validateStaticHypothesisRecords(input.staticHypotheses, {
-      candidateIds: candidates.map((candidate) => candidate.id),
-    }),
-    maxHypotheses,
-  );
+  const allStaticHypotheses = validateStaticHypothesisRecords(input.staticHypotheses, {
+    candidateIds: candidates.map((candidate) => candidate.id),
+  });
+  const modelStaticHypotheses = selectHypotheses(allStaticHypotheses, maxHypotheses);
+  const allHypothesisIds = allStaticHypotheses.map((hypothesis) => hypothesis.id);
+  const modelHypothesisIds = modelStaticHypotheses.map((hypothesis) => hypothesis.id);
   const validationRecipes = validateValidationRecipes(input.validationRecipes ?? [], {
-    hypothesisIds: input.staticHypotheses.map((hypothesis) => hypothesis.id),
+    hypothesisIds: allHypothesisIds,
   });
   const recipesByHypothesisId = new Map(
     validationRecipes.map((recipe) => [recipe.hypothesisId, recipe]),
@@ -109,29 +121,82 @@ export async function enrichStaticHypotheses(
   const nodesById = new Map(input.graph.nodes.map((node) => [node.id, node]));
   const evidenceById = new Map((input.evidence ?? []).map((evidence) => [evidence.id, evidence]));
   const fallback = validateHypothesisEnrichments(
-    staticHypotheses.map((hypothesis) =>
+    allStaticHypotheses.map((hypothesis) =>
       fallbackEnrichment(hypothesis, candidateById, recipesByHypothesisId, nodesById, evidenceById),
     ),
-    { hypothesisIds: staticHypotheses.map((hypothesis) => hypothesis.id) },
+    { hypothesisIds: allHypothesisIds },
+  );
+  const fallbackByHypothesisId = new Map(
+    fallback.map((record) => [record.hypothesisId, record] as const),
+  );
+  const modelFallback = validateHypothesisEnrichments(
+    modelStaticHypotheses.map((hypothesis) => {
+      const record = fallbackByHypothesisId.get(hypothesis.id);
+      if (record === undefined) {
+        throw new Error(`missing catalog enrichment for hypothesis ${hypothesis.id}`);
+      }
+      return record;
+    }),
+    { hypothesisIds: modelHypothesisIds },
   );
 
-  if (fallback.length === 0 || !(await modelIsAvailable(input.model))) {
+  if (
+    fallback.length === 0 ||
+    modelFallback.length === 0 ||
+    !(await modelIsAvailable(input.model))
+  ) {
     return fallback;
   }
 
-  const modelInput = modelInputFor({
-    repositoryName: input.repositoryName,
-    staticHypotheses,
-    candidateById,
-    graph: input.graph,
-    validationRecipes: recipesByHypothesisId,
-    findings: input.findings ?? [],
-    evidence: input.evidence ?? [],
-    catalogEnrichments: new Map(fallback.map((record) => [record.hypothesisId, record])),
+  const modelInputs = chunks(modelStaticHypotheses, MODEL_HYPOTHESIS_BATCH_SIZE).map((batch) =>
+    modelInputFor({
+      repositoryName: input.repositoryName,
+      staticHypotheses: batch,
+      candidateById,
+      graph: input.graph,
+      validationRecipes: recipesByHypothesisId,
+      findings: input.findings ?? [],
+      evidence: input.evidence ?? [],
+      catalogEnrichments: fallbackByHypothesisId,
+    }),
+  );
+  let completedModelHypotheses = 0;
+  let completedModelBatches = 0;
+  input.onModelProgress?.({
+    completed: completedModelHypotheses,
+    total: modelStaticHypotheses.length,
+    completedBatches: completedModelBatches,
+    totalBatches: modelInputs.length,
   });
-  const modelOutput = await input.model.enrichHypotheses(modelInput).catch(() => null);
-  const modelEnrichments = validateModelOutput(modelOutput, fallback);
-  if (modelEnrichments === null) {
+  const batchResults = await mapWithConcurrency(
+    modelInputs,
+    MODEL_HYPOTHESIS_CONCURRENCY,
+    async (modelInput) => {
+      try {
+        return await enrichModelInput(input.model, modelInput, fallbackByHypothesisId);
+      } finally {
+        completedModelHypotheses += modelInput.hypotheses.length;
+        completedModelBatches += 1;
+        input.onModelProgress?.({
+          completed: completedModelHypotheses,
+          total: modelStaticHypotheses.length,
+          completedBatches: completedModelBatches,
+          totalBatches: modelInputs.length,
+        });
+      }
+    },
+  );
+  const modelEnrichments = new Map<string, ModelHypothesisEnrichment>();
+  for (const batchResult of batchResults) {
+    if (batchResult === null) {
+      continue;
+    }
+    for (const [hypothesisId, enrichment] of batchResult) {
+      modelEnrichments.set(hypothesisId, enrichment);
+    }
+  }
+
+  if (modelEnrichments.size === 0) {
     return fallback;
   }
 
@@ -139,7 +204,7 @@ export async function enrichStaticHypotheses(
     fallback.map((catalogRecord) => {
       const modelRecord = modelEnrichments.get(catalogRecord.hypothesisId);
       if (modelRecord === undefined) {
-        throw new Error(`missing model enrichment for hypothesis ${catalogRecord.hypothesisId}`);
+        return catalogRecord;
       }
       return {
         ...catalogRecord,
@@ -153,7 +218,7 @@ export async function enrichStaticHypotheses(
         validationRecipeText: modelRecord.validationRecipeText,
       };
     }),
-    { hypothesisIds: staticHypotheses.map((hypothesis) => hypothesis.id) },
+    { hypothesisIds: allHypothesisIds },
   );
 }
 
@@ -258,11 +323,59 @@ function fallbackEnrichment(
   };
 }
 
+async function enrichModelInput(
+  model: ModelProvider,
+  modelInput: ModelHypothesisEnrichBatchInput,
+  fallbackByHypothesisId: ReadonlyMap<string, HypothesisEnrichment>,
+): Promise<Map<string, ModelHypothesisEnrichment> | null> {
+  const batchFallback = fallbackForModelInput(modelInput, fallbackByHypothesisId);
+  const batchResult = await callAndValidateModel(model, modelInput, batchFallback);
+  if (batchResult !== null || modelInput.hypotheses.length <= 1) {
+    return batchResult;
+  }
+
+  const out = new Map<string, ModelHypothesisEnrichment>();
+  for (const hypothesis of modelInput.hypotheses) {
+    const singleInput = { ...modelInput, hypotheses: [hypothesis] };
+    const singleFallback = fallbackForModelInput(singleInput, fallbackByHypothesisId);
+    const singleResult = await callAndValidateModel(model, singleInput, singleFallback);
+    if (singleResult === null) {
+      continue;
+    }
+    for (const [hypothesisId, enrichment] of singleResult) {
+      out.set(hypothesisId, enrichment);
+    }
+  }
+  return out.size === 0 ? null : out;
+}
+
+function fallbackForModelInput(
+  modelInput: ModelHypothesisEnrichBatchInput,
+  fallbackByHypothesisId: ReadonlyMap<string, HypothesisEnrichment>,
+): HypothesisEnrichment[] {
+  return modelInput.hypotheses.map((hypothesis) => {
+    const record = fallbackByHypothesisId.get(hypothesis.hypothesisId);
+    if (record === undefined) {
+      throw new Error(`missing catalog enrichment for hypothesis ${hypothesis.hypothesisId}`);
+    }
+    return record;
+  });
+}
+
+async function callAndValidateModel(
+  model: ModelProvider,
+  modelInput: ModelHypothesisEnrichBatchInput,
+  fallback: ReadonlyArray<HypothesisEnrichment>,
+): Promise<Map<string, ModelHypothesisEnrichment> | null> {
+  const modelOutput = await model.enrichHypotheses(modelInput).catch(() => null);
+  return validateModelOutput(modelOutput, fallback);
+}
+
 function validateModelOutput(
   modelOutput: ReadonlyArray<ModelHypothesisEnrichment> | null,
   fallback: ReadonlyArray<HypothesisEnrichment>,
 ): Map<string, ModelHypothesisEnrichment> | null {
-  if (modelOutput === null || modelOutput.length !== fallback.length) {
+  if (modelOutput === null) {
     return null;
   }
   const expectedIds = new Set(fallback.map((record) => record.hypothesisId));
@@ -271,20 +384,20 @@ function validateModelOutput(
 
   for (const record of modelOutput) {
     if (!isRecord(record) || hasProhibitedFields(record)) {
-      return null;
+      continue;
     }
     if (!expectedIds.has(record.hypothesisId) || seenIds.has(record.hypothesisId)) {
-      return null;
+      continue;
     }
     const sanitized = sanitizeModelEnrichment(record);
     if (sanitized === null) {
-      return null;
+      continue;
     }
     seenIds.add(record.hypothesisId);
     out.set(record.hypothesisId, sanitized);
   }
 
-  return seenIds.size === expectedIds.size ? out : null;
+  return out.size === 0 ? null : out;
 }
 
 function sanitizeModelEnrichment(
@@ -327,16 +440,15 @@ function sanitizeModelEnrichment(
 
 function selectHypotheses(
   hypotheses: ReadonlyArray<StaticHypothesis>,
-  maxHypotheses: number,
+  maxHypotheses: number | undefined,
 ): StaticHypothesis[] {
-  return [...hypotheses]
-    .sort(
-      (a, b) =>
-        statusRank(b.status) - statusRank(a.status) ||
-        b.staticConfidence - a.staticConfidence ||
-        a.id.localeCompare(b.id),
-    )
-    .slice(0, maxHypotheses);
+  const sorted = [...hypotheses].sort(
+    (a, b) =>
+      statusRank(b.status) - statusRank(a.status) ||
+      b.staticConfidence - a.staticConfidence ||
+      a.id.localeCompare(b.id),
+  );
+  return maxHypotheses === undefined ? sorted : sorted.slice(0, maxHypotheses);
 }
 
 function statusRank(status: StaticHypothesis["status"]): number {
@@ -494,7 +606,7 @@ function impactText(family: string, hypothesis: StaticHypothesis): string {
     case "sast_reachable_path":
       return "A direct static finding appears reachable from analyzed application entry points.";
     case "dependency_usage_path":
-      return "A vulnerable component is connected to observed code usage and may matter more than a presence-only dependency finding.";
+      return "A vulnerable component is connected to observed code usage or the package dependency graph and may matter more than a presence-only dependency finding.";
     case "ci_supply_chain_path":
       return "Build automation may reach mutable or privileged resources and could affect release integrity.";
     case "secret_impact_chain":
@@ -527,8 +639,8 @@ const FAMILY_COPY: Readonly<Record<string, FamilyCopy>> = {
   },
   dependency_usage_path: {
     concern:
-      "A vulnerable dependency is actually used by this code, not just listed in the manifest.",
-    fix: "Upgrade or replace the affected dependency, or stop calling the vulnerable API at these call sites.",
+      "A vulnerable dependency is connected to this project by an observed import, use site, or package dependency graph path.",
+    fix: "Upgrade or replace the affected dependency, or remove the dependency graph path that brings it into the project.",
   },
   ci_supply_chain_path: {
     concern: "A build or CI step can reach privileged or mutable resources.",
@@ -719,6 +831,26 @@ function positiveInt(value: number, label: string): number {
     throw new Error(`${label} must be a positive integer`);
   }
   return value;
+}
+
+function chunks<T>(values: ReadonlyArray<T>, size: number): T[][] {
+  const out: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    out.push(values.slice(index, index + size));
+  }
+  return out;
+}
+
+async function mapWithConcurrency<T, R>(
+  values: ReadonlyArray<T>,
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = [];
+  for (let index = 0; index < values.length; index += concurrency) {
+    out.push(...(await Promise.all(values.slice(index, index + concurrency).map(mapper))));
+  }
+  return out;
 }
 
 function uniqueStable(values: ReadonlyArray<string>): string[] {

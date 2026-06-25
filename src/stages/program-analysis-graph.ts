@@ -30,14 +30,14 @@ export interface ComposeProgramAnalysisGraphInput {
   readonly createdAt: string;
 }
 
-type AtomObject = Readonly<Record<string, unknown>>;
+type ProgramAnalysisObject = Readonly<Record<string, unknown>>;
 
 interface ObservedEntity {
   readonly fullName: string;
   readonly symbol: string;
   readonly repoPath: string;
   readonly lineRange: LineRange;
-  readonly slice: AtomObject;
+  readonly slice: ProgramAnalysisObject;
   readonly evidenceId: string;
   readonly producerVersion: string;
 }
@@ -67,18 +67,74 @@ interface GraphBuilder {
   readonly edgesByStableKey: Map<string, SecurityGraphEdge>;
 }
 
-const PRODUCER = "atom";
+const PRODUCER = "joern";
 const DEFAULT_CONFIDENCE = 0.9;
-const SINK_NAMES = new Set([
-  "fetch",
-  "axios",
-  "axios.get",
-  "http.get",
-  "https.get",
-  "child_process.exec",
+const MAX_SECURITY_FLOW_PATH_LENGTH = 6;
+const SQL_METHOD_NAMES = new Set([
+  "createnativequery",
+  "createquery",
+  "createstatement",
+  "execute",
+  "executebatch",
+  "executecontext",
+  "executelargeupdate",
+  "executemany",
+  "executequery",
+  "executeupdate",
   "exec",
-  "eval",
+  "execcontext",
+  "preparecall",
+  "preparestatement",
+  "query",
+  "querycontext",
+  "queryrow",
+  "queryrowcontext",
+  "update",
 ]);
+const SQL_TEXT_PATTERN =
+  /\b(?:select\s+.+\s+from|insert\s+into|update\s+[\w".`[\]]+\s+set|delete\s+from|drop\s+table|alter\s+table|create\s+table)\b/;
+const HTML_TEXT_PATTERN =
+  /(?:<\s*(?:script|iframe|img|svg|a|div|span|p|br|hr|input|textarea|template)\b|&lt;\s*(?:script|iframe|img|svg|a|div|span|p|br|hr|input|textarea|template)\b|\[(?:innerHTML|outerHTML)\])/i;
+const RESOURCE_IDENTIFIER_PATTERN =
+  /\b(?:user|account|profile|basket|cart|order|customer|tenant|owner|role|admin|invoice|document|record|resource)[\w$-]*(?:id|name|email|hash)?\b|\b(?:id|uid|bid|cid|email|username|orderid|userid|basketid|user_id|basket_id|order_id)\b/i;
+const ACCESS_CONTROL_RESOURCE_PATTERN =
+  /\b(?:findone|findall|findbypk|findbyid|findbyuserid|findbyusername|find|update|destroy|delete|remove|save|insert|create|collection\.find|collection\.findone|model\.find|new\s+[A-Z][\w$]*(?:Profile|Account|Basket|Order|User|Record|Resource)|UserProfile\s*\()/i;
+const CSRF_STATE_CHANGE_PATTERN =
+  /\b(?:setvalue|put|save|update|destroy|delete|remove|insert|create|persist|merge|flush|commit|push|add|send|post|write|collection\.update|collection\.insert|model\.create|model\.update)\b/i;
+const FILE_METHOD_NAMES = new Set([
+  "create",
+  "copy",
+  "delete",
+  "deleteifexists",
+  "open",
+  "move",
+  "newbufferedreader",
+  "newbufferedwriter",
+  "newinputstream",
+  "newoutputstream",
+  "readfile",
+  "readallbytes",
+  "readalllines",
+  "readstring",
+  "write",
+  "writefile",
+  "writestring",
+]);
+
+const PYTHON_SUBPROCESS_METHODS = new Set([
+  "call",
+  "check_call",
+  "check_output",
+  "getoutput",
+  "getstatusoutput",
+  "popen",
+  "run",
+]);
+
+interface SinkClassification {
+  readonly label: string;
+  readonly sinkType: string;
+}
 
 export function composeProgramAnalysisGraph(
   input: ComposeProgramAnalysisGraphInput,
@@ -129,6 +185,7 @@ export function composeProgramAnalysisGraph(
     }
     addObservedCalls(builder, input.graphVersion, entity, owner);
   }
+  addLexicalFlowEdges(builder, input.graphVersion);
 
   const flows = buildFlows(input.graphVersion, builder);
   const graph: SecurityGraph = {
@@ -474,23 +531,23 @@ function addSinkIfKnown(
   builder: GraphBuilder,
   graphVersion: string,
   entity: ObservedEntity,
-  target: AtomObject,
+  target: ProgramAnalysisObject,
   name: string,
 ): SecurityGraphNode | undefined {
-  const normalized = normalizeCallName(name);
-  if (!SINK_NAMES.has(normalized)) {
+  const classification = classifySinkCall(target, name, entity);
+  if (classification === undefined) {
     return undefined;
   }
   const lineNumber = positiveInteger(target.lineNumber) ?? entity.lineRange.startLine;
   return addNode(builder, graphVersion, {
     kind: "Sink",
-    stableKey: `Sink:${normalized}:${entity.fullName}:${entity.repoPath}:${lineNumber}`,
-    label: normalized,
+    stableKey: `Sink:${classification.sinkType}:${classification.label}:${entity.fullName}:${entity.repoPath}:${lineNumber}`,
+    label: classification.label,
     repoPath: entity.repoPath,
     lineRange: { startLine: lineNumber, endLine: lineNumber },
-    symbol: normalized,
+    symbol: classification.label,
     properties: {
-      sinkType: sinkType(normalized),
+      sinkType: classification.sinkType,
       callName: name,
     },
     evidenceIds: [entity.evidenceId],
@@ -498,13 +555,558 @@ function addSinkIfKnown(
   });
 }
 
+function classifySinkCall(
+  target: ProgramAnalysisObject,
+  selectedName: string,
+  entity: ObservedEntity,
+): SinkClassification | undefined {
+  const candidates = unique([
+    selectedName,
+    stringValue(target.name) ?? "",
+    stringValue(target.resolvedMethod) ?? "",
+    stringValue(target.code) ?? "",
+  ]).filter((value) => value !== "");
+
+  for (const candidate of candidates) {
+    const classification = classifySinkCandidate(candidate, entity);
+    if (classification !== undefined) {
+      return classification;
+    }
+  }
+  return undefined;
+}
+
+function classifySinkCandidate(
+  candidate: string,
+  entity: ObservedEntity,
+): SinkClassification | undefined {
+  const lower = candidate.toLowerCase();
+  const rawMethodName = methodNameFromCall(candidate);
+  const methodName = rawMethodName.toLowerCase();
+  const label = normalizedCallLabel(candidate, rawMethodName);
+  const repoPath = entity.repoPath;
+
+  if (
+    methodName === "eval" ||
+    (methodName === "exec" && /(^|[^\w.])exec\s*\(/.test(lower)) ||
+    lower.includes("os.system") ||
+    lower.includes("os.popen") ||
+    (lower.includes("subprocess.") && PYTHON_SUBPROCESS_METHODS.has(methodName)) ||
+    lower.includes("commands.getoutput") ||
+    lower.includes("exec.command") ||
+    lower.includes("child_process.exec") ||
+    lower.includes("runtime.exec") ||
+    (methodName === "exec" && (lower.includes("child_process") || lower.includes("runtime"))) ||
+    (methodName === "start" && lower.includes("processbuilder"))
+  ) {
+    return { label, sinkType: "code_execution" };
+  }
+
+  const httpLabel = outboundHttpLabel(candidate, lower, methodName);
+  if (httpLabel !== undefined) {
+    return { label: httpLabel, sinkType: outboundHttpSinkType(repoPath, lower) };
+  }
+
+  if (isAccessControlSensitiveResourceUse(candidate, lower, methodName, entity)) {
+    return { label: accessControlLabel(candidate, label, entity), sinkType: "access_control" };
+  }
+
+  if (isCsrfSensitiveStateChange(candidate, lower, methodName, entity)) {
+    return { label, sinkType: "csrf_state_change" };
+  }
+
+  const xssLabel = crossSiteScriptingLabel(candidate, lower, methodName, label, entity);
+  if (xssLabel !== undefined) {
+    return { label: xssLabel, sinkType: "cross_site_scripting" };
+  }
+
+  if (SQL_METHOD_NAMES.has(methodName) && hasSqlContext(lower, methodName)) {
+    return { label, sinkType: "sql_execution" };
+  }
+
+  if (
+    (methodName === "readobject" &&
+      (lower.includes("objectinputstream") ||
+        lower.includes("xmldecoder") ||
+        lower.includes(".readobject"))) ||
+    lower.includes("pickle.loads") ||
+    lower.includes("pickle.load") ||
+    lower.includes("yaml.load")
+  ) {
+    return { label, sinkType: "deserialization" };
+  }
+
+  if (
+    (methodName === "parse" || methodName === "unmarshal" || methodName === "read") &&
+    (lower.includes("documentbuilder") ||
+      lower.includes("saxparser") ||
+      lower.includes("xmlinputfactory") ||
+      lower.includes("xmlreader") ||
+      lower.includes("saxreader") ||
+      lower.includes("unmarshaller") ||
+      lower.includes(".xml"))
+  ) {
+    return { label, sinkType: "xml_processing" };
+  }
+
+  if (
+    (FILE_METHOD_NAMES.has(methodName) &&
+      (lower.includes("java.nio.file") ||
+        lower.includes("java.io.") ||
+        lower.includes("files.") ||
+        lower.includes("pathlib.") ||
+        lower.includes("os.open") ||
+        lower.includes("os.create") ||
+        lower.includes("ioutil.") ||
+        lower.includes("os.readfile") ||
+        lower.includes("os.writefile") ||
+        lower.includes("fileinputstream") ||
+        lower.includes("fileoutputstream"))) ||
+    (methodName === "open" && isBareFileOpen(repoPath, lower)) ||
+    (methodName === "get" && (lower.includes("paths.get") || lower.includes("filesystems.getpath")))
+  ) {
+    return { label, sinkType: "file_system" };
+  }
+
+  if (
+    methodName === "sendredirect" ||
+    methodName === "redirect" ||
+    lower.includes("redirectview")
+  ) {
+    return { label, sinkType: "redirect" };
+  }
+
+  if (
+    (methodName === "process" &&
+      (lower.includes("templateengine") || lower.includes("template.process"))) ||
+    methodName === "render_template_string"
+  ) {
+    return { label, sinkType: "template_render" };
+  }
+
+  return undefined;
+}
+
+function isAccessControlSensitiveResourceUse(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  if (!isHttpBoundary(entity)) {
+    return false;
+  }
+  const context = entityContext(entity, candidate);
+  if (
+    !RESOURCE_IDENTIFIER_PATTERN.test(context) ||
+    !ACCESS_CONTROL_RESOURCE_PATTERN.test(context)
+  ) {
+    return false;
+  }
+  if (!hasRequestControlledResourceIdentifier(entity, candidate)) {
+    return false;
+  }
+  if (hasOwnershipControl(context)) {
+    return false;
+  }
+  return (
+    [
+      "findone",
+      "findall",
+      "findbypk",
+      "findbyid",
+      "find",
+      "update",
+      "destroy",
+      "delete",
+      "save",
+    ].includes(methodName) ||
+    lower.includes("new userprofile") ||
+    lower.includes("where:") ||
+    lower.includes("collection.find")
+  );
+}
+
+function isCsrfSensitiveStateChange(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const hint = boundaryHint(entity.slice.boundary);
+  if (hint === undefined || !isStateChangingHttpMethod(hint.method)) {
+    return false;
+  }
+  if (hasStrongCsrfControl(entityContext(entity, candidate))) {
+    return false;
+  }
+  return CSRF_STATE_CHANGE_PATTERN.test(lower) || CSRF_STATE_CHANGE_PATTERN.test(methodName);
+}
+
+function accessControlLabel(
+  candidate: string,
+  fallbackLabel: string,
+  entity: ObservedEntity,
+): string {
+  const context = entityContext(entity, candidate);
+  if (/\bidor\b|insecure[\w\s-]*direct[\w\s-]*object/i.test(context)) {
+    return "IDOR object access";
+  }
+  return fallbackLabel;
+}
+
+function isHttpBoundary(entity: ObservedEntity): boolean {
+  const hint = boundaryHint(entity.slice.boundary);
+  if (hint === undefined) {
+    return false;
+  }
+  const boundary = `${hint.boundaryType} ${hint.routeOrName}`.toLowerCase();
+  return (
+    boundary.includes("http") ||
+    boundary.includes("web") ||
+    boundary.includes("spring") ||
+    boundary.includes("express") ||
+    boundary.includes("route") ||
+    hint.routeOrName.startsWith("/")
+  );
+}
+
+function isStateChangingHttpMethod(method: string | undefined): boolean {
+  switch (method?.toUpperCase()) {
+    case "POST":
+    case "PUT":
+    case "PATCH":
+    case "DELETE":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function hasRequestControlledResourceIdentifier(
+  entity: ObservedEntity,
+  candidate: string,
+): boolean {
+  const parameterNames = asObjectArray(entity.slice.parameters)
+    .map((parameter) => stringValue(parameter.name))
+    .filter((name): name is string => name !== undefined);
+  return (
+    parameterNames.some((name) => RESOURCE_IDENTIFIER_PATTERN.test(name)) ||
+    /\b(?:req|request|ctx)\s*(?:\.\s*(?:params|body|query|headers))?\s*(?:\.\s*|\[\s*['"])(?:id|uid|bid|cid|userId|userid|user_id|basketId|basketid|basket_id|orderId|orderid|order_id|accountId|account_id|profileId|profile_id|ownerId|owner_id|email|username)\b/i.test(
+      candidate,
+    ) ||
+    /\b(?:params|body|query|headers)\s*\[\s*['"](?:id|uid|bid|cid|userId|userid|user_id|basketId|basketid|basket_id|orderId|orderid|order_id|accountId|account_id|profileId|profile_id|ownerId|owner_id|email|username)['"]\s*\]/i.test(
+      candidate,
+    ) ||
+    (hasExternalRequestSource(entity) && hasHandlerLocalResourceIdentifier(candidate))
+  );
+}
+
+function hasExternalRequestSource(entity: ObservedEntity): boolean {
+  const hint = boundaryHint(entity.slice.boundary);
+  if (hint?.sourceName !== undefined && /\b(?:req|request|ctx|context)\b/i.test(hint.sourceName)) {
+    return true;
+  }
+  return asObjectArray(entity.slice.parameters).some((parameter) => {
+    const name = stringValue(parameter.name) ?? "";
+    const type = stringValue(parameter.typeFullName) ?? "";
+    return /\b(?:req|request|ctx|context)\b/i.test(name) || /\bRequest\b/.test(type);
+  });
+}
+
+function hasHandlerLocalResourceIdentifier(candidate: string): boolean {
+  const identifier =
+    "(?:id|uid|bid|cid|userId|userid|user_id|basketId|basketid|basket_id|orderId|orderid|order_id|accountId|account_id|profileId|profile_id|ownerId|owner_id|email|username)";
+  return (
+    new RegExp(String.raw`\bwhere\s*:\s*\{[^}]*\b${identifier}\b`, "i").test(candidate) ||
+    new RegExp(
+      String.raw`\b(?:findOne|findAll|findByPk|findById|find|update|destroy|delete|remove)\s*\([^)]*\b${identifier}\b`,
+      "i",
+    ).test(candidate) ||
+    new RegExp(
+      String.raw`\bnew\s+[A-Z][\w$]*(?:Profile|Account|Basket|Order|User|Record|Resource)\s*\(\s*${identifier}\b`,
+      "i",
+    ).test(candidate)
+  );
+}
+
+function hasOwnershipControl(context: string): boolean {
+  return (
+    /\b(?:invalid\s+(?:basket|user|order|account)|does not belong|belongs to|owner|ownership)\b[\s\S]{0,160}\b(?:status\s*\(\s*40[13]|sendstatus\s*\(\s*40[13]|forbidden|unauthorized)\b/i.test(
+      context,
+    ) ||
+    /\b(?:status\s*\(\s*40[13]|sendstatus\s*\(\s*40[13]|forbidden|unauthorized)\b[\s\S]{0,160}\b(?:invalid\s+(?:basket|user|order|account)|does not belong|belongs to|owner|ownership)\b/i.test(
+      context,
+    ) ||
+    (/\b(?:forbidden|unauthorized|invalid\s+(?:basket|user|order|account)|does not belong|belongs to|owner|ownership)\b/i.test(
+      context,
+    ) &&
+      /\b(?:return|throw|status\s*\(\s*40[13]|sendstatus\s*\(\s*40[13]|forbidden|unauthorized)\b/i.test(
+        context,
+      ))
+  );
+}
+
+function hasStrongCsrfControl(context: string): boolean {
+  return /\b(?:csrf(?:token|_token|middleware)|csrf[_-]?token|xsrf[_-]?token|csurf|anti[-_ ]?csrf|samesite|double[-_ ]?submit)\b/i.test(
+    context,
+  );
+}
+
+function entityContext(entity: ObservedEntity, candidate: string): string {
+  return [
+    entity.fullName,
+    entity.repoPath,
+    JSON.stringify(entity.slice.boundary ?? {}),
+    ...asObjectArray(entity.slice.parameters).flatMap((parameter) => [
+      stringValue(parameter.name) ?? "",
+      stringValue(parameter.typeFullName) ?? "",
+    ]),
+    ...asObjectArray(entity.slice.usages).flatMap((usage) => {
+      const target = asObject(usage.targetObj);
+      return [
+        stringValue(target.name) ?? "",
+        stringValue(target.resolvedMethod) ?? "",
+        stringValue(target.code) ?? "",
+      ];
+    }),
+    candidate,
+  ].join("\n");
+}
+
+function crossSiteScriptingLabel(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  fallbackLabel: string,
+  entity: ObservedEntity,
+): string | undefined {
+  if (lower.includes("bypasssecuritytrusthtml")) {
+    return "bypassSecurityTrustHtml";
+  }
+  if (lower.includes("dangerouslysetinnerhtml")) {
+    return "dangerouslySetInnerHTML";
+  }
+  if (/\b(?:innerhtml|outerhtml|insertadjacenthtml)\b/.test(lower)) {
+    return methodName === "assignment" ? "innerHTML" : fallbackLabel;
+  }
+  if (
+    methodName === "compile" &&
+    (lower.includes("pug.") ||
+      lower.includes("handlebars.") ||
+      lower.includes("mustache.") ||
+      lower.includes("template"))
+  ) {
+    return fallbackLabel;
+  }
+  if (
+    ["append", "concat", "replace", "write"].includes(methodName) &&
+    HTML_TEXT_PATTERN.test(candidate) &&
+    (methodName === "replace" || hasRawParameterHtmlInsertion(candidate, entity))
+  ) {
+    return fallbackLabel;
+  }
+  return undefined;
+}
+
+function hasRawParameterHtmlInsertion(candidate: string, entity: ObservedEntity): boolean {
+  const parameterNames = asObjectArray(entity.slice.parameters)
+    .map((parameter) => stringValue(parameter.name))
+    .filter((name): name is string => name !== undefined)
+    .filter((name) => !isFrameworkParameterName(name));
+  return parameterNames.some((name) => {
+    const escaped = escapeRegExp(name);
+    return new RegExp(String.raw`(?:\+|\$\{)\s*(?:this\.)?${escaped}(?!\s*\.)\s*(?:[+)};]|$)`).test(
+      candidate,
+    );
+  });
+}
+
+function isFrameworkParameterName(name: string): boolean {
+  switch (name.toLowerCase()) {
+    case "req":
+    case "request":
+    case "res":
+    case "response":
+    case "next":
+    case "ctx":
+    case "context":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function outboundHttpLabel(
+  candidate: string,
+  lower: string,
+  methodName: string,
+): string | undefined {
+  if (/\bfetch\s*\(/i.test(candidate) || methodName === "fetch") {
+    return "fetch";
+  }
+
+  const axios = lower.match(/\baxios(?:\.(get|post|put|patch|delete|request))?/);
+  if (axios !== null) {
+    return axios[1] === undefined ? "axios" : `axios.${axios[1]}`;
+  }
+
+  const nodeHttp = lower.match(/\b(https?)\.(get|post|request)\s*\(/);
+  if (nodeHttp !== null) {
+    return `${nodeHttp[1]}.${nodeHttp[2]}`;
+  }
+
+  const angularHttp = lower.match(
+    /\b(?:this\.)?http(?:client)?\.(get|post|put|patch|delete|request)\s*\(/,
+  );
+  if (angularHttp !== null) {
+    return `http.${angularHttp[1]}`;
+  }
+
+  const pythonRequests = lower.match(/\brequests\.(get|post|put|patch|delete|request)\b/);
+  if (pythonRequests !== null) {
+    return `requests.${pythonRequests[1]}`;
+  }
+
+  if (lower.includes("resttemplate.") || lower.includes("webclient.")) {
+    return methodName;
+  }
+
+  const goHttp = lower.match(
+    /(?:^|[^\w])(?:net\/http|http)\.(get|post|head|postform|newrequest|newrequestwithcontext)\b/,
+  );
+  if (goHttp !== null) {
+    return `http.${goHttp[1]}`;
+  }
+
+  if (methodName === "do" && lower.includes("net/http.client.do")) {
+    return "http.client.do";
+  }
+
+  return undefined;
+}
+
+function outboundHttpSinkType(repoPath: string, lower: string): string {
+  if (
+    isLikelyBrowserClientPath(repoPath) ||
+    lower.includes("this.http") ||
+    lower.includes("httpclient")
+  ) {
+    return "outbound_http";
+  }
+  return "server_side_request";
+}
+
+function isLikelyBrowserClientPath(repoPath: string): boolean {
+  const normalized = repoPath.toLowerCase();
+  return (
+    normalized.startsWith("frontend/") ||
+    normalized.startsWith("client/") ||
+    normalized.startsWith("web/") ||
+    normalized.startsWith("apps/web/") ||
+    normalized.startsWith("packages/web/") ||
+    normalized.startsWith("mobile/") ||
+    normalized.includes("/frontend/") ||
+    normalized.includes("/client/") ||
+    normalized.includes("/apps/web/") ||
+    normalized.includes("/packages/web/") ||
+    normalized.includes("/mobile/") ||
+    normalized.includes("/public/") ||
+    normalized.includes(".component.") ||
+    normalized.includes(".service.")
+  );
+}
+
+function isBareFileOpen(repoPath: string, lower: string): boolean {
+  if (!/\bopen\s*\(/.test(lower) || isLikelyBrowserClientPath(repoPath)) {
+    return false;
+  }
+  const normalized = repoPath.toLowerCase();
+  return (
+    normalized.endsWith(".py") ||
+    lower.includes("fs.open") ||
+    lower.includes("node:fs") ||
+    lower.includes("fs/promises")
+  );
+}
+
+function hasSqlContext(lower: string, methodName: string): boolean {
+  return (
+    lower.includes("java.sql") ||
+    lower.includes("javax.sql") ||
+    lower.includes("jdbc") ||
+    lower.includes("statement") ||
+    lower.includes("preparedstatement") ||
+    lower.includes("callablestatement") ||
+    lower.includes("entitymanager") ||
+    lower.includes("jdbctemplate") ||
+    lower.includes("databaseclient") ||
+    lower.includes("sqlsession") ||
+    lower.includes("sqlite3") ||
+    lower.includes("cursor.") ||
+    lower.includes("database/sql") ||
+    lower.includes("sequelize.") ||
+    lower.includes("knex.") ||
+    lower.includes("pg.") ||
+    lower.includes("mysql") ||
+    SQL_TEXT_PATTERN.test(lower) ||
+    methodName === "executequery" ||
+    methodName === "executeupdate" ||
+    methodName === "executebatch" ||
+    methodName === "executelargeupdate" ||
+    methodName === "preparestatement" ||
+    methodName === "createquery" ||
+    methodName === "createnativequery"
+  );
+}
+
+function addLexicalFlowEdges(builder: GraphBuilder, graphVersion: string): void {
+  const codeEntities = [...builder.codeByFullName.entries()].sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  for (const [fullName, child] of codeEntities) {
+    const parentFullName = lexicalParentFullName(fullName);
+    if (parentFullName === undefined) {
+      continue;
+    }
+    const parent = builder.codeByFullName.get(parentFullName);
+    if (parent === undefined || parent.repoPath !== child.repoPath) {
+      continue;
+    }
+    addEdge(builder, graphVersion, {
+      kind: "flows_to",
+      stableKey: `flows_to:${parent.id}:${child.id}:lexical-child`,
+      fromNodeId: parent.id,
+      toNodeId: child.id,
+      properties: {
+        flowType: "lexical_child",
+      },
+      evidenceIds: unique([...parent.evidenceIds, ...child.evidenceIds]),
+      producerVersion: child.producerVersion,
+    });
+  }
+}
+
+function lexicalParentFullName(fullName: string): string | undefined {
+  const lambdaIndex = fullName.lastIndexOf(":<lambda>");
+  if (lambdaIndex < 0) {
+    return undefined;
+  }
+  const parent = fullName.slice(0, lambdaIndex);
+  return parent === "" ? undefined : parent;
+}
+
 function buildFlows(graphVersion: string, builder: GraphBuilder): SecurityFlow[] {
-  const sources = builder.nodes.filter((node) => node.kind === "Source");
+  const sources = [...builder.nodes]
+    .filter((node) => node.kind === "Source")
+    .sort((left, right) => left.stableKey.localeCompare(right.stableKey));
   const sinks = new Set(
     builder.nodes.filter((node) => node.kind === "Sink").map((node) => node.id),
   );
   const outgoing = new Map<string, SecurityGraphEdge[]>();
-  for (const edge of builder.edges) {
+  for (const edge of [...builder.edges].sort((left, right) =>
+    left.stableKey.localeCompare(right.stableKey),
+  )) {
     if (!["receives", "registers", "calls", "flows_to"].includes(edge.kind)) {
       continue;
     }
@@ -513,56 +1115,72 @@ function buildFlows(graphVersion: string, builder: GraphBuilder): SecurityFlow[]
     outgoing.set(edge.fromNodeId, current);
   }
 
-  const flows: SecurityFlow[] = [];
+  const flows: Array<{ readonly stableKey: string; readonly flow: SecurityFlow }> = [];
   for (const source of sources) {
-    const path = firstPathToSink(source.id, sinks, outgoing);
-    if (path === undefined) {
-      continue;
+    for (const path of pathsToSinks(source.id, sinks, outgoing)) {
+      const sinkId = path.at(-1)?.toNodeId;
+      if (sinkId === undefined) {
+        continue;
+      }
+      const stableKey = `flow:${source.id}:${sinkId}:${path.map((edge) => edge.id).join(">")}`;
+      flows.push({
+        stableKey,
+        flow: {
+          id: securityFlowId(graphVersion, stableKey),
+          sourceNodeId: source.id,
+          sinkNodeId: sinkId,
+          pathEdgeIds: path.map((edge) => edge.id),
+          controlNodeIds: [],
+          coverageState: "checked",
+          confidence: DEFAULT_CONFIDENCE,
+          evidenceIds: unique(path.flatMap((edge) => edge.evidenceIds)),
+        },
+      });
     }
-    const sinkId = path.at(-1)?.toNodeId;
-    if (sinkId === undefined) {
-      continue;
-    }
-    const stableKey = `flow:${source.id}:${sinkId}:${path.map((edge) => edge.id).join(">")}`;
-    flows.push({
-      id: securityFlowId(graphVersion, stableKey),
-      sourceNodeId: source.id,
-      sinkNodeId: sinkId,
-      pathEdgeIds: path.map((edge) => edge.id),
-      controlNodeIds: [],
-      coverageState: "checked",
-      confidence: DEFAULT_CONFIDENCE,
-      evidenceIds: unique(path.flatMap((edge) => edge.evidenceIds)),
-    });
   }
 
-  return flows;
+  return flows
+    .sort((left, right) => left.stableKey.localeCompare(right.stableKey))
+    .map((entry) => entry.flow);
 }
 
-function firstPathToSink(
+function pathsToSinks(
   startNodeId: string,
   sinkIds: ReadonlySet<string>,
   outgoing: ReadonlyMap<string, ReadonlyArray<SecurityGraphEdge>>,
-): SecurityGraphEdge[] | undefined {
-  const queue: Array<{ readonly nodeId: string; readonly path: ReadonlyArray<SecurityGraphEdge> }> =
-    [{ nodeId: startNodeId, path: [] }];
-  const visited = new Set<string>();
+): SecurityGraphEdge[][] {
+  const queue: Array<{
+    readonly nodeId: string;
+    readonly path: ReadonlyArray<SecurityGraphEdge>;
+    readonly nodeIds: ReadonlyArray<string>;
+  }> = [{ nodeId: startNodeId, path: [], nodeIds: [startNodeId] }];
+  const paths: SecurityGraphEdge[][] = [];
 
   while (queue.length > 0) {
     const current = queue.shift();
-    if (current === undefined || visited.has(current.nodeId)) {
+    if (current === undefined) {
       continue;
     }
-    visited.add(current.nodeId);
     if (sinkIds.has(current.nodeId) && current.path.length > 0) {
-      return [...current.path];
+      paths.push([...current.path]);
+      continue;
+    }
+    if (current.path.length >= MAX_SECURITY_FLOW_PATH_LENGTH) {
+      continue;
     }
     for (const edge of outgoing.get(current.nodeId) ?? []) {
-      queue.push({ nodeId: edge.toNodeId, path: [...current.path, edge] });
+      if (current.nodeIds.includes(edge.toNodeId)) {
+        continue;
+      }
+      queue.push({
+        nodeId: edge.toNodeId,
+        path: [...current.path, edge],
+        nodeIds: [...current.nodeIds, edge.toNodeId],
+      });
     }
   }
 
-  return undefined;
+  return paths;
 }
 
 function addNode(
@@ -649,6 +1267,13 @@ function buildCoverage(input: {
 }): GraphCoverage[] {
   return [
     coverage(
+      "entities",
+      input.entityCount > 0 ? "checked" : "partial",
+      input.entityCount,
+      input.entityCount,
+      input.producerVersion,
+    ),
+    coverage(
       "boundaries",
       input.boundaryCount > 0 ? "checked" : "partial",
       input.boundaryCount,
@@ -659,7 +1284,7 @@ function buildCoverage(input: {
       "call_graph",
       input.callEdgeCount > 0 ? "checked" : "partial",
       input.callEdgeCount,
-      input.entityCount,
+      Math.max(input.entityCount, input.callEdgeCount),
       input.producerVersion,
     ),
     coverage(
@@ -688,12 +1313,12 @@ function coverage(
     producerVersion,
     ...(state === "checked"
       ? {}
-      : { reason: `${area} coverage is incomplete from current Atom artifacts.` }),
+      : { reason: `${area} coverage is incomplete from current Joern artifacts.` }),
   };
 }
 
 function producerVersion(artifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact>): string {
-  return artifacts[0]?.backendVersion ?? "atom@unknown";
+  return artifacts[0]?.backendVersion ?? "joern@unknown";
 }
 
 function countNodes(builder: GraphBuilder, kind: SecurityGraphNode["kind"]): number {
@@ -725,13 +1350,13 @@ function observationLabel(observation: FlowBoundaryObservation): string {
   return symbolFromFullName(observation.fullName);
 }
 
-function asObject(value: unknown): AtomObject {
+function asObject(value: unknown): ProgramAnalysisObject {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as AtomObject)
+    ? (value as ProgramAnalysisObject)
     : {};
 }
 
-function asObjectArray(value: unknown): AtomObject[] {
+function asObjectArray(value: unknown): ProgramAnalysisObject[] {
   return Array.isArray(value)
     ? value.map(asObject).filter((item) => Object.keys(item).length > 0)
     : [];
@@ -754,21 +1379,51 @@ function isSafeManifestPath(repoPath: string, manifestPaths: ReadonlySet<string>
 }
 
 function symbolFromFullName(fullName: string): string {
+  const programMethodIndex = fullName.lastIndexOf("::program:");
+  if (programMethodIndex >= 0) {
+    return fullName.slice(programMethodIndex + "::program:".length);
+  }
+  if (fullName.endsWith("::program")) {
+    return "program";
+  }
+
+  const callableName = fullName.split(":").at(0) ?? fullName;
+  const javaMethod = callableName.split(".").filter(Boolean).at(-1);
+  if (javaMethod !== undefined && !javaMethod.includes("/")) {
+    return javaMethod;
+  }
   return fullName.split(":").filter(Boolean).at(-1) ?? fullName;
 }
 
-function normalizeCallName(name: string): string {
-  return symbolFromFullName(name).replace(/^globalThis\./, "");
+function methodNameFromCall(value: string): string {
+  const withoutGlobal = value.replace(/^globalThis\./, "");
+  const callableName = withoutGlobal.split(":").at(0) ?? withoutGlobal;
+  const invokedFromCode = [...callableName.matchAll(/(?:^|[^\w$])([A-Za-z_$][\w$]*)\s*\(/g)]
+    .map((match) => match[1])
+    .filter((name): name is string => name !== undefined)
+    .at(-1);
+  if (invokedFromCode !== undefined) {
+    return invokedFromCode;
+  }
+  const dotted = callableName.split(".").filter(Boolean).at(-1);
+  if (dotted !== undefined) {
+    return dotted.replace(/\(.*$/, "");
+  }
+  return symbolFromFullName(value).replace(/\(.*$/, "");
 }
 
-function sinkType(name: string): string {
-  if (name.includes("fetch") || name.includes("http") || name.includes("axios")) {
-    return "outbound_http";
+function normalizedCallLabel(value: string, methodName: string): string {
+  if (value.includes("child_process.exec")) {
+    return "child_process.exec";
   }
-  if (name === "eval" || name.includes("exec")) {
-    return "code_execution";
+  if (value.toLowerCase().includes("runtime.exec")) {
+    return "Runtime.exec";
   }
-  return "dangerous_operation";
+  return methodName || symbolFromFullName(value);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function unique(values: ReadonlyArray<string>): string[] {

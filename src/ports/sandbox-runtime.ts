@@ -10,7 +10,7 @@
 export interface SandboxSession {
   readonly id: string;
   /** Run a command, return exit code + stdout/stderr (UTF-8). */
-  exec(command: string[]): Promise<ExecResult>;
+  exec(command: string[], options?: SandboxExecOptions): Promise<ExecResult>;
   /** Upload a file from the host into the sandbox at `guestPath`. */
   upload(localPath: string, guestPath: string): Promise<void>;
   /** Upload bytes directly (no host file). */
@@ -27,6 +27,18 @@ export interface ExecResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
+}
+
+export type SandboxExecEvent =
+  | { readonly type: "started"; readonly pid?: number }
+  | { readonly type: "stdout"; readonly data: string }
+  | { readonly type: "stderr"; readonly data: string }
+  | { readonly type: "exited"; readonly exitCode: number };
+
+export interface SandboxExecOptions {
+  readonly onEvent?: (event: SandboxExecEvent) => void;
+  /** Best-effort command wall-clock limit inside the sandbox. */
+  readonly timeoutMs?: number;
 }
 
 export interface SandboxCreateOptions {

@@ -31,6 +31,7 @@ const BUILTIN_IGNORED_DIRS = new Set([
 export interface LocalSourcePackage {
   readonly archivePath: string;
   readonly commitSha: string | null;
+  readonly originUrl?: string;
   readonly exclusions: ReadonlyArray<ManifestExclusion>;
   cleanup(): Promise<void>;
 }
@@ -82,6 +83,7 @@ export async function createLocalSourcePackage(sourceRoot: string): Promise<Loca
   return {
     archivePath,
     commitSha,
+    ...(await gitOriginUrl(root)),
     exclusions: mutableExclusions,
     cleanup: async () => {
       await rm(tmp, { recursive: true, force: true });
@@ -218,6 +220,24 @@ async function gitText(cwd: string, args: string[]): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+async function gitOriginUrl(root: string): Promise<{ readonly originUrl?: string }> {
+  const value = await gitText(root, ["remote", "get-url", "origin"]);
+  return value === null ? {} : { originUrl: normalizeGitRemoteUrl(value) };
+}
+
+function normalizeGitRemoteUrl(value: string): string {
+  const trimmed = value.trim();
+  const sshMatch = trimmed.match(/^git@([^:]+):(.+)$/);
+  if (sshMatch !== null) {
+    const host = sshMatch[1];
+    const repo = sshMatch[2];
+    if (host !== undefined && repo !== undefined) {
+      return `https://${host}/${repo.replace(/\.git$/, "")}`;
+    }
+  }
+  return trimmed.replace(/\.git$/, "");
 }
 
 function toPosixPath(p: string): string {

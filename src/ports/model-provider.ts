@@ -148,9 +148,9 @@ export interface ModelHypothesisEnrichment {
 export interface ModelProvider {
   /** True when a key/config is present and a call should be attempted. */
   isAvailable(): Promise<boolean>;
-  /** Enhance a Fix Pack in one call. Returns null to fall back to the catalog. */
+  /** Enhance a small Fix Pack batch. Returns null to fall back to the catalog. */
   enhance(input: ModelEnhanceBatchInput): Promise<ReadonlyArray<RemediationAction> | null>;
-  /** Enrich static hypotheses in one bounded call. Returns null for catalog fallback. */
+  /** Enrich a small static-hypothesis batch. Returns null for catalog fallback. */
   enrichHypotheses(
     input: ModelHypothesisEnrichBatchInput,
   ): Promise<ReadonlyArray<ModelHypothesisEnrichment> | null>;

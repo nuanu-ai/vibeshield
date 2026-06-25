@@ -11,7 +11,7 @@ import type { Finding, FindingCategory, FindingCluster, Severity } from "../doma
 import type { PlannedCheck, RepositoryInventory, ScanPlan } from "../domain/inventory.js";
 import type { Manifest } from "../domain/manifest.js";
 import { summarizeManifest, summarizeToolchain } from "../domain/manifest-summary.js";
-import type { ArtifactRef, SourceInput } from "../domain/run.js";
+import type { ArtifactRef, SourceInput, StageId } from "../domain/run.js";
 import { buildAssessment, type RankedAction } from "../domain/security-assessment.js";
 import type { StageContext, StageDefinition, StageResult } from "../pipeline/stage-definition.js";
 import type {
@@ -78,6 +78,7 @@ const MODEL_SNIPPET_CHAR_LIMIT = 500;
 const MODEL_SUMMARY_BUCKET_LIMIT = 12;
 const TOOLCHAIN_REFRESH_TIMEOUT_MS = 5 * 60 * 1000;
 const SCANNER_TIMEOUT_MS = 2 * 60 * 1000;
+const MODEL_REMEDIATION_CONCURRENCY = 2;
 
 const SCANNER_STAGE_IDS = [
   "scan.secrets.gitleaks",
@@ -170,6 +171,7 @@ interface ScannerCandidate {
   readonly filePath?: string;
   readonly startLine?: number;
   readonly severity?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
 }
 
 interface ScannerCandidateFields {
@@ -178,6 +180,7 @@ interface ScannerCandidateFields {
   readonly filePath?: string | undefined;
   readonly startLine?: number | undefined;
   readonly severity?: string | undefined;
+  readonly metadata?: Readonly<Record<string, string>> | undefined;
 }
 
 interface NormalizeData {
@@ -232,9 +235,8 @@ function sourceResolveStage(): StageDefinition {
       await execRequired(ctx, ["gitleaks", "version"], "toolchain preflight: gitleaks");
       await execRequired(ctx, ["mkdir", "-p", WORK_DIR], "create work directory");
       await execRequired(ctx, ["rm", "-rf", SOURCE_DIR], "clear previous source directory");
-      await ctx.session.uploadBytes(ORIGIN_PATH, jsonBytes(ctx.source));
-
       if (ctx.source.kind === "github") {
+        await ctx.session.uploadBytes(ORIGIN_PATH, jsonBytes(ctx.source));
         await execRequired(
           ctx,
           ["git", "clone", "--depth", "1", ctx.source.url, SOURCE_DIR],
@@ -243,6 +245,13 @@ function sourceResolveStage(): StageDefinition {
       } else {
         const pkg = await createLocalSourcePackage(ctx.source.path);
         try {
+          await ctx.session.uploadBytes(
+            ORIGIN_PATH,
+            jsonBytes({
+              ...ctx.source,
+              ...(pkg.originUrl === undefined ? {} : { originUrl: pkg.originUrl }),
+            }),
+          );
           await ctx.session.upload(pkg.archivePath, LOCAL_SOURCE_TAR);
           await ctx.session.uploadBytes(
             SOURCE_FILTER_PATH,
@@ -742,6 +751,7 @@ function normalizeStage(): StageDefinition {
             locations: [{ filePath, startLine, endLine: startLine }],
             evidenceIds: [evidenceId],
             fingerprint,
+            ...(candidate.metadata === undefined ? {} : { metadata: candidate.metadata }),
             remediationKey: remediationKeyForCategory(category),
           });
         }
@@ -855,7 +865,7 @@ function reportStage(options: ReportStageOptions): StageDefinition {
       );
       const { evidence, findings } = readInput<NormalizeData>(ctx, "findings.normalize");
       const { clusters } = readInput<CorrelateData>(ctx, "findings.correlate");
-      const { verdict } = readInput<ActionsData>(ctx, "actions.rank");
+      const { verdict: quickVerdict } = readInput<ActionsData>(ctx, "actions.rank");
       const { rankedActions } = readInput<RemediationData>(ctx, "remediation.generate");
       const deepData = options.deep
         ? readInput<DeepStaticData>(ctx, DEEP_STATIC_STAGE_ID)
@@ -867,7 +877,7 @@ function reportStage(options: ReportStageOptions): StageDefinition {
         repository: repositorySummary(ctx.source, manifest),
         manifest: summarizeManifest(manifest),
         toolchain: summarizeToolchain(manifest.toolchain),
-        verdict,
+        verdict: verdictWithDeepStatic(quickVerdict, deepData),
         coverage,
         findingSummary: summarizeFindings(findings),
         evidence,
@@ -879,6 +889,7 @@ function reportStage(options: ReportStageOptions): StageDefinition {
           : {
               deepCoverage: deepData.deepCoverage.entries,
               findingContextAssessments: deepData.findingContextAssessments,
+              hypothesisCandidates: deepData.hypothesisCandidates,
               staticHypotheses: deepData.staticHypotheses,
               validationRecipes: deepData.validationRecipes,
               hypothesisEnrichments: enrichData?.hypothesisEnrichments ?? [],
@@ -1354,6 +1365,30 @@ function verdictFor(
   return lostRequiredCoverage ? "scan-incomplete" : "looks-ok-for-now";
 }
 
+function verdictWithDeepStatic(verdict: Verdict, deepData: DeepStaticData | undefined): Verdict {
+  const hasSupportedAttackPath =
+    deepData?.staticHypotheses.some((hypothesis) => hypothesis.status === "statically_supported") ??
+    false;
+  return hasSupportedAttackPath ? strongerVerdict(verdict, "not-ready-to-deploy") : verdict;
+}
+
+function strongerVerdict(left: Verdict, right: Verdict): Verdict {
+  return verdictRank(left) <= verdictRank(right) ? left : right;
+}
+
+function verdictRank(verdict: Verdict): number {
+  switch (verdict) {
+    case "critical-fix-needed":
+      return 0;
+    case "not-ready-to-deploy":
+      return 1;
+    case "scan-incomplete":
+      return 2;
+    case "looks-ok-for-now":
+      return 3;
+  }
+}
+
 async function readScannerBytes(
   ctx: StageContext,
   outputPath: string | undefined,
@@ -1520,6 +1555,11 @@ function candidatesFromTrivy(
         normalizeCandidatePath(stringFrom(item.Target)),
       startLine: numberFrom(cause.StartLine),
       severity: stringFrom(item.Severity),
+      metadata: compactMetadata({
+        packageName: stringFrom(item.PkgName),
+        installedVersion: stringFrom(item.InstalledVersion),
+        fixedVersion: stringFrom(item.FixedVersion),
+      }),
     });
   });
 }
@@ -1537,7 +1577,18 @@ function scannerCandidate(
     ...(fields.filePath !== undefined ? { filePath: fields.filePath } : {}),
     ...(fields.startLine !== undefined ? { startLine: fields.startLine } : {}),
     ...(fields.severity !== undefined ? { severity: fields.severity } : {}),
+    ...(fields.metadata === undefined ? {} : { metadata: fields.metadata }),
   };
+}
+
+function compactMetadata(
+  values: Readonly<Record<string, string | undefined>>,
+): Readonly<Record<string, string>> | undefined {
+  const entries = Object.entries(values).filter((entry): entry is [string, string] => {
+    const value = entry[1];
+    return typeof value === "string" && value.trim() !== "";
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
 function pathFromZizmorLocations(value: unknown): string | undefined {
@@ -1785,15 +1836,41 @@ async function enhanceRemediations(
   }
 
   const modelActions = catalogActions.slice(0, MODEL_ACTION_LIMIT);
-  const enhanced = await ctx.model
-    .enhance(modelEnhanceInput(ctx.source, modelActions, findings, evidence))
-    .catch(() => null);
-  if (enhanced === null) {
-    return [...catalogActions];
-  }
+  const enhancedById = new Map<string, RemediationAction>();
+  let completedModelActions = 0;
+  emitModelProgress(
+    ctx,
+    "remediation.generate",
+    "Writing fixes",
+    completedModelActions,
+    modelActions.length,
+  );
+  await mapWithConcurrency(modelActions, MODEL_REMEDIATION_CONCURRENCY, async (action) => {
+    try {
+      const enhanced = await ctx.model
+        .enhance(modelEnhanceInput(ctx.source, [action], findings, evidence))
+        .catch(() => null);
+      if (enhanced === null) {
+        return;
+      }
+      const validated = validateEnhancedRemediations(enhanced, [action]);
+      const remediation = validated?.get(action.candidate.id);
+      if (remediation !== undefined) {
+        enhancedById.set(action.candidate.id, remediation);
+      }
+    } finally {
+      completedModelActions += 1;
+      emitModelProgress(
+        ctx,
+        "remediation.generate",
+        "Writing fixes",
+        completedModelActions,
+        modelActions.length,
+      );
+    }
+  });
 
-  const enhancedById = validateEnhancedRemediations(enhanced, modelActions);
-  if (enhancedById === null) {
+  if (enhancedById.size === 0) {
     return [...catalogActions];
   }
 
@@ -1922,6 +1999,40 @@ function topModelCounts(values: ReadonlyArray<string>): ModelEnhanceCount[] {
     .map(([value, count]) => ({ value, count }))
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
     .slice(0, MODEL_SUMMARY_BUCKET_LIMIT);
+}
+
+async function mapWithConcurrency<T, R>(
+  values: ReadonlyArray<T>,
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = [];
+  for (let index = 0; index < values.length; index += concurrency) {
+    out.push(...(await Promise.all(values.slice(index, index + concurrency).map(mapper))));
+  }
+  return out;
+}
+
+function emitModelProgress(
+  ctx: StageContext,
+  stageId: StageId,
+  label: string,
+  completed: number,
+  total: number,
+): void {
+  const publicLabel = `${label} ${completed}/${total}`;
+  ctx.events.emit({
+    type: "scan-progress",
+    stageId,
+    message: publicLabel,
+    details: {
+      publicLabel,
+      source: "model",
+      completed,
+      total,
+    },
+    timestamp: new Date().toISOString(),
+  });
 }
 
 function truncateForModel(value: string): string {
@@ -2135,7 +2246,13 @@ function repositorySummary(source: SourceInput, manifest: Manifest) {
   if (source.kind === "github") {
     return { ...base, originUrl: source.url };
   }
-  return { ...base, localPath: source.path };
+  const localOriginUrl =
+    source.originUrl ?? (manifest.origin.kind === "local" ? manifest.origin.originUrl : undefined);
+  return {
+    ...base,
+    ...(localOriginUrl === undefined ? {} : { originUrl: localOriginUrl }),
+    localPath: source.path,
+  };
 }
 
 function summarizeFindings(findings: ReadonlyArray<Finding>) {

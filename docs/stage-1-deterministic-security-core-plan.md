@@ -1,4 +1,4 @@
-# Stage 1 Plan: deterministic Quick Scan + one AI fix-pack call
+# Stage 1 Plan: deterministic Quick Scan + batched AI fix-pack wording
 
 VibeShield is a security triage for people who build apps with AI agents. They
 point it at a repo before they ship and get a small **Agent Fix Pack**: a few
@@ -9,9 +9,9 @@ here's the prompt to fix it."
 
 Iteration 1 builds the reliable deterministic machine that produces this, end to
 end, on a real repo. Facts, severity, priority, and the final verdict are
-computed by rules. Exactly one bounded AI call turns the deterministic findings
-into the plain-language explanation and the coding-agent prompt; if it fails, a
-built-in template produces the same result less elaborately.
+computed by rules. Bounded per-action AI calls turn deterministic findings into
+plain-language explanations and coding-agent prompts; if a call fails, a built-in
+template produces the same result less elaborately for that action.
 
 ## Locked decisions
 
@@ -32,12 +32,12 @@ follows from them.
 - Iteration 1 ships the **full check set** (secrets, code patterns, SBOM,
   dependencies, GitHub Actions, IaC). Internally it is proven one check first,
   then widened.
-- The one AI call uses a configured **Sonnet-class model** over **OpenRouter**,
-  **on the host** (it needs the findings, not the repo). The model comes from
+- Bounded AI calls use a configured **Sonnet-class model** over **OpenRouter**,
+  **on the host** (they need the findings, not the repo). The model comes from
   `.env` via `VIBESHIELD_REMEDIATION_MODEL`, with default
-  `anthropic/claude-sonnet-4.6`. It is **enhancement only** — the deterministic
-  result is complete without any model.
-- If the AI call is unavailable, invalid, or over budget, a deterministic
+  `anthropic/claude-sonnet-4.6`. They are **enhancement only** — the
+  deterministic result is complete without any model.
+- If an AI call is unavailable, invalid, fails, or over budget, a deterministic
   **catalog template** produces the same actions and prompts.
 - Reports: terminal + `report.json` + `report.md` + `report.html`. **PDF later.**
 - The CLI stays owner-facing: concise progress on stderr and a short receipt on
@@ -55,7 +55,7 @@ vibeshield scan <github-url | local-git-root>
   findings.normalize    raw tool output -> Evidence -> Finding (+ semantic validators)
   findings.correlate    group findings with the same root cause
   actions.rank          ActionCandidate with rule-computed priority + verdict
-  remediation.generate  ONE Sonnet call: candidates -> explanation + prompt     (catalog fallback)
+  remediation.generate  per-action model batches -> explanation + prompt        (catalog fallback)
   report.compose        one SecurityAssessment object
   report.render         report.json / .md / .html + short terminal receipt
 ```
@@ -161,7 +161,7 @@ Status:
   required coverage → `Scan incomplete`. Out: clusters + truthful coverage. Done:
   killing one check keeps other findings; required-coverage loss blocks green.
 
-### Gate 3 — the one AI fix-pack call
+### Gate 3 — batched AI fix-pack wording
 
 Closes when: the verdict, priority, and finding set are identical with the AI on
 vs off; the AI only makes the explanations and prompts read better.
@@ -173,9 +173,9 @@ vs off; the AI only makes the explanations and prompts read better.
   Out: a model client. Done: unit tests cover configured model, fenced JSON,
   salvageable JSON repair, schema aliases, and missing-key fallback.
 - [x] **remediation.generate + fallback.** In: ≤10 candidates + findings +
-  redacted snippets + catalog + inventory. Do: **one** Sonnet call producing
-  per-candidate explanation/steps/prompt/verify; repair salvageable malformed
-  JSON; validate ids/paths; invalid → catalog. Out: enriched
+  redacted snippets + catalog + inventory. Do: bounded per-action model calls
+  producing explanation/steps/prompt/verify; repair salvageable malformed JSON;
+  validate ids/paths; invalid → catalog for that action. Out: enriched
   `RemediationAction`s. Done: live run
   `20260622140126-5af9d710` used the configured OpenRouter Sonnet model, kept
   the same verdict/finding ids/candidates as catalog fallback, and produced
@@ -202,7 +202,7 @@ vs off; the AI only makes the explanations and prompts read better.
 - [x] **Remove old MVP from the tracked current surface** as each replacement
   lands: Daytona, Pi mapping collectors, `attack-hypotheses`, evaluator loops,
   repo-map-as-truth, duplicate stage arrays, mutable-path overwrite, in-memory
-  registry. Keep OpenRouter as the gateway for the one remediation call. Done:
+  registry. Keep OpenRouter as the gateway for remediation wording calls. Done:
   current tracked code/docs describe the Microsandbox deterministic Quick Scan;
   old MVP material is not part of the runnable path.
 
@@ -321,22 +321,23 @@ Minimal on purpose — enough to keep stages coherent.
   steps, coding-agent prompt template. Unknown findings use a clearly-weaker
   generic template. The catalog is the deterministic fallback and the primary UX
   when the AI is off.
-- **The one AI call** (`remediation.generate`): configured Sonnet-class model
+- **Bounded AI calls** (`remediation.generate`): configured Sonnet-class model
   over OpenRouter, on the host. `OPENROUTER_API_KEY` and
-  `VIBESHIELD_REMEDIATION_MODEL` come from `.env`; if the key is missing, the
-  call is skipped and the catalog is used.
-  - Input: up to ten `ActionCandidate`s with their findings, redacted evidence
-    snippets, affected files, the matching catalog entries, and the repo
-    inventory.
+  `VIBESHIELD_REMEDIATION_MODEL` come from `.env`; if the key is missing, calls
+  are skipped and the catalog is used.
+  - Input: up to ten `ActionCandidate`s, sent as separate per-action requests
+    with capped findings, redacted evidence snippets, affected files, the
+    matching catalog entry, and summary counts.
   - Output (structured JSON against the `RemediationAction` schema) per candidate:
     plain-language risk, why-fix-now, fix steps, operational steps, coding-agent
     prompt, verification.
   - Rules: use only the given finding/evidence ids; never change priority,
     severity, or verdict; separate code changes from operational steps. Secret
     values are redacted out of the input.
-  - **Exactly one model call.** Its output may be syntactically repaired if the
-    JSON is salvageable, then validated (schema + semantic validators). Anything
-    that still fails validation falls back to the catalog.
+  - **Bounded per-action calls.** Each output may be syntactically repaired if
+    the JSON is salvageable, then validated (schema + semantic validators).
+    Anything that still fails validation falls back to the catalog for that
+    action.
 - **Semantic validators** on stage outputs: referenced files exist in the
   snapshot, line ranges are in range, hashes match, ids resolve, paths stay
   inside the repo.
@@ -382,13 +383,13 @@ OpenRouter remediation enhancement, and catalog fallback.
   section/mapping collectors and per-area agent loops; `attack-hypotheses`;
   evaluator/self-reflection loops; repository-map-as-pipeline-truth; duplicate
   stage-order arrays; mutable-path artifact overwrite; the in-memory artifact
-  registry. OpenRouter remains the gateway for the one remediation call — no
+  registry. OpenRouter remains the gateway for remediation wording calls — no
   model is required for the deterministic result.
 
 ## Later — named, not dropped
 
 - AI hypotheses + verification loop (the second AI stage).
-- Deeper code analysis / evidence graph (cdxgen + atom, Joern/codebadger) — rides
+- Deeper code analysis / evidence graph (Joern CPG + VibeShield rules) — rides
   with hypotheses.
 - Richer scoring (exposure, blast radius, reachability, production relevance).
 - Offline / no-egress isolation + a pinned, published toolchain image and the

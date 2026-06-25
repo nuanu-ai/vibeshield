@@ -55,4 +55,4 @@ export interface ToolVersion {
 
 export type ManifestOrigin =
   | { readonly kind: "github"; readonly url: string }
-  | { readonly kind: "local"; readonly path: string };
+  | { readonly kind: "local"; readonly path: string; readonly originUrl?: string };

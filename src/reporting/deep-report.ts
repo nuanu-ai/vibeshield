@@ -1,10 +1,12 @@
 import { verdictLabel } from "../domain/assessment.js";
+import type { Evidence } from "../domain/evidence.js";
 import type { FindingContextAssessment } from "../domain/finding-context-assessment.js";
 import type { HypothesisEnrichment } from "../domain/hypothesis-enrichment.js";
 import type { RankedAction, SecurityAssessment } from "../domain/security-assessment.js";
 import type { StaticHypothesis } from "../domain/static-hypothesis.js";
 import type { ValidationRecipe } from "../domain/validation-recipe.js";
 import {
+  type AttackPathSignal,
   actionCardHtml,
   actionLocationsForReport,
   attackPathCardHtml,
@@ -36,9 +38,10 @@ export function renderDeepReportJson(
 
 export function renderDeepHtmlReport(_runId: string, assessment: SecurityAssessment): string {
   const actions = assessment.rankedActions;
-  const hypotheses = reportableHypotheses(assessment.staticHypotheses ?? []);
   const enrichments = byHypothesisId(assessment.hypothesisEnrichments ?? []);
   const recipes = recipeByHypothesisId(assessment.validationRecipes ?? []);
+  const evidenceById = evidenceIndex(assessment.evidence);
+  const hypotheses = reportableHypotheses(assessment.staticHypotheses ?? [], enrichments, recipes);
 
   const sections: string[] = [
     verdictBannerHtml(assessment),
@@ -78,7 +81,7 @@ export function renderDeepHtmlReport(_runId: string, assessment: SecurityAssessm
         index + 1,
         hypothesis,
         enrichments.get(hypothesis.id),
-        recipes.get(hypothesis.id),
+        signalsForHypothesis(hypothesis, evidenceById),
       ),
     ),
   );
@@ -99,9 +102,10 @@ export function renderDeepHtmlReport(_runId: string, assessment: SecurityAssessm
 
 export function renderDeepMarkdownReport(_runId: string, assessment: SecurityAssessment): string {
   const actions = assessment.rankedActions;
-  const hypotheses = reportableHypotheses(assessment.staticHypotheses ?? []);
   const enrichments = byHypothesisId(assessment.hypothesisEnrichments ?? []);
   const recipes = recipeByHypothesisId(assessment.validationRecipes ?? []);
+  const evidenceById = evidenceIndex(assessment.evidence);
+  const hypotheses = reportableHypotheses(assessment.staticHypotheses ?? [], enrichments, recipes);
 
   const lines = [
     `# VibeShield — ${repositoryName(assessment)}`,
@@ -141,7 +145,7 @@ export function renderDeepMarkdownReport(_runId: string, assessment: SecurityAss
       index + 1,
       hypothesis,
       enrichments.get(hypothesis.id),
-      recipes.get(hypothesis.id),
+      signalsForHypothesis(hypothesis, evidenceById),
     );
   });
 
@@ -188,7 +192,7 @@ function appendHypothesisMarkdown(
   rank: number,
   hypothesis: StaticHypothesis,
   enrichment: HypothesisEnrichment | undefined,
-  recipe: ValidationRecipe | undefined,
+  signals: ReadonlyArray<AttackPathSignal>,
 ): void {
   lines.push(`### ${rank}. ${hypothesis.title}`, "");
   lines.push(enrichment?.attackDescription ?? hypothesis.pathSummary, "");
@@ -203,13 +207,14 @@ function appendHypothesisMarkdown(
     lines.push("Copy this whole block into your coding agent:");
     lines.push("", "```text", enrichment.agentPrompt, "```", "");
   }
-  if (recipe !== undefined) {
-    appendList(lines, "What you'd need", recipe.requiredFixtures);
-    appendOrderedList(lines, "How to check it", recipe.steps);
-    lines.push(`**Expected if safe:** ${recipe.expectedResult}`, "");
-  } else if (enrichment !== undefined && enrichment.validationRecipeText.trim() !== "") {
-    lines.push("**How to confirm it**", "", enrichment.validationRecipeText, "");
+  lines.push("**Technical details**", "");
+  lines.push(`- Static path: ${hypothesis.pathSummary}`);
+  if (signals.length > 0) {
+    for (const signal of signals) {
+      lines.push(`- Signal: ${signal.tool} - ${signal.location}`);
+    }
   }
+  lines.push("");
 }
 
 function appendList(lines: string[], heading: string, values: ReadonlyArray<string>): void {
@@ -223,26 +228,64 @@ function appendList(lines: string[], heading: string, values: ReadonlyArray<stri
   lines.push("");
 }
 
-function appendOrderedList(lines: string[], heading: string, values: ReadonlyArray<string>): void {
-  if (values.length === 0) {
-    return;
-  }
-  lines.push(`**${heading}**`, "");
-  values.forEach((value, index) => {
-    lines.push(`${index + 1}. ${value}`);
-  });
-  lines.push("");
-}
+function reportableHypotheses(
+  hypotheses: ReadonlyArray<StaticHypothesis>,
+  enrichments: ReadonlyMap<string, HypothesisEnrichment>,
+  recipes: ReadonlyMap<string, ValidationRecipe>,
+): StaticHypothesis[] {
+  const seenOwnerFacingPaths = new Set<string>();
+  const reportable: StaticHypothesis[] = [];
 
-function reportableHypotheses(hypotheses: ReadonlyArray<StaticHypothesis>): StaticHypothesis[] {
-  return [...hypotheses]
+  for (const hypothesis of [...hypotheses]
     .filter((hypothesis) => hypothesis.status !== "statically_contradicted")
     .sort(
       (a, b) =>
         b.staticConfidence - a.staticConfidence ||
         a.title.localeCompare(b.title) ||
         a.id.localeCompare(b.id),
+    )) {
+    const key = ownerFacingAttackPathKey(
+      hypothesis,
+      enrichments.get(hypothesis.id),
+      recipes.get(hypothesis.id),
     );
+    if (key !== undefined) {
+      if (seenOwnerFacingPaths.has(key)) {
+        continue;
+      }
+      seenOwnerFacingPaths.add(key);
+    }
+    reportable.push(hypothesis);
+  }
+
+  return reportable;
+}
+
+function ownerFacingAttackPathKey(
+  hypothesis: StaticHypothesis,
+  enrichment: HypothesisEnrichment | undefined,
+  recipe: ValidationRecipe | undefined,
+): string | undefined {
+  if (enrichment === undefined) {
+    return undefined;
+  }
+
+  return [
+    normalizeReportText(hypothesis.title),
+    hypothesis.status,
+    hypothesis.runtimeValidationRequired ? "runtime" : "static",
+    normalizeReportText(enrichment.attackDescription),
+    normalizeReportText(enrichment.impact),
+    normalizeReportText(enrichment.agentPrompt),
+    recipe === undefined
+      ? "no-recipe"
+      : recipe.requiredFixtures.map(normalizeReportText).join("\0"),
+    recipe === undefined ? "" : normalizeReportText(recipe.expectedResult),
+  ].join("\u0001");
+}
+
+function normalizeReportText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function byHypothesisId(
@@ -255,6 +298,45 @@ function recipeByHypothesisId(
   recipes: ReadonlyArray<ValidationRecipe>,
 ): Map<string, ValidationRecipe> {
   return new Map(recipes.map((recipe) => [recipe.hypothesisId, recipe]));
+}
+
+function evidenceIndex(evidence: ReadonlyArray<Evidence>): Map<string, Evidence> {
+  return new Map(evidence.map((record) => [record.id, record]));
+}
+
+function signalsForHypothesis(
+  hypothesis: StaticHypothesis,
+  evidenceById: ReadonlyMap<string, Evidence>,
+): AttackPathSignal[] {
+  const seen = new Set<string>();
+  const signals: AttackPathSignal[] = [];
+
+  for (const evidenceId of hypothesis.supportingEvidenceIds) {
+    const evidence = evidenceById.get(evidenceId);
+    if (evidence === undefined) {
+      continue;
+    }
+    const signal = {
+      tool: evidence.tool,
+      location: evidenceLocation(evidence),
+    };
+    const key = `${signal.tool}\0${signal.location}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    signals.push(signal);
+  }
+
+  return signals;
+}
+
+function evidenceLocation(evidence: Evidence): string {
+  const line =
+    evidence.startLine === evidence.endLine
+      ? `${evidence.startLine}`
+      : `${evidence.startLine}-${evidence.endLine}`;
+  return `${evidence.filePath}:${line}`;
 }
 
 // Kept for the JSON contract surface; finding-context detail stays in report.json

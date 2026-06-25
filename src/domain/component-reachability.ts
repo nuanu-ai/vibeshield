@@ -15,6 +15,7 @@ export interface ComponentReachability {
 
 export type ComponentReachabilityLevel =
   | "present"
+  | "dependency_graph_reachable"
   | "imported"
   | "used"
   | "reachable_from_boundary"
@@ -25,6 +26,7 @@ export type AffectedSymbolReachability = "reachable" | "unknown";
 
 const LEVELS = new Set<ComponentReachabilityLevel>([
   "present",
+  "dependency_graph_reachable",
   "imported",
   "used",
   "reachable_from_boundary",

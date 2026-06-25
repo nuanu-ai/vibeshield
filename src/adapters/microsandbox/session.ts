@@ -9,10 +9,16 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import type { Sandbox } from "microsandbox";
-import type { ExecResult, SandboxSession } from "../../ports/sandbox-runtime.js";
+import type { ExecEvent, Sandbox } from "microsandbox";
+import type {
+  ExecResult,
+  SandboxExecEvent,
+  SandboxExecOptions,
+  SandboxSession,
+} from "../../ports/sandbox-runtime.js";
 
 const execFileP = promisify(execFile);
+const decoder = new TextDecoder();
 
 export class MicrosandboxSession implements SandboxSession {
   constructor(
@@ -20,12 +26,43 @@ export class MicrosandboxSession implements SandboxSession {
     readonly id: string,
   ) {}
 
-  async exec(command: string[]): Promise<ExecResult> {
+  async exec(command: string[], options: SandboxExecOptions = {}): Promise<ExecResult> {
     const joined = command.map(shellQuote).join(" ");
-    const out = await withMicrosandboxContext(`running in Microsandbox: ${joined}`, () =>
-      this.sb.shell(joined),
-    );
-    return { exitCode: out.code, stdout: out.stdout(), stderr: out.stderr() };
+    const shellCommand = withTimeout(joined, options.timeoutMs);
+    const onEvent = options.onEvent;
+    if (onEvent === undefined) {
+      const out = await withMicrosandboxContext(`running in Microsandbox: ${shellCommand}`, () =>
+        this.sb.shell(shellCommand),
+      );
+      return { exitCode: out.code, stdout: out.stdout(), stderr: out.stderr() };
+    }
+    return await withMicrosandboxContext(`streaming in Microsandbox: ${shellCommand}`, async () => {
+      const handle = await this.sb.shellStream(shellCommand);
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      let exitCode: number | undefined;
+
+      for (;;) {
+        const event = await handle.recv();
+        if (event === null) {
+          break;
+        }
+        const mapped = toSandboxExecEvent(event);
+        if (mapped.type === "stdout") {
+          stdout.push(mapped.data);
+        } else if (mapped.type === "stderr") {
+          stderr.push(mapped.data);
+        } else if (mapped.type === "exited") {
+          exitCode = mapped.exitCode;
+        }
+        onEvent(mapped);
+      }
+
+      if (exitCode === undefined) {
+        exitCode = (await handle.wait()).code;
+      }
+      return { exitCode, stdout: stdout.join(""), stderr: stderr.join("") };
+    });
   }
 
   async upload(localPath: string, guestPath: string): Promise<void> {
@@ -74,6 +111,27 @@ export class MicrosandboxSession implements SandboxSession {
       }
     }
   }
+}
+
+function toSandboxExecEvent(event: ExecEvent): SandboxExecEvent {
+  switch (event.kind) {
+    case "started":
+      return { type: "started", pid: event.pid };
+    case "stdout":
+      return { type: "stdout", data: decoder.decode(event.data) };
+    case "stderr":
+      return { type: "stderr", data: decoder.decode(event.data) };
+    case "exited":
+      return { type: "exited", exitCode: event.code };
+  }
+}
+
+function withTimeout(command: string, timeoutMs: number | undefined): string {
+  if (timeoutMs === undefined) {
+    return command;
+  }
+  const seconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+  return `timeout --kill-after=5s ${seconds}s ${command}`;
 }
 
 /**

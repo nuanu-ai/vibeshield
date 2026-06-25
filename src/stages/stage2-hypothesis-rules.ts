@@ -66,11 +66,11 @@ export function stage2HypothesisRules(
     {
       id: "stage2.dependency-usage-path",
       family: "dependency_usage_path",
-      title: "Vulnerable component is imported or used on an analyzed path",
+      title: "Vulnerable component is imported, used, or reachable in the dependency graph",
       source: { kinds: ["Boundary", "Source", "CodeEntity"] },
       target: { kinds: ["Component"] },
       path: {
-        allowedEdgeKinds: ["receives", "registers", "calls", "imports", "uses"],
+        allowedEdgeKinds: ["receives", "registers", "calls", "imports", "uses", "depends_on"],
         maxPathLength,
       },
       coverageRefs: ["stage2:dependency_usage", "stage2:call_graph"],

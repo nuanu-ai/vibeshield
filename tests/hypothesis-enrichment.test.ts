@@ -137,41 +137,72 @@ describe("enrichStaticHypotheses fallback", () => {
       findings: [fixture.finding, fixture2.finding],
       evidence: [fixture.evidence, fixture2.evidence],
     };
-    const valid = modelOutput(fixture.hypothesis.id);
-
-    for (const response of [
-      [valid],
-      [modelOutput("missing-hypothesis"), modelOutput(fixture2.hypothesis.id)],
-      [modelOutput(fixture.hypothesis.id), modelOutput(fixture.hypothesis.id)],
-      [
-        {
-          ...modelOutput(fixture.hypothesis.id),
-          status: "confirmed",
-        } as ModelHypothesisEnrichment,
-        modelOutput(fixture2.hypothesis.id),
-      ],
-      [
-        {
-          ...modelOutput(fixture.hypothesis.id),
-          graphRefs: ["new-edge"],
-        } as ModelHypothesisEnrichment,
-        modelOutput(fixture2.hypothesis.id),
-      ],
-      [
-        {
-          ...modelOutput(fixture.hypothesis.id),
-          attackDescription: "Runtime confirmed exploit.",
-        },
-        modelOutput(fixture2.hypothesis.id),
-      ],
-    ]) {
+    for (const { response, sources } of [
+      {
+        response: [modelOutput("missing-hypothesis"), modelOutput(fixture2.hypothesis.id)],
+        sources: ["catalog", "model"],
+      },
+      {
+        response: [modelOutput(fixture.hypothesis.id), modelOutput(fixture.hypothesis.id)],
+        sources: ["model", "catalog"],
+      },
+      {
+        response: [
+          {
+            ...modelOutput(fixture.hypothesis.id),
+            status: "confirmed",
+          } as ModelHypothesisEnrichment,
+          modelOutput(fixture2.hypothesis.id),
+        ],
+        sources: ["catalog", "model"],
+      },
+      {
+        response: [
+          {
+            ...modelOutput(fixture.hypothesis.id),
+            graphRefs: ["new-edge"],
+          } as ModelHypothesisEnrichment,
+          modelOutput(fixture2.hypothesis.id),
+        ],
+        sources: ["catalog", "model"],
+      },
+      {
+        response: [
+          {
+            ...modelOutput(fixture.hypothesis.id),
+            attackDescription: "Runtime confirmed exploit.",
+          },
+          modelOutput(fixture2.hypothesis.id),
+        ],
+        sources: ["catalog", "model"],
+      },
+    ] as const) {
       const result = await enrichStaticHypotheses({
         ...inputs,
         model: new FakeModel({ response: () => response }),
       });
 
-      expect(result.map((record) => record.source)).toEqual(["catalog", "catalog"]);
+      expect(result.map((record) => record.source)).toEqual(sources);
     }
+
+    const allInvalid = await enrichStaticHypotheses({
+      ...inputs,
+      model: new FakeModel({ response: () => [modelOutput("missing-hypothesis")] }),
+    });
+
+    expect(allInvalid.map((record) => record.source)).toEqual(["catalog", "catalog"]);
+
+    const partial = await enrichStaticHypotheses({
+      ...inputs,
+      model: new FakeModel({
+        response: (input) =>
+          input.hypotheses[0]?.hypothesisId === fixture.hypothesis.id
+            ? [modelOutput(fixture.hypothesis.id)]
+            : [modelOutput("missing-hypothesis")],
+      }),
+    });
+
+    expect(partial.map((record) => record.source)).toEqual(["model", "catalog"]);
   });
 
   it("bounds, redacts, and truncates model input while preserving top hypothesis order", async () => {
@@ -185,7 +216,7 @@ describe("enrichStaticHypotheses fallback", () => {
       response: (input) => input.hypotheses.map(modelOutputFromInput),
     });
 
-    await enrichStaticHypotheses({
+    const result = await enrichStaticHypotheses({
       repositoryName: "repo",
       model,
       staticHypotheses: [lower.hypothesis, higher.hypothesis],
@@ -197,6 +228,21 @@ describe("enrichStaticHypotheses fallback", () => {
       maxHypotheses: 1,
     });
 
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          hypothesisId: lower.hypothesis.id,
+          source: "catalog",
+        }),
+        expect.objectContaining({
+          hypothesisId: higher.hypothesis.id,
+          source: "model",
+          attackDescription: expect.stringContaining(higher.hypothesis.id),
+        }),
+      ]),
+    );
+    expect(result).toHaveLength(2);
+
     const modelHypotheses = model.hypothesisInputs[0]?.hypotheses ?? [];
     expect(modelHypotheses).toHaveLength(1);
     expect(modelHypotheses[0]?.hypothesisId).toBe(higher.hypothesis.id);
@@ -206,6 +252,80 @@ describe("enrichStaticHypotheses fallback", () => {
     expect(modelHypotheses[0]?.validationRecipe?.requiredFixtures).toEqual([
       "boundary_input_fixture",
     ]);
+  });
+
+  it("reports bounded model enrichment progress per hypothesis batch", async () => {
+    const first = enrichmentFixture({ suffix: "first", confidence: 0.9 });
+    const second = enrichmentFixture({ suffix: "second", confidence: 0.8 });
+    const progress: Array<{
+      completed: number;
+      total: number;
+      completedBatches: number;
+      totalBatches: number;
+    }> = [];
+    const model = new FakeModel({
+      response: (input) => input.hypotheses.map(modelOutputFromInput),
+    });
+
+    const result = await enrichStaticHypotheses({
+      repositoryName: "repo",
+      model,
+      staticHypotheses: [first.hypothesis, second.hypothesis],
+      candidates: [first.candidate, second.candidate],
+      graph: mergeGraphs(first.graph, second.graph),
+      validationRecipes: [first.recipe, second.recipe],
+      findings: [first.finding, second.finding],
+      evidence: [first.evidence, second.evidence],
+      onModelProgress: (event) => {
+        progress.push(event);
+      },
+    });
+
+    expect(result.map((record) => record.source)).toEqual(["model", "model"]);
+    expect(model.hypothesisInputs).toHaveLength(1);
+    expect(model.hypothesisInputs[0]?.hypotheses).toHaveLength(2);
+    expect(progress[0]).toEqual({
+      completed: 0,
+      total: 2,
+      completedBatches: 0,
+      totalBatches: 1,
+    });
+    expect(progress.at(-1)).toEqual({
+      completed: 2,
+      total: 2,
+      completedBatches: 1,
+      totalBatches: 1,
+    });
+    expect(progress.map((event) => event.completed)).toEqual([0, 2]);
+    expect(progress.map((event) => event.completedBatches)).toEqual([0, 1]);
+  });
+
+  it("splits an invalid model batch so one bad response does not drop the whole batch", async () => {
+    const first = enrichmentFixture({ suffix: "first", confidence: 0.9 });
+    const second = enrichmentFixture({ suffix: "second", confidence: 0.8 });
+    const model = new FakeModel({
+      response: (input) => {
+        if (input.hypotheses.length > 1) {
+          return null;
+        }
+        const hypothesisId = input.hypotheses[0]?.hypothesisId;
+        return hypothesisId === first.hypothesis.id ? [modelOutput(hypothesisId)] : null;
+      },
+    });
+
+    const result = await enrichStaticHypotheses({
+      repositoryName: "repo",
+      model,
+      staticHypotheses: [first.hypothesis, second.hypothesis],
+      candidates: [first.candidate, second.candidate],
+      graph: mergeGraphs(first.graph, second.graph),
+      validationRecipes: [first.recipe, second.recipe],
+      findings: [first.finding, second.finding],
+      evidence: [first.evidence, second.evidence],
+    });
+
+    expect(result.map((record) => record.source)).toEqual(["model", "catalog"]);
+    expect(model.hypothesisInputs.map((input) => input.hypotheses.length)).toEqual([2, 1, 1]);
   });
 });
 

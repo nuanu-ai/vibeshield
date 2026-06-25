@@ -13,6 +13,11 @@ describe("deep report renderers", () => {
     const json = renderDeepReportJson("run-1", assessment);
 
     expect(json.runId).toBe("run-1");
+    expect(json.assessment.hypothesisCandidates?.[0]).toMatchObject({
+      id: "candidate-1",
+      family: "external_input_to_dangerous_operation",
+      supportingEdgeIds: ["edge-1"],
+    });
     expect(json.assessment.staticHypotheses?.[0]?.id).toBe("hypothesis-1");
     expect(json.assessment.validationRecipes?.[0]?.id).toBe("recipe-1");
     expect(json.assessment.deepActionGroups?.[0]?.id).toBe("group-1");
@@ -32,10 +37,92 @@ describe("deep report renderers", () => {
     expect(markdown).toContain("High confidence");
     expect(markdown).toContain("## What was checked");
     expect(markdown).toContain("| Call graph | Checked |");
-    expect(markdown).toContain("principal_a");
+    expect(markdown).toContain("Signal: gitleaks - src/config.ts:3");
     expect(markdown).not.toContain("statically_supported");
+    expect(markdown).not.toContain("candidate-1");
     expect(markdown).not.toContain("hypothesis-1");
     expect(markdown).not.toContain("repo-map-sha");
+  });
+
+  it("deduplicates owner-facing attack paths without changing JSON", () => {
+    const assessment = deepAssessment();
+    const baseHypothesis = firstRecord(assessment.staticHypotheses, "static hypothesis");
+    const baseRecipe = firstRecord(assessment.validationRecipes, "validation recipe");
+    const baseEnrichment = firstRecord(assessment.hypothesisEnrichments, "hypothesis enrichment");
+    const duplicateHypothesis: NonNullable<SecurityAssessment["staticHypotheses"]>[number] = {
+      ...baseHypothesis,
+      id: "hypothesis-duplicate",
+      candidateId: "candidate-duplicate",
+      staticConfidence: 0.78,
+      pathSummary: "Alternate static path reaches the same fetch.",
+    };
+    const duplicateRecipe: NonNullable<SecurityAssessment["validationRecipes"]>[number] = {
+      ...baseRecipe,
+      id: "recipe-duplicate",
+      hypothesisId: "hypothesis-duplicate",
+      steps: ["Replay the lower-confidence duplicate path."],
+    };
+    const duplicateEnrichment: NonNullable<SecurityAssessment["hypothesisEnrichments"]>[number] = {
+      ...baseEnrichment,
+      id: "enrichment-duplicate",
+      hypothesisId: "hypothesis-duplicate",
+    };
+    const withDuplicate: SecurityAssessment = {
+      ...assessment,
+      staticHypotheses: [...(assessment.staticHypotheses ?? []), duplicateHypothesis],
+      validationRecipes: [...(assessment.validationRecipes ?? []), duplicateRecipe],
+      hypothesisEnrichments: [...(assessment.hypothesisEnrichments ?? []), duplicateEnrichment],
+    };
+
+    const json = renderDeepReportJson("run-1", withDuplicate);
+    const markdown = renderDeepMarkdownReport("run-1", withDuplicate);
+    const html = renderDeepHtmlReport("run-1", withDuplicate);
+
+    expect(json.assessment.staticHypotheses?.map((hypothesis) => hypothesis.id)).toContain(
+      "hypothesis-duplicate",
+    );
+    expect(markdown.match(/^### \d+\. External input reaches <fetch>$/gm)).toHaveLength(1);
+    expect(html.match(/<h3>External input reaches &lt;fetch&gt;<\/h3>/g)).toHaveLength(1);
+    expect(markdown).not.toContain("Replay the lower-confidence duplicate path.");
+    expect(html).not.toContain("Alternate static path reaches the same fetch.");
+  });
+
+  it("keeps same-title attack paths when the owner-facing location differs", () => {
+    const assessment = deepAssessment();
+    const baseHypothesis = firstRecord(assessment.staticHypotheses, "static hypothesis");
+    const baseRecipe = firstRecord(assessment.validationRecipes, "validation recipe");
+    const baseEnrichment = firstRecord(assessment.hypothesisEnrichments, "hypothesis enrichment");
+    const distinctHypothesis: NonNullable<SecurityAssessment["staticHypotheses"]>[number] = {
+      ...baseHypothesis,
+      id: "hypothesis-distinct",
+      candidateId: "candidate-distinct",
+      staticConfidence: 0.78,
+      pathSummary: "External input from another handler reaches fetch.",
+    };
+    const distinctRecipe: NonNullable<SecurityAssessment["validationRecipes"]>[number] = {
+      ...baseRecipe,
+      id: "recipe-distinct",
+      hypothesisId: "hypothesis-distinct",
+    };
+    const distinctEnrichment: NonNullable<SecurityAssessment["hypothesisEnrichments"]>[number] = {
+      ...baseEnrichment,
+      id: "enrichment-distinct",
+      hypothesisId: "hypothesis-distinct",
+      attackDescription: "External input reaches fetch through another handler.",
+      agentPrompt: "Patch the other handler.",
+    };
+    const withDistinctPath: SecurityAssessment = {
+      ...assessment,
+      staticHypotheses: [...(assessment.staticHypotheses ?? []), distinctHypothesis],
+      validationRecipes: [...(assessment.validationRecipes ?? []), distinctRecipe],
+      hypothesisEnrichments: [...(assessment.hypothesisEnrichments ?? []), distinctEnrichment],
+    };
+
+    const markdown = renderDeepMarkdownReport("run-1", withDistinctPath);
+
+    expect(markdown.match(/^### \d+\. External input reaches <fetch>$/gm)).toHaveLength(2);
+    expect(markdown).toContain("External input reaches fetch through the handler.");
+    expect(markdown).toContain("External input reaches fetch through another handler.");
   });
 
   it("renders equivalent escaped deep HTML sections", () => {
@@ -69,8 +156,8 @@ function deepAssessment(): SecurityAssessment {
       {
         area: "call_graph",
         state: "checked",
-        producer: "atom",
-        producerVersion: "atom@2.5.6",
+        producer: "joern",
+        producerVersion: "joern@4.0.565",
       },
     ],
     findingContextAssessments: [
@@ -82,6 +169,22 @@ function deepAssessment(): SecurityAssessment {
         hypothesisIds: ["hypothesis-1"],
         reason: "Finding is on the analyzed static path.",
         coverageState: "checked",
+      },
+    ],
+    hypothesisCandidates: [
+      {
+        id: "candidate-1",
+        ruleId: "stage2.external-input-dangerous-operation",
+        family: "external_input_to_dangerous_operation",
+        title: "External input reaches <fetch>",
+        findingIds: ["finding-1"],
+        supportingNodeIds: ["node-1"],
+        supportingEdgeIds: ["edge-1"],
+        contradictingNodeIds: [],
+        contradictingEdgeIds: [],
+        coverageRefs: ["stage2:data_flow:checked"],
+        requiredValidation: ["dangerous_operation_repro"],
+        candidateReason: "External input reaches fetch across one graph edge.",
       },
     ],
     staticHypotheses: [
@@ -233,4 +336,12 @@ function quickAssessment(): SecurityAssessment {
       "This scan did not run your app; authorization logic and runtime behavior were not checked.",
     generatedAt: "2026-06-24T10:00:00.000Z",
   };
+}
+
+function firstRecord<T>(values: ReadonlyArray<T> | undefined, label: string): T {
+  const value = values?.[0];
+  if (value === undefined) {
+    throw new Error(`missing ${label}`);
+  }
+  return value;
 }

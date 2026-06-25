@@ -66,6 +66,7 @@ describe("OpenRouterModelProvider", () => {
     expect(body.model).toBe("anthropic/claude-sonnet-4.6");
     expect(body.response_format).toEqual({ type: "json_object" });
     expect(body.messages[1].content).toContain("action-1");
+    expect(requests[0]?.init.signal).toBeUndefined();
   });
 
   it("uses the default Sonnet model, accepts fenced JSON, and returns null when invalid", async () => {

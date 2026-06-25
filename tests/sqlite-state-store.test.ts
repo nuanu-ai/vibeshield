@@ -204,9 +204,9 @@ describe("SqliteStateStore", () => {
         {
           area: "model",
           state: "failed",
-          reason: "Atom process exited 137",
-          producer: "atom",
-          producerVersion: "atom@2.5.6",
+          reason: "Joern process exited 137",
+          producer: "joern",
+          producerVersion: "joern@4.0.565",
         },
       ],
     });
@@ -262,8 +262,8 @@ function makeDeepCoverage(overrides: Partial<DeepCoverage> = {}): DeepCoverage {
         state: "checked",
         coveredCount: 1,
         totalCount: 1,
-        producer: "atom",
-        producerVersion: "atom@2.5.6",
+        producer: "joern",
+        producerVersion: "joern@4.0.565",
       },
     ],
     ...overrides,

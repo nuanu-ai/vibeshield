@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { AtomProgramAnalysisBackend } from "../adapters/atom-program-analysis-backend.js";
+import { JoernProgramAnalysisBackend } from "../adapters/joern-program-analysis-backend.js";
 import type { DeepActionGroup } from "../domain/action-group.js";
 import type { ComponentReachability } from "../domain/component-reachability.js";
 import type { DeepCoverage } from "../domain/deep-coverage.js";
@@ -11,21 +12,45 @@ import type { HypothesisEnrichment } from "../domain/hypothesis-enrichment.js";
 import type { Manifest } from "../domain/manifest.js";
 import type { RepositoryMap } from "../domain/repository-map.js";
 import type { ArtifactRef, StageId } from "../domain/run.js";
-import type { SecurityGraph } from "../domain/security-graph.js";
+import type {
+  LineRange,
+  SecurityGraph,
+  SecurityGraphValidationContext,
+} from "../domain/security-graph.js";
 import { securityGraphId, validateSecurityGraph } from "../domain/security-graph.js";
 import type { StaticHypothesis } from "../domain/static-hypothesis.js";
 import type { ValidationRecipe } from "../domain/validation-recipe.js";
 import type { StageContext, StageDefinition, StageResult } from "../pipeline/stage-definition.js";
 import type {
+  ProgramAnalysisCoverageArea,
   ProgramAnalysisExtractionArtifact,
+  ProgramAnalysisExtractionKind,
   ProgramAnalysisFailure,
   ProgramAnalysisModelRef,
 } from "../ports/program-analysis-backend.js";
-import { composeComponentReachability } from "./component-reachability.js";
+import {
+  type CiArtifactObservation,
+  type CiStepObservation,
+  type CiTokenPermissionObservation,
+  type CiTriggerObservation,
+  type CiWorkflowObservation,
+  composeCiIacContext,
+  type IacResourceObservation,
+} from "./ci-iac-context.js";
+import {
+  type ComponentDependencyObservation,
+  type ComponentUsageObservation,
+  composeComponentReachability,
+} from "./component-reachability.js";
 import { groupDeepActions } from "./deep-action-grouping.js";
 import { composeDeepCoverage } from "./deep-coverage.js";
 import { assessFindingContext, type FindingHypothesisLink } from "./finding-context-assessment.js";
 import { enrichStaticHypotheses } from "./hypothesis-enrichment.js";
+import {
+  JOERN_BOUNDARIES_SLICE_PATH,
+  JOERN_CALL_EDGES_SLICE_PATH,
+  JOERN_COMPONENT_USAGE_SLICE_PATH,
+} from "./paths.js";
 import { composeProgramAnalysisGraph } from "./program-analysis-graph.js";
 import { composeQuickScanGraph } from "./quick-scan-graph-import.js";
 import { renderRepositoryMap } from "./repository-map.js";
@@ -37,6 +62,7 @@ export const DEEP_STATIC_STAGE_ID = "deep.static.compose";
 
 const GRAPH_VERSION = "deep-static-v1";
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 export interface DeepStaticData {
   readonly securityGraph: SecurityGraph;
@@ -90,6 +116,11 @@ interface ActionsData {
     readonly affectedFiles: ReadonlyArray<string>;
     readonly verdictImpact: "blocks-deploy" | "degrades" | "informational";
   }>;
+}
+
+interface ProgramArtifactExtractionResult {
+  readonly artifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact>;
+  readonly failures: ReadonlyArray<ProgramAnalysisFailure>;
 }
 
 export function deepStaticStage(): StageDefinition {
@@ -176,6 +207,9 @@ async function enrichHypothesesOrDegrade(input: {
       validationRecipes: input.validationRecipes,
       findings: input.findings,
       evidence: input.evidence,
+      onModelProgress: (progress) => {
+        emitHypothesisEnrichProgress(input.ctx, progress);
+      },
     });
   } catch {
     return [];
@@ -190,42 +224,61 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
   const { clusters } = readInput<CorrelateData>(ctx, "findings.correlate");
   const { candidates: directActions } = readInput<ActionsData>(ctx, "actions.rank");
   const snapshotId = manifest.sourceHash;
-  const backend = new AtomProgramAnalysisBackend({
+  const backend = new JoernProgramAnalysisBackend({
     session: ctx.session,
     artifacts: ctx.artifacts,
+    events: ctx.events,
   });
   const backendFailures: ProgramAnalysisFailure[] = [];
   const compositionFailures: ProgramAnalysisFailure[] = [];
 
   let model: ProgramAnalysisModelRef | undefined;
   let programGraph: SecurityGraph | undefined;
+  let programArtifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact> = [];
 
   try {
     model = await backend.buildModel({ sourceDir, manifest });
-    const artifacts = await extractProgramArtifacts(backend, model);
-    programGraph = composeProgramAnalysisGraph({
-      runId: ctx.runId,
-      snapshotId,
-      graphVersion: GRAPH_VERSION,
-      manifest,
-      artifacts,
-      createdAt,
-    });
   } catch (error) {
     backendFailures.push({
       area: "model",
       reason: publicReason("Deep Static program analysis failed", error),
     });
   }
+  if (model !== undefined) {
+    const extracted = await extractProgramArtifacts(backend, model);
+    programArtifacts = extracted.artifacts;
+    backendFailures.push(...extracted.failures);
+    if (extracted.artifacts.length > 0) {
+      emitDeepProgress(ctx, "Assembling the security graph");
+      try {
+        programGraph = composeProgramAnalysisGraph({
+          runId: ctx.runId,
+          snapshotId,
+          graphVersion: GRAPH_VERSION,
+          manifest,
+          artifacts: extracted.artifacts,
+          createdAt,
+        });
+      } catch (error) {
+        compositionFailures.push({
+          area: "model",
+          reason: publicReason("Deep Static graph assembly failed", error),
+        });
+      }
+    }
+  }
 
-  const backendCoverage = backend.reportCoverage({
-    manifest,
-    ...(model === undefined ? {} : { model }),
-    ...(backendFailures.length === 0 ? {} : { failures: backendFailures }),
-  });
+  const backendCoverage = backend
+    .reportCoverage({
+      manifest,
+      ...(model === undefined ? {} : { model }),
+      ...(backendFailures.length === 0 ? {} : { failures: backendFailures }),
+    })
+    .concat(componentUsageCoverage(programArtifacts));
 
   const graph = composeGraphOrFallback({
     ctx,
+    sourceDir,
     manifest,
     evidence,
     findings,
@@ -234,12 +287,30 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     baseGraph: programGraph,
     failures: compositionFailures,
   });
-  const reachability = composeReachabilityOrDegrade({
-    graph,
+  const graphWithCiIac = await composeCiIacOrDegrade({
+    ctx,
+    sourceDir,
     manifest,
+    findings,
+    graph,
+    failures: compositionFailures,
+  });
+  emitDeepProgress(ctx, "Checking reachability");
+  const dependencyObservations = await componentDependencyObservationsFromEvidence({
+    ctx,
+    evidence,
+    findings,
+    failures: compositionFailures,
+  });
+  const reachability = composeReachabilityOrDegrade({
+    graph: graphWithCiIac,
+    manifest,
+    artifacts: programArtifacts,
+    dependencyObservations,
     failures: compositionFailures,
   });
 
+  emitDeepProgress(ctx, "Looking for likely attack paths");
   const correlated = await correlateOrDegrade({
     ctx,
     manifest,
@@ -251,6 +322,7 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     failures: compositionFailures,
   });
 
+  emitDeepProgress(ctx, "Writing the Deep Static map");
   const repositoryMap = renderRepositoryMap(reachability.graph);
   const repositoryMapPath = path.join(ctx.runDir, "repository-map.json");
   await mkdir(ctx.runDir, { recursive: true });
@@ -272,6 +344,14 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     failures: compositionFailures,
     createdAt,
   });
+  await persistDeepStaticState({
+    ctx,
+    manifest,
+    evidence,
+    graph: reachability.graph,
+    artifacts: programArtifacts,
+    deepCoverage,
+  });
 
   return {
     securityGraph: reachability.graph,
@@ -288,21 +368,145 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
   };
 }
 
+async function persistDeepStaticState(input: {
+  readonly ctx: StageContext;
+  readonly manifest: Manifest;
+  readonly evidence: ReadonlyArray<FindingEvidence>;
+  readonly graph: SecurityGraph;
+  readonly artifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact>;
+  readonly deepCoverage: DeepCoverage;
+}): Promise<void> {
+  await input.ctx.state.recordSecurityGraph(
+    input.graph,
+    securityGraphValidationContext(input.manifest, input.evidence, input.artifacts, input.graph),
+  );
+  await input.ctx.state.recordDeepCoverage(input.deepCoverage);
+}
+
+function securityGraphValidationContext(
+  manifest: Manifest,
+  evidence: ReadonlyArray<FindingEvidence>,
+  artifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact>,
+  graph: SecurityGraph,
+): SecurityGraphValidationContext {
+  return {
+    manifestPaths: manifest.files.map((file) => file.path),
+    evidenceIds: uniqueStrings([
+      ...evidence.map((item) => item.id),
+      ...artifacts.map((artifact) => artifact.sliceArtifact.blobSha256),
+      ...graph.nodes.flatMap((node) => node.evidenceIds),
+      ...graph.edges.flatMap((edge) => edge.evidenceIds),
+      ...graph.flows.flatMap((flow) => flow.evidenceIds),
+    ]),
+  };
+}
+
 async function extractProgramArtifacts(
-  backend: AtomProgramAnalysisBackend,
+  backend: JoernProgramAnalysisBackend,
   model: ProgramAnalysisModelRef,
-): Promise<ProgramAnalysisExtractionArtifact[]> {
-  return [
-    await backend.extractEntities(model),
-    await backend.extractBoundaries(model),
-    await backend.extractCallEdges(model),
-    await backend.extractFlows(model),
-    await backend.extractComponentUsage(model),
+): Promise<ProgramArtifactExtractionResult> {
+  const artifacts: ProgramAnalysisExtractionArtifact[] = [];
+  const failures: ProgramAnalysisFailure[] = [];
+  const reusedUsageArtifacts: ReadonlyArray<{
+    readonly kind: ProgramAnalysisExtractionKind;
+    readonly area: ProgramAnalysisCoverageArea;
+    readonly slicePath: string;
+  }> = [
+    { kind: "boundaries", area: "boundaries", slicePath: JOERN_BOUNDARIES_SLICE_PATH },
+    { kind: "call_edges", area: "call_edges", slicePath: JOERN_CALL_EDGES_SLICE_PATH },
+    {
+      kind: "component_usage",
+      area: "component_usage",
+      slicePath: JOERN_COMPONENT_USAGE_SLICE_PATH,
+    },
   ];
+
+  try {
+    const usageArtifact = await backend.extractEntities(model);
+    artifacts.push(
+      usageArtifact,
+      ...reusedUsageArtifacts.map((artifact) =>
+        reuseUsageArtifact(usageArtifact, artifact.kind, artifact.slicePath),
+      ),
+    );
+  } catch (error) {
+    for (const extraction of [
+      { kind: "entities", area: "entities" },
+      ...reusedUsageArtifacts,
+    ] as const) {
+      failures.push({
+        area: extraction.area,
+        reason: publicReason(`Deep Static ${extraction.kind} extraction failed`, error),
+      });
+    }
+  }
+
+  try {
+    artifacts.push(await backend.extractFlows(model));
+  } catch (error) {
+    failures.push({
+      area: "flows",
+      reason: publicReason("Deep Static flows extraction failed", error),
+    });
+  }
+
+  return { artifacts, failures };
+}
+
+function reuseUsageArtifact(
+  artifact: ProgramAnalysisExtractionArtifact,
+  kind: ProgramAnalysisExtractionKind,
+  slicePath: string,
+): ProgramAnalysisExtractionArtifact {
+  return {
+    ...artifact,
+    kind,
+    slicePath,
+  };
+}
+
+function emitDeepProgress(ctx: StageContext, label: string): void {
+  ctx.events.emit({
+    type: "scan-progress",
+    stageId: DEEP_STATIC_STAGE_ID,
+    message: label,
+    details: {
+      publicLabel: label,
+      source: "deep-static",
+    },
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function emitHypothesisEnrichProgress(
+  ctx: StageContext,
+  progress: {
+    readonly completed: number;
+    readonly total: number;
+    readonly completedBatches: number;
+    readonly totalBatches: number;
+  },
+): void {
+  const label = `Explaining likely attack paths ${progress.completedBatches}/${progress.totalBatches} batches (${progress.completed}/${progress.total} hypotheses)`;
+  ctx.events.emit({
+    type: "scan-progress",
+    stageId: HYPOTHESIS_ENRICH_STAGE_ID,
+    message: label,
+    details: {
+      publicLabel: label,
+      source: "model",
+      completed: progress.completed,
+      total: progress.total,
+      completedBatches: progress.completedBatches,
+      totalBatches: progress.totalBatches,
+    },
+    timestamp: new Date().toISOString(),
+  });
 }
 
 function composeGraphOrFallback(input: {
   readonly ctx: StageContext;
+  readonly sourceDir: string;
   readonly manifest: Manifest;
   readonly evidence: ReadonlyArray<FindingEvidence>;
   readonly findings: ReadonlyArray<Finding>;
@@ -345,9 +549,458 @@ function composeGraphOrFallback(input: {
   }
 }
 
+async function composeCiIacOrDegrade(input: {
+  readonly ctx: StageContext;
+  readonly sourceDir: string;
+  readonly manifest: Manifest;
+  readonly findings: ReadonlyArray<Finding>;
+  readonly graph: SecurityGraph;
+  readonly failures: ProgramAnalysisFailure[];
+}): Promise<SecurityGraph> {
+  try {
+    const observations = await ciIacObservationsFromSnapshot(input);
+    return composeCiIacContext({
+      graph: input.graph,
+      manifest: input.manifest,
+      workflows: observations.workflows,
+      iacResources: observations.iacResources,
+    });
+  } catch (error) {
+    input.failures.push({
+      area: "ci_iac",
+      reason: publicReason("Deep Static CI/IaC context projection failed", error),
+    });
+    return input.graph;
+  }
+}
+
+async function ciIacObservationsFromSnapshot(input: {
+  readonly ctx: StageContext;
+  readonly sourceDir: string;
+  readonly manifest: Manifest;
+  readonly findings: ReadonlyArray<Finding>;
+}): Promise<{
+  readonly workflows: ReadonlyArray<CiWorkflowObservation>;
+  readonly iacResources: ReadonlyArray<IacResourceObservation>;
+}> {
+  const findingsByPath = findingsByLocationPath(input.findings);
+  const workflows: CiWorkflowObservation[] = [];
+  const iacResources: IacResourceObservation[] = [];
+
+  for (const file of input.manifest.files) {
+    if (isGithubActionsWorkflow(file.path)) {
+      const text = await readSnapshotText(input.ctx, input.sourceDir, file.path);
+      workflows.push(workflowObservationFromText(file.path, text, findingsByPath));
+      continue;
+    }
+    if (isIacFile(file.path)) {
+      const text = await readSnapshotText(input.ctx, input.sourceDir, file.path);
+      iacResources.push(...iacResourceObservationsFromText(file.path, text, findingsByPath));
+    }
+  }
+
+  return { workflows, iacResources };
+}
+
+async function readSnapshotText(
+  ctx: StageContext,
+  sourceDir: string,
+  repoPath: string,
+): Promise<string> {
+  const bytes = await ctx.session.read(`${sourceDir}/${repoPath}`);
+  return new TextDecoder().decode(bytes);
+}
+
+function workflowObservationFromText(
+  workflowPath: string,
+  text: string,
+  findingsByPath: ReadonlyMap<string, ReadonlyArray<Finding>>,
+): CiWorkflowObservation {
+  const lines = text.split(/\r?\n/);
+  const evidenceIds = [ciIacEvidenceId("workflow", workflowPath, text)];
+  const steps = workflowSteps(workflowPath, lines);
+  return {
+    workflowPath,
+    name: workflowName(workflowPath, lines),
+    evidenceIds,
+    lineRange: { startLine: 1, endLine: Math.max(lines.length, 1) },
+    findingIds: findingIdsForPath(findingsByPath, workflowPath, "github-action"),
+    triggers: workflowTriggers(workflowPath, lines),
+    steps,
+    tokenPermissions: workflowTokenPermissions(workflowPath, lines, steps),
+    artifacts: workflowArtifacts(workflowPath, lines, steps),
+  };
+}
+
+function workflowName(workflowPath: string, lines: ReadonlyArray<string>): string {
+  const explicit = lines
+    .map((line) => line.match(/^\s*name\s*:\s*(.+?)\s*$/)?.[1])
+    .find((value): value is string => value !== undefined);
+  return stripYamlScalar(explicit) ?? path.posix.basename(workflowPath).replace(/\.ya?ml$/i, "");
+}
+
+function workflowTriggers(
+  workflowPath: string,
+  lines: ReadonlyArray<string>,
+): CiTriggerObservation[] {
+  const triggers = new Map<string, CiTriggerObservation>();
+  const knownEvents = new Set([
+    "branch_protection_rule",
+    "check_run",
+    "check_suite",
+    "create",
+    "delete",
+    "deployment",
+    "deployment_status",
+    "discussion",
+    "fork",
+    "gollum",
+    "issue_comment",
+    "issues",
+    "label",
+    "merge_group",
+    "milestone",
+    "page_build",
+    "project",
+    "project_card",
+    "project_column",
+    "public",
+    "pull_request",
+    "pull_request_review",
+    "pull_request_review_comment",
+    "pull_request_target",
+    "push",
+    "registry_package",
+    "release",
+    "repository_dispatch",
+    "schedule",
+    "status",
+    "watch",
+    "workflow_call",
+    "workflow_dispatch",
+    "workflow_run",
+  ]);
+
+  lines.forEach((line, index) => {
+    const lineNumber = index + 1;
+    const onInline = line.match(/^\s*on\s*:\s*(.+?)\s*$/);
+    if (onInline !== null) {
+      const value = stripYamlScalar(onInline[1]) ?? "";
+      const values =
+        value.startsWith("[") && value.endsWith("]")
+          ? value
+              .slice(1, -1)
+              .split(",")
+              .map((item) => stripYamlScalar(item))
+          : [value];
+      for (const event of values) {
+        if (event !== undefined && knownEvents.has(event)) {
+          triggers.set(event, {
+            event,
+            evidenceIds: [ciIacEvidenceId("workflow-trigger", workflowPath, line)],
+            lineRange: { startLine: lineNumber, endLine: lineNumber },
+          });
+        }
+      }
+    }
+    const blockEvent = line.match(/^\s{2,}([A-Za-z_][\w-]*)\s*:/)?.[1];
+    if (blockEvent !== undefined && knownEvents.has(blockEvent)) {
+      triggers.set(blockEvent, {
+        event: blockEvent,
+        evidenceIds: [ciIacEvidenceId("workflow-trigger", workflowPath, line)],
+        lineRange: { startLine: lineNumber, endLine: lineNumber },
+      });
+    }
+  });
+
+  return [...triggers.values()].sort((a, b) => a.event.localeCompare(b.event));
+}
+
+function workflowSteps(workflowPath: string, lines: ReadonlyArray<string>): CiStepObservation[] {
+  return lines.flatMap((line, index) => {
+    const lineNumber = index + 1;
+    const uses = yamlValue(line, "uses");
+    const run = yamlValue(line, "run");
+    if (uses === undefined && run === undefined) {
+      return [];
+    }
+    const value = uses ?? run ?? "step";
+    const name = stepName(lines, index) ?? value;
+    return [
+      {
+        id: `${lineNumber}-${slug(value)}`,
+        name,
+        evidenceIds: [ciIacEvidenceId("workflow-step", workflowPath, line)],
+        lineRange: { startLine: lineNumber, endLine: lineNumber },
+        ...(uses === undefined ? {} : { uses, pinned: isPinnedAction(uses) }),
+        ...(run === undefined ? {} : { run }),
+      },
+    ];
+  });
+}
+
+function workflowTokenPermissions(
+  workflowPath: string,
+  lines: ReadonlyArray<string>,
+  steps: ReadonlyArray<CiStepObservation>,
+): CiTokenPermissionObservation[] {
+  const firstStepId = steps[0]?.id;
+  return lines.flatMap((line, index) => {
+    const match = line.match(
+      /^\s*(actions|attestations|checks|contents|deployments|discussions|id-token|issues|packages|pages|pull-requests|repository-projects|security-events|statuses)\s*:\s*(read|write|none)\b/i,
+    );
+    if (match === null) {
+      return [];
+    }
+    const lineNumber = index + 1;
+    const scope = match[1];
+    const access = match[2];
+    if (scope === undefined || access === undefined) {
+      return [];
+    }
+    return [
+      {
+        scope: scope.toLowerCase(),
+        access: access.toLowerCase() as "none" | "read" | "write",
+        evidenceIds: [ciIacEvidenceId("workflow-token", workflowPath, line)],
+        lineRange: { startLine: lineNumber, endLine: lineNumber },
+        ...(firstStepId === undefined ? {} : { stepId: firstStepId }),
+      },
+    ];
+  });
+}
+
+function workflowArtifacts(
+  _workflowPath: string,
+  lines: ReadonlyArray<string>,
+  steps: ReadonlyArray<CiStepObservation>,
+): CiArtifactObservation[] {
+  return steps.flatMap((step) => {
+    if (step.uses?.toLowerCase().includes("actions/upload-artifact") !== true) {
+      return [];
+    }
+    const startIndex = Math.max(0, (step.lineRange?.startLine ?? 1) - 1);
+    const block = lines.slice(startIndex, Math.min(lines.length, startIndex + 12));
+    const name =
+      firstYamlValue(block, "name") ?? firstYamlValue(block, "path") ?? `artifact-${step.id}`;
+    const artifactPath = firstYamlValue(block, "path");
+    return [
+      {
+        stepId: step.id,
+        name,
+        evidenceIds: step.evidenceIds,
+        ...(step.lineRange === undefined ? {} : { lineRange: step.lineRange }),
+        ...(artifactPath === undefined ? {} : { path: artifactPath }),
+      },
+    ];
+  });
+}
+
+function iacResourceObservationsFromText(
+  repoPath: string,
+  text: string,
+  findingsByPath: ReadonlyMap<string, ReadonlyArray<Finding>>,
+): IacResourceObservation[] {
+  if (/\.tf(vars)?$/i.test(repoPath)) {
+    return terraformResourceObservations(repoPath, text, findingsByPath);
+  }
+  if (/\.(ya?ml|json)$/i.test(repoPath)) {
+    return yamlIacResourceObservations(repoPath, text, findingsByPath);
+  }
+  return genericIacResourceObservation(repoPath, text, findingsByPath);
+}
+
+function terraformResourceObservations(
+  repoPath: string,
+  text: string,
+  findingsByPath: ReadonlyMap<string, ReadonlyArray<Finding>>,
+): IacResourceObservation[] {
+  const matches = [...text.matchAll(/resource\s+"([^"]+)"\s+"([^"]+)"/g)];
+  if (matches.length === 0) {
+    return genericIacResourceObservation(repoPath, text, findingsByPath);
+  }
+  return matches.map((match, index) => {
+    const resourceType = match[1];
+    const name = match[2];
+    if (resourceType === undefined || name === undefined) {
+      throw new Error(`invalid Terraform resource match in ${repoPath}`);
+    }
+    const start = match.index ?? 0;
+    const end = matches[index + 1]?.index ?? text.length;
+    const block = text.slice(start, end);
+    const line = lineNumberForOffset(text, start);
+    return {
+      repoPath,
+      resourceType,
+      name,
+      evidenceIds: [ciIacEvidenceId("iac-resource", repoPath, match[0])],
+      lineRange: { startLine: line, endLine: line },
+      public: looksPublicIac(block),
+      findingIds: findingIdsForPath(findingsByPath, repoPath, "iac"),
+    };
+  });
+}
+
+function yamlIacResourceObservations(
+  repoPath: string,
+  text: string,
+  findingsByPath: ReadonlyMap<string, ReadonlyArray<Finding>>,
+): IacResourceObservation[] {
+  const lines = text.split(/\r?\n/);
+  const kindLine = lines.findIndex((line) => /^\s*kind\s*:/.test(line));
+  if (kindLine < 0) {
+    return genericIacResourceObservation(repoPath, text, findingsByPath);
+  }
+  const kind = yamlValue(lines[kindLine] ?? "", "kind") ?? "yaml-resource";
+  const name = firstYamlValue(lines, "name") ?? path.posix.basename(repoPath);
+  return [
+    {
+      repoPath,
+      resourceType: kind,
+      name,
+      evidenceIds: [ciIacEvidenceId("iac-resource", repoPath, lines[kindLine] ?? kind)],
+      lineRange: { startLine: kindLine + 1, endLine: kindLine + 1 },
+      public: looksPublicIac(text),
+      findingIds: findingIdsForPath(findingsByPath, repoPath, "iac"),
+    },
+  ];
+}
+
+function genericIacResourceObservation(
+  repoPath: string,
+  text: string,
+  findingsByPath: ReadonlyMap<string, ReadonlyArray<Finding>>,
+): IacResourceObservation[] {
+  if (!looksPublicIac(text) && findingIdsForPath(findingsByPath, repoPath, "iac").length === 0) {
+    return [];
+  }
+  return [
+    {
+      repoPath,
+      resourceType: path.posix.basename(repoPath).toLowerCase(),
+      name: path.posix.basename(repoPath),
+      evidenceIds: [ciIacEvidenceId("iac-resource", repoPath, text.slice(0, 200))],
+      lineRange: { startLine: 1, endLine: 1 },
+      public: looksPublicIac(text),
+      findingIds: findingIdsForPath(findingsByPath, repoPath, "iac"),
+    },
+  ];
+}
+
+function findingsByLocationPath(
+  findings: ReadonlyArray<Finding>,
+): ReadonlyMap<string, ReadonlyArray<Finding>> {
+  const byPath = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    for (const location of finding.locations) {
+      const current = byPath.get(location.filePath) ?? [];
+      current.push(finding);
+      byPath.set(location.filePath, current);
+    }
+  }
+  return byPath;
+}
+
+function findingIdsForPath(
+  findingsByPath: ReadonlyMap<string, ReadonlyArray<Finding>>,
+  repoPath: string,
+  category: Finding["category"],
+): string[] {
+  return (findingsByPath.get(repoPath) ?? [])
+    .filter((finding) => finding.category === category)
+    .map((finding) => finding.id)
+    .sort();
+}
+
+function isGithubActionsWorkflow(filePath: string): boolean {
+  return /^\.github\/workflows\/[^/]+\.ya?ml$/i.test(filePath);
+}
+
+function isIacFile(filePath: string): boolean {
+  if (isGithubActionsWorkflow(filePath)) {
+    return false;
+  }
+  const base = path.posix.basename(filePath);
+  const lowerPath = filePath.toLowerCase();
+  return (
+    /^dockerfile([.-].*)?$/i.test(base) ||
+    /^(docker-)?compose([.-].*)?\.ya?ml$/i.test(base) ||
+    /\.(tf|tfvars)$/i.test(base) ||
+    ((base === "Chart.yaml" || /^values([.-].*)?\.ya?ml$/i.test(base)) &&
+      (lowerPath.includes("/helm/") || lowerPath.includes("/charts/"))) ||
+    (/\.(ya?ml|json)$/i.test(base) &&
+      (lowerPath.startsWith("k8s/") ||
+        lowerPath.startsWith("kubernetes/") ||
+        lowerPath.includes("/k8s/") ||
+        lowerPath.includes("/kubernetes/")))
+  );
+}
+
+function firstYamlValue(lines: ReadonlyArray<string>, key: string): string | undefined {
+  return lines.map((line) => yamlValue(line, key)).find((value) => value !== undefined);
+}
+
+function yamlValue(line: string, key: string): string | undefined {
+  const match = line.match(new RegExp(`^\\s*-?\\s*${escapeRegExp(key)}\\s*:\\s*(.+?)\\s*$`));
+  return stripYamlScalar(match?.[1]);
+}
+
+function stepName(lines: ReadonlyArray<string>, index: number): string | undefined {
+  for (let current = index; current >= Math.max(0, index - 4); current -= 1) {
+    const name = yamlValue(lines[current] ?? "", "name");
+    if (name !== undefined) {
+      return name;
+    }
+  }
+  return undefined;
+}
+
+function stripYamlScalar(value: string | undefined): string | undefined {
+  const stripped = value
+    ?.trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\s+#.*$/, "");
+  return stripped === undefined || stripped === "" || stripped === "{}" ? undefined : stripped;
+}
+
+function isPinnedAction(uses: string): boolean {
+  return /@[0-9a-f]{40}$/i.test(uses);
+}
+
+function looksPublicIac(text: string): boolean {
+  return /0\.0\.0\.0\/0|::\/0|public-read|public_read|LoadBalancer|Ingress|internet-facing/i.test(
+    text,
+  );
+}
+
+function lineNumberForOffset(text: string, offset: number): number {
+  return text.slice(0, offset).split(/\r?\n/).length;
+}
+
+function ciIacEvidenceId(kind: string, repoPath: string, body: string): string {
+  return `ci_iac_${createHash("sha256")
+    .update([kind, repoPath, body].join("\0"))
+    .digest("hex")
+    .slice(0, 16)}`;
+}
+
+function slug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function composeReachabilityOrDegrade(input: {
   readonly graph: SecurityGraph;
   readonly manifest: Manifest;
+  readonly artifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact>;
+  readonly dependencyObservations: ReadonlyArray<ComponentDependencyObservation>;
   readonly failures: ProgramAnalysisFailure[];
 }): {
   readonly graph: SecurityGraph;
@@ -357,6 +1010,8 @@ function composeReachabilityOrDegrade(input: {
     const result = composeComponentReachability({
       graph: input.graph,
       manifest: input.manifest,
+      observations: componentUsageObservationsFromArtifacts(input.artifacts),
+      dependencyObservations: input.dependencyObservations,
     });
     return { graph: result.graph, componentReachability: result.reachability };
   } catch (error) {
@@ -366,6 +1021,306 @@ function composeReachabilityOrDegrade(input: {
     });
     return { graph: input.graph, componentReachability: [] };
   }
+}
+
+function componentUsageCoverage(
+  artifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact>,
+): ReturnType<JoernProgramAnalysisBackend["reportCoverage"]> {
+  const artifact = artifacts.find((item) => item.kind === "component_usage");
+  if (artifact === undefined) {
+    return [];
+  }
+  const count = componentUsageObservationsFromArtifacts([artifact]).length;
+  return [
+    {
+      area: "component_usage",
+      state: "checked",
+      producer: "joern",
+      producerVersion: artifact.backendVersion,
+      coveredCount: count,
+      totalCount: count,
+    },
+  ];
+}
+
+function componentUsageObservationsFromArtifacts(
+  artifacts: ReadonlyArray<ProgramAnalysisExtractionArtifact>,
+): ComponentUsageObservation[] {
+  return artifacts
+    .filter((artifact) => artifact.kind === "component_usage")
+    .flatMap((artifact) => {
+      const root = recordValue(artifact.parsed);
+      if (root === undefined) {
+        return [];
+      }
+      return recordArray(root.componentUsages).flatMap((record) => {
+        const packageName = stringValue(record.packageName);
+        const repoPath = stringValue(record.repoPath);
+        const usageKind = stringValue(record.usageKind);
+        const lineRange = lineRangeValue(record.lineRange);
+        if (
+          packageName === undefined ||
+          repoPath === undefined ||
+          lineRange === undefined ||
+          (usageKind !== "imported" && usageKind !== "used")
+        ) {
+          return [];
+        }
+        return [
+          {
+            packageName,
+            repoPath,
+            usageKind,
+            evidenceIds: [artifact.sliceArtifact.blobSha256],
+            lineRange,
+          },
+        ];
+      });
+    });
+}
+
+async function componentDependencyObservationsFromEvidence(input: {
+  readonly ctx: StageContext;
+  readonly evidence: ReadonlyArray<FindingEvidence>;
+  readonly findings: ReadonlyArray<Finding>;
+  readonly failures: ProgramAnalysisFailure[];
+}): Promise<ComponentDependencyObservation[]> {
+  const trivyEvidenceByRaw = new Map<string, FindingEvidence[]>();
+  for (const item of input.evidence) {
+    if (item.tool !== "trivy") {
+      continue;
+    }
+    const current = trivyEvidenceByRaw.get(item.rawArtifactBlobSha256) ?? [];
+    current.push(item);
+    trivyEvidenceByRaw.set(item.rawArtifactBlobSha256, current);
+  }
+  if (trivyEvidenceByRaw.size === 0) {
+    return [];
+  }
+
+  const evidenceIdsByPackage = findingEvidenceIdsByPackage(input.findings);
+  const observations: ComponentDependencyObservation[] = [];
+  const seen = new Set<string>();
+
+  for (const [rawArtifactBlobSha256, rawEvidence] of trivyEvidenceByRaw) {
+    let parsed: unknown;
+    try {
+      const bytes = await input.ctx.artifacts.read(rawArtifactBlobSha256);
+      parsed = JSON.parse(decoder.decode(bytes)) as unknown;
+    } catch (error) {
+      input.failures.push({
+        area: "component_usage",
+        reason: publicReason("Deep Static package dependency graph read failed", error),
+      });
+      continue;
+    }
+
+    for (const observation of componentDependencyObservationsFromTrivyRaw({
+      raw: parsed,
+      fallbackEvidenceIds: rawEvidence.map((item) => item.id),
+      evidenceIdsByPackage,
+    })) {
+      const key = [
+        observation.manifestPath,
+        observation.sourcePackageName,
+        observation.packageName,
+        observation.relationship ?? "",
+      ].join("\0");
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      observations.push(observation);
+    }
+  }
+
+  return observations;
+}
+
+function componentDependencyObservationsFromTrivyRaw(input: {
+  readonly raw: unknown;
+  readonly fallbackEvidenceIds: ReadonlyArray<string>;
+  readonly evidenceIdsByPackage: ReadonlyMap<string, ReadonlyArray<string>>;
+}): ComponentDependencyObservation[] {
+  const root = recordValue(input.raw);
+  if (root === undefined) {
+    return [];
+  }
+  const observations: ComponentDependencyObservation[] = [];
+
+  for (const result of recordArray(root.Results)) {
+    const manifestPath = normalizeTrivyTarget(stringValue(result.Target));
+    const packages = recordArray(result.Packages);
+    if (manifestPath === undefined || packages.length === 0) {
+      continue;
+    }
+    const packagesById = trivyPackagesById(packages);
+    for (const pkg of packages) {
+      const sourcePackageName =
+        stringValue(pkg.Name) ?? packageNameFromPackageId(stringValue(pkg.ID));
+      const dependsOn = stringArray(pkg.DependsOn);
+      if (sourcePackageName === undefined || dependsOn.length === 0) {
+        continue;
+      }
+      const relationship = stringValue(pkg.Relationship);
+      for (const dependencyId of dependsOn) {
+        const dependency = packagesById.get(dependencyId);
+        const packageName = dependency?.name ?? packageNameFromPackageId(dependencyId);
+        if (packageName === undefined) {
+          continue;
+        }
+        observations.push({
+          sourcePackageName,
+          packageName,
+          manifestPath,
+          ...(dependency?.version === undefined ? {} : { version: dependency.version }),
+          ...(relationship === undefined ? {} : { relationship }),
+          evidenceIds: evidenceIdsForPackage(
+            packageName,
+            input.evidenceIdsByPackage,
+            input.fallbackEvidenceIds,
+          ),
+          lineRange: { startLine: 1, endLine: 1 },
+        });
+      }
+    }
+  }
+
+  return observations;
+}
+
+function trivyPackagesById(
+  packages: ReadonlyArray<Readonly<Record<string, unknown>>>,
+): Map<string, { readonly name: string; readonly version?: string }> {
+  const out = new Map<string, { readonly name: string; readonly version?: string }>();
+  for (const pkg of packages) {
+    const id = stringValue(pkg.ID);
+    if (id === undefined) {
+      continue;
+    }
+    const name = stringValue(pkg.Name) ?? packageNameFromPackageId(id);
+    if (name === undefined) {
+      continue;
+    }
+    const version = stringValue(pkg.Version);
+    out.set(id, {
+      name,
+      ...(version === undefined ? {} : { version }),
+    });
+  }
+  return out;
+}
+
+function findingEvidenceIdsByPackage(
+  findings: ReadonlyArray<Finding>,
+): Map<string, ReadonlyArray<string>> {
+  const out = new Map<string, string[]>();
+  for (const finding of findings) {
+    if (finding.sourceTool !== "trivy") {
+      continue;
+    }
+    const packageName = finding.metadata?.packageName;
+    if (packageName === undefined || packageName.trim() === "") {
+      continue;
+    }
+    const current = out.get(packageName) ?? [];
+    current.push(...finding.evidenceIds);
+    out.set(packageName, uniqueStrings(current));
+  }
+  return out;
+}
+
+function evidenceIdsForPackage(
+  packageName: string,
+  evidenceIdsByPackage: ReadonlyMap<string, ReadonlyArray<string>>,
+  fallbackEvidenceIds: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const exact = evidenceIdsByPackage.get(packageName);
+  if (exact !== undefined && exact.length > 0) {
+    return exact;
+  }
+  for (const [candidate, evidenceIds] of evidenceIdsByPackage) {
+    if (
+      evidenceIds.length > 0 &&
+      (candidate.endsWith(`/${packageName}`) || packageName.endsWith(`/${candidate}`))
+    ) {
+      return evidenceIds;
+    }
+  }
+  return fallbackEvidenceIds;
+}
+
+function packageNameFromPackageId(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const at = value.lastIndexOf("@");
+  if (at > 0) {
+    return value.slice(0, at);
+  }
+  return value.trim() === "" ? undefined : value;
+}
+
+function normalizeTrivyTarget(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = value
+    .replace(/\\/g, "/")
+    .replace(/^\/work\/source\//, "")
+    .replace(/^\.\//, "");
+  return normalized === "" || normalized.startsWith("../") || path.isAbsolute(normalized)
+    ? undefined
+    : normalized;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.flatMap((item) => {
+        const text = stringValue(item);
+        return text === undefined ? [] : [text];
+      })
+    : [];
+}
+
+function uniqueStrings(values: ReadonlyArray<string>): string[] {
+  return [...new Set(values)];
+}
+
+function recordValue(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
+function recordArray(value: unknown): ReadonlyArray<Readonly<Record<string, unknown>>> {
+  return Array.isArray(value)
+    ? value.flatMap((item) => {
+        const record = recordValue(item);
+        return record === undefined ? [] : [record];
+      })
+    : [];
+}
+
+function lineRangeValue(value: unknown): LineRange | undefined {
+  const record = recordValue(value);
+  if (record === undefined) {
+    return undefined;
+  }
+  const startLine = positiveInteger(record.startLine);
+  const endLine = positiveInteger(record.endLine);
+  if (startLine === undefined) {
+    return undefined;
+  }
+  return { startLine, endLine: endLine ?? startLine };
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return Number.isInteger(value) && typeof value === "number" && value > 0 ? value : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
 async function correlateOrDegrade(input: {
@@ -398,7 +1353,6 @@ async function correlateOrDegrade(input: {
     const hypothesisCandidates = correlateStage2Hypotheses({
       graph: input.graph,
       findingContexts: firstPassContexts,
-      maxCandidatesPerRule: 5,
     });
     const staticHypotheses = validateStaticHypotheses({
       graph: input.graph,

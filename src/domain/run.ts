@@ -63,6 +63,8 @@ export interface LocalSource {
   readonly kind: "local";
   /** Absolute host path that was scanned. */
   readonly path: string;
+  /** Git origin remote URL when the local worktree has one. */
+  readonly originUrl?: string;
 }
 
 /** Reference to a stored artifact blob (content-addressed by sha256). */

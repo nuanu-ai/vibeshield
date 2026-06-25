@@ -29,7 +29,9 @@ describeLive("MicrosandboxRuntime (live)", () => {
       expect(new TextDecoder().decode(back)).toBe("hello-vibeshield");
       for (const command of [
         ["gitleaks", "version"],
-        ["atom", "--help"],
+        ["joern", "--help"],
+        ["joern-parse", "--help"],
+        ["vibeshield-joern-extract", "--help"],
         ["opengrep", "--version"],
         ["syft", "version"],
         ["trivy", "--version"],
@@ -37,7 +39,7 @@ describeLive("MicrosandboxRuntime (live)", () => {
         ["zizmor", "--version"],
       ]) {
         const out = await session.exec(command);
-        expect(out.exitCode).toBe(0);
+        expect(out.exitCode, `${command.join(" ")}\n${out.stdout}\n${out.stderr}`).toBe(0);
       }
     } finally {
       await runtime.destroy("vs-smoke-test");

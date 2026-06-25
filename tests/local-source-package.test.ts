@@ -63,6 +63,23 @@ describe("local source packaging", () => {
       await pkg.cleanup();
     }
   });
+
+  it("captures the Git origin remote for local clone identity", async () => {
+    const source = path.join(dir, "repo");
+    await mkdir(source);
+    await writeFile(path.join(source, "app.ts"), "export const ok = true;\n");
+    await initGitRepo(source, ["app.ts"]);
+    await execFileP("git", ["remote", "add", "origin", "git@github.com:Example/demo.git"], {
+      cwd: source,
+    });
+
+    const pkg = await createLocalSourcePackage(source);
+    try {
+      expect(pkg.originUrl).toBe("https://github.com/Example/demo");
+    } finally {
+      await pkg.cleanup();
+    }
+  });
 });
 
 async function initGitRepo(source: string, files = [".gitignore", "app.ts"]): Promise<void> {

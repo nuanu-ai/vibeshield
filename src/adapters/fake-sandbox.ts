@@ -14,6 +14,7 @@ import type {
   ExecResult,
   SandboxAvailability,
   SandboxCreateOptions,
+  SandboxExecOptions,
   SandboxRuntime,
   SandboxSession,
 } from "../ports/sandbox-runtime.js";
@@ -21,12 +22,14 @@ import type {
 export type FakeExecHandler = (
   command: string[],
   session: FakeSandboxSession,
+  options: SandboxExecOptions,
 ) => ExecResult | Promise<ExecResult>;
 
 /** A captured exec invocation, for assertion in tests. */
 export interface FakeInvocation {
   readonly name: string;
   readonly command: string[];
+  readonly timeoutMs?: number;
 }
 
 export class FakeSandboxSession implements SandboxSession {
@@ -38,9 +41,13 @@ export class FakeSandboxSession implements SandboxSession {
     private readonly execHandler: FakeExecHandler,
   ) {}
 
-  async exec(command: string[]): Promise<ExecResult> {
-    this.invocations.push({ name: this.id, command });
-    return await this.execHandler(command, this);
+  async exec(command: string[], options: SandboxExecOptions = {}): Promise<ExecResult> {
+    this.invocations.push({
+      name: this.id,
+      command,
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    });
+    return await this.execHandler(command, this, options);
   }
 
   async upload(localPath: string, guestPath: string): Promise<void> {
@@ -94,9 +101,13 @@ export class FakeSandboxRuntime implements SandboxRuntime {
   }
 
   async create(options: SandboxCreateOptions): Promise<FakeSandboxSession> {
-    const session = new FakeSandboxSession(options.name, (cmd, currentSession) => {
-      this.invocations.push({ name: options.name, command: cmd });
-      return this.execHandler(cmd, currentSession);
+    const session = new FakeSandboxSession(options.name, (cmd, currentSession, execOptions) => {
+      this.invocations.push({
+        name: options.name,
+        command: cmd,
+        ...(execOptions.timeoutMs === undefined ? {} : { timeoutMs: execOptions.timeoutMs }),
+      });
+      return this.execHandler(cmd, currentSession, execOptions);
     });
     this.sessions.set(options.name, session);
     return session;

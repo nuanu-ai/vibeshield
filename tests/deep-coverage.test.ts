@@ -28,7 +28,7 @@ describe("DeepCoverage validation", () => {
     ).toThrow(/coveredCount exceeds totalCount/);
 
     expect(() => validateDeepCoverage(coverage({ entries: [entry(), entry()] }))).toThrow(
-      /deepCoverage entry key is duplicated: boundaries:atom/,
+      /deepCoverage entry key is duplicated: boundaries:joern/,
     );
   });
 });
@@ -41,11 +41,11 @@ describe("composeDeepCoverage", () => {
         state: "partial",
         coveredCount: 1,
         totalCount: 2,
-        reason: "Some source languages are not supported by Deep Static v1: go=1.",
-        producer: "atom",
-        producerVersion: "atom@2.5.6",
+        reason: "Some source languages are not supported by Deep Static v1: ruby=1.",
+        producer: "joern",
+        producerVersion: "joern@4.0.565",
       },
-      { area: "model", state: "checked", producer: "atom", producerVersion: "atom@2.5.6" },
+      { area: "model", state: "checked", producer: "joern", producerVersion: "joern@4.0.565" },
     ];
     const deepCoverage = composeDeepCoverage({
       runId: "run-1",
@@ -58,8 +58,8 @@ describe("composeDeepCoverage", () => {
           state: "checked",
           coveredCount: 1,
           totalCount: 1,
-          producer: "atom",
-          producerVersion: "atom@2.5.6",
+          producer: "joern",
+          producerVersion: "joern@4.0.565",
         },
         {
           area: "call_graph",
@@ -67,31 +67,31 @@ describe("composeDeepCoverage", () => {
           coveredCount: 1,
           totalCount: 2,
           reason: "one call target was ambiguous",
-          producer: "atom",
-          producerVersion: "atom@2.5.6",
+          producer: "joern",
+          producerVersion: "joern@4.0.565",
         },
         {
           area: "data_flow",
           state: "checked",
           coveredCount: 1,
           totalCount: 1,
-          producer: "atom",
-          producerVersion: "atom@2.5.6",
+          producer: "joern",
+          producerVersion: "joern@4.0.565",
         },
       ],
       createdAt: "2026-06-24T10:00:00Z",
     });
 
     expect(deepCoverage.entries.map((item) => [item.area, item.state, item.producer])).toEqual([
-      ["boundaries", "checked", "atom"],
-      ["call_graph", "partial", "atom"],
+      ["boundaries", "checked", "joern"],
+      ["call_graph", "partial", "joern"],
       ["ci_iac", "skipped", "vibeshield"],
       ["component_usage", "skipped", "vibeshield"],
-      ["data_flow", "checked", "atom"],
+      ["data_flow", "checked", "joern"],
       ["dependency_usage", "skipped", "vibeshield"],
       ["entities", "skipped", "vibeshield"],
-      ["language_support", "partial", "atom"],
-      ["model", "checked", "atom"],
+      ["language_support", "partial", "joern"],
+      ["model", "checked", "joern"],
     ]);
   });
 
@@ -102,16 +102,17 @@ describe("composeDeepCoverage", () => {
         state: "degraded",
         coveredCount: 0,
         totalCount: 1,
-        reason: "No supported JS/TS/Python source files found; unsupported source languages: go=1.",
-        producer: "atom",
-        producerVersion: "atom@2.5.6",
+        reason:
+          "No supported JS/TS/Java/Python/Go source files found; unsupported source languages: ruby=1.",
+        producer: "joern",
+        producerVersion: "joern@4.0.565",
       },
       {
         area: "model",
         state: "failed",
-        reason: "Atom process exited 137",
-        producer: "atom",
-        producerVersion: "atom@2.5.6",
+        reason: "Joern process exited 137",
+        producer: "joern",
+        producerVersion: "joern@4.0.565",
       },
     ];
     const deepCoverage = composeDeepCoverage({
@@ -125,11 +126,12 @@ describe("composeDeepCoverage", () => {
     const byArea = new Map(deepCoverage.entries.map((item) => [item.area, item]));
     expect(byArea.get("language_support")).toMatchObject({
       state: "degraded",
-      reason: "No supported JS/TS/Python source files found; unsupported source languages: go=1.",
+      reason:
+        "No supported JS/TS/Java/Python/Go source files found; unsupported source languages: ruby=1.",
     });
     expect(byArea.get("model")).toMatchObject({
       state: "failed",
-      reason: "Atom process exited 137",
+      reason: "Joern process exited 137",
     });
     expect(byArea.get("boundaries")).toMatchObject({
       state: "skipped",
@@ -154,8 +156,8 @@ function entry() {
     state: "checked" as const,
     coveredCount: 1,
     totalCount: 1,
-    producer: "atom",
-    producerVersion: "atom@2.5.6",
+    producer: "joern",
+    producerVersion: "joern@4.0.565",
   };
 }
 
@@ -166,7 +168,7 @@ function manifest(): Manifest {
     sourceHash: "snapshot-1",
     files: [
       { path: "src/index.ts", size: 100, sha256: "ts-sha" },
-      { path: "src/legacy.go", size: 80, sha256: "go-sha" },
+      { path: "src/legacy.rb", size: 80, sha256: "rb-sha" },
     ],
     exclusions: [],
     toolchain: { imageTag: "vibeshield-toolchain:test", tools: [] },
@@ -177,6 +179,6 @@ function manifest(): Manifest {
 function unsupportedManifest(): Manifest {
   return {
     ...manifest(),
-    files: [{ path: "cmd/main.go", size: 100, sha256: "go-sha" }],
+    files: [{ path: "lib/app.rb", size: 100, sha256: "rb-sha" }],
   };
 }

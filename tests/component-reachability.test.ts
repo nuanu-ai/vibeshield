@@ -11,6 +11,7 @@ import {
   securityGraphNodeId,
 } from "../src/domain/security-graph.js";
 import {
+  type ComponentDependencyObservation,
   type ComponentUsageObservation,
   composeComponentReachability,
 } from "../src/stages/component-reachability.js";
@@ -24,6 +25,74 @@ describe("composeComponentReachability levels", () => {
       pathEdgeIds: [],
       affectedSymbolReachability: "unknown",
     });
+  });
+
+  it("promotes a lockfile component when the package dependency graph reaches it", () => {
+    const result = composeComponentReachability({
+      graph: baseGraph(),
+      manifest: manifest(),
+      dependencyObservations: [
+        dependency("fixture-app", "lock-only", "package.json", "ev-lock-only"),
+      ],
+    });
+    const reachability = byPackage(result.reachability).get("lock-only");
+    const dependencyEdge = result.graph.edges.find((edge) => edge.kind === "depends_on");
+
+    expect(reachability).toMatchObject({
+      level: "dependency_graph_reachable",
+      pathEdgeIds: [dependencyEdge?.id],
+      affectedSymbolReachability: "unknown",
+    });
+    expect(dependencyEdge).toMatchObject({
+      kind: "depends_on",
+      properties: {
+        sourcePackageName: "fixture-app",
+        packageName: "lock-only",
+      },
+    });
+    expect(
+      result.graph.nodes.find((node) => node.properties.recordType === "dependency_manifest"),
+    ).toMatchObject({
+      kind: "CodeEntity",
+      repoPath: "package.json",
+      properties: { sourcePackageName: "fixture-app", manifestPath: "package.json" },
+    });
+  });
+
+  it("attaches dependency graph evidence to every component for the same package", () => {
+    const graph = baseGraph();
+    const duplicateComponent = node(
+      "Component",
+      "Component:lock-only:second-cve",
+      "lock-only",
+      ["ev-lock-only-2"],
+      {
+        symbol: "lock-only",
+        properties: { packageName: "lock-only", version: "1.0.0" },
+      },
+    );
+    const result = composeComponentReachability({
+      graph: { ...graph, nodes: [...graph.nodes, duplicateComponent] },
+      manifest: manifest(),
+      dependencyObservations: [
+        dependency("fixture-app", "lock-only", "package.json", "ev-lock-only"),
+      ],
+    });
+    const lockOnlyReachability = result.reachability.filter(
+      (record) => record.packageName === "lock-only",
+    );
+
+    expect(lockOnlyReachability).toHaveLength(2);
+    expect(
+      lockOnlyReachability.every((record) => record.level === "dependency_graph_reachable"),
+    ).toBe(true);
+    expect(
+      result.graph.edges.filter(
+        (edge) =>
+          edge.kind === "depends_on" &&
+          lockOnlyReachability.some((record) => record.componentNodeId === edge.toNodeId),
+      ),
+    ).toHaveLength(2);
   });
 
   it("creates imports and uses edges from explicit observations", () => {
@@ -41,6 +110,48 @@ describe("composeComponentReachability levels", () => {
     expect(reachability.get("used-internal")).toMatchObject({ level: "used" });
     expect(result.graph.edges.filter((edge) => edge.kind === "imports")).toHaveLength(1);
     expect(result.graph.edges.filter((edge) => edge.kind === "uses")).toHaveLength(1);
+    expect(result.graph.coverage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          area: "dependency_usage",
+          state: "checked",
+          coveredCount: 2,
+          totalCount: 6,
+          producer: "component-reachability",
+        }),
+      ]),
+    );
+  });
+
+  it("does not attach ownerless import observations to ambiguous multi-method files", () => {
+    const result = composeComponentReachability({
+      graph: {
+        ...baseGraph(),
+        nodes: [...baseGraph().nodes, codeNode("src/internal.ts", "secondInternal")],
+      },
+      manifest: manifest(),
+      observations: [
+        {
+          packageName: "used-internal",
+          repoPath: "src/internal.ts",
+          usageKind: "imported",
+          evidenceIds: ["ev-used"],
+          lineRange: { startLine: 1, endLine: 1 },
+        },
+      ],
+    });
+
+    expect(result.graph.edges.filter((edge) => edge.kind === "imports")).toHaveLength(1);
+    expect(
+      result.graph.nodes.find((node) => node.properties.recordType === "component_usage"),
+    ).toMatchObject({
+      kind: "CodeEntity",
+      repoPath: "src/internal.ts",
+      properties: { packageName: "used-internal", usageKind: "imported" },
+    });
+    expect(byPackage(result.reachability).get("used-internal")).toMatchObject({
+      level: "imported",
+    });
   });
 
   it("promotes a component used by boundary-reachable code", () => {
@@ -54,6 +165,20 @@ describe("composeComponentReachability levels", () => {
       level: "reachable_from_boundary",
     });
     expect(byPackage(result.reachability).get("public-client")?.pathEdgeIds).toHaveLength(2);
+  });
+
+  it("matches Go module suffixes without broad fuzzy package matching", () => {
+    const result = composeComponentReachability({
+      graph: baseGraph(),
+      manifest: manifest(),
+      observations: [
+        usage("github.com/dgrijalva/jwt-go", "src/public.ts", "publicHandler", "used", "ev-public"),
+      ],
+    });
+
+    expect(byPackage(result.reachability).get("jwt-go")).toMatchObject({
+      level: "reachable_from_boundary",
+    });
   });
 
   it("promotes reachable affected-symbol evidence without treating missing data as no", () => {
@@ -154,6 +279,21 @@ function usage(
   };
 }
 
+function dependency(
+  sourcePackageName: string,
+  packageName: string,
+  manifestPath: string,
+  evidenceId: string,
+): ComponentDependencyObservation {
+  return {
+    sourcePackageName,
+    packageName,
+    manifestPath,
+    evidenceIds: [evidenceId],
+    lineRange: { startLine: 1, endLine: 1 },
+  };
+}
+
 function baseGraph(): SecurityGraph {
   const nodes = [
     boundaryNode(),
@@ -165,6 +305,7 @@ function baseGraph(): SecurityGraph {
       "used-internal",
       "public-client",
       "affected-client",
+      "jwt-go",
     ]),
     ...componentFindings([
       "lock-only",
@@ -172,6 +313,7 @@ function baseGraph(): SecurityGraph {
       "used-internal",
       "public-client",
       "affected-client",
+      "jwt-go",
     ]),
   ];
   return {
@@ -305,6 +447,7 @@ function manifest(): Manifest {
     files: [
       { path: "src/public.ts", size: 10, sha256: "public-sha" },
       { path: "src/internal.ts", size: 10, sha256: "internal-sha" },
+      { path: "package.json", size: 10, sha256: "package-sha" },
     ],
     exclusions: [],
     toolchain: { imageTag: "vibeshield-toolchain:test", tools: [] },

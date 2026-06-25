@@ -54,17 +54,15 @@ interface SearchPath {
   readonly nodeIds: ReadonlyArray<string>;
 }
 
-const DEFAULT_MAX_CANDIDATES_PER_RULE = 25;
 const CONTRADICTION_EDGE_KINDS = new Set<SecurityGraphEdgeKind>([
   "protected_by",
   "contradicted_by",
 ]);
 
 export function correlateGraphRules(input: CorrelateGraphRulesInput): HypothesisCandidate[] {
-  assertPositiveInteger(
-    input.maxCandidatesPerRule ?? DEFAULT_MAX_CANDIDATES_PER_RULE,
-    "maxCandidatesPerRule",
-  );
+  if (input.maxCandidatesPerRule !== undefined) {
+    assertPositiveInteger(input.maxCandidatesPerRule, "maxCandidatesPerRule");
+  }
   const rules = input.rules.map(validateRule);
   const graphNodeIds = new Set(input.graph.nodes.map((node) => node.id));
   const graphEdgeIds = new Set(input.graph.edges.map((edge) => edge.id));
@@ -80,7 +78,8 @@ export function correlateGraphRules(input: CorrelateGraphRulesInput): Hypothesis
     for (const path of pathsForRule(input.graph, rule)) {
       ruleCandidates.push(candidateForPath(input.graph, findingContexts, rule, path));
       if (
-        ruleCandidates.length >= (input.maxCandidatesPerRule ?? DEFAULT_MAX_CANDIDATES_PER_RULE)
+        input.maxCandidatesPerRule !== undefined &&
+        ruleCandidates.length >= input.maxCandidatesPerRule
       ) {
         break;
       }
@@ -178,6 +177,7 @@ function candidateForPath(
   const contradictingNodeIds = endpointNodeIds(contradictionEdges);
   const contradictingEdgeIds = uniqueSorted(contradictionEdges.map((edge) => edge.id));
   const findingIds = linkedFindingIds(contexts, supportingNodeIds, supportingEdgeIds);
+  const title = candidateTitle(graph.nodes, rule, path);
 
   return {
     id: hypothesisCandidateId(graph.graphVersion, rule.id, [
@@ -187,7 +187,7 @@ function candidateForPath(
     ]),
     ruleId: rule.id,
     family: rule.family,
-    title: rule.title,
+    title,
     findingIds,
     supportingNodeIds,
     supportingEdgeIds,
@@ -195,8 +195,54 @@ function candidateForPath(
     contradictingEdgeIds,
     coverageRefs: coverageRefsFor(graph, rule),
     requiredValidation: uniqueSorted(rule.requiredValidation),
-    candidateReason: candidateReason(graph.nodes, rule, path, supportEdges.length),
+    candidateReason: candidateReason(graph.nodes, title, path, supportEdges.length),
   };
+}
+
+function candidateTitle(
+  nodes: ReadonlyArray<SecurityGraphNode>,
+  rule: CorrelationRuleDefinition,
+  path: SearchPath,
+): string {
+  if (rule.family !== "external_input_to_dangerous_operation") {
+    return rule.title;
+  }
+  const target = nodes.find((node) => node.id === path.endNodeId);
+  if (target?.kind !== "Sink") {
+    return rule.title;
+  }
+  const sinkType = stringProperty(target.properties.sinkType);
+  switch (sinkType) {
+    case "sql_execution":
+      return "SQL injection path: external input reaches SQL execution";
+    case "xml_processing":
+      return "XXE path: external input reaches XML processing";
+    case "deserialization":
+      return "Insecure deserialization path: external input reaches deserialization";
+    case "file_system":
+      return "Path traversal or file access path: external input reaches filesystem access";
+    case "redirect":
+      return "Open redirect path: external input reaches a redirect";
+    case "template_render":
+      return "Template injection path: external input reaches template rendering";
+    case "code_execution":
+      return "Code execution path: external input reaches command or code execution";
+    case "server_side_request":
+      return "Server-side request forgery path: external input reaches a server-side HTTP client";
+    case "outbound_http":
+      return "Outbound request path: external input reaches an HTTP client";
+    case "cross_site_scripting":
+      return "Cross-site scripting path: external input reaches HTML or script output";
+    case "access_control":
+      if (target.label.toLowerCase().includes("idor")) {
+        return "IDOR path: request-controlled resource id reaches object access";
+      }
+      return "Access control path: request-controlled resource id reaches owned data access";
+    case "csrf_state_change":
+      return "CSRF path: state-changing request reaches mutable server-side state without a strong CSRF control";
+    default:
+      return rule.title;
+  }
 }
 
 function linkedFindingIds(
@@ -300,14 +346,47 @@ function coverageRefsFor(
 
 function candidateReason(
   nodes: ReadonlyArray<SecurityGraphNode>,
-  rule: CorrelationRuleDefinition,
+  title: string,
   path: SearchPath,
   edgeCount: number,
 ): string {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
-  const start = nodesById.get(path.startNodeId)?.label ?? path.startNodeId;
-  const end = nodesById.get(path.endNodeId)?.label ?? path.endNodeId;
-  return `${rule.title}: ${start} reaches ${end} across ${edgeCount} graph edges`;
+  const start = reasonNodeLabel(nodesById.get(path.startNodeId)) ?? path.startNodeId;
+  const end = reasonNodeLabel(nodesById.get(path.endNodeId)) ?? path.endNodeId;
+  return `${title}: ${start} reaches ${end} across ${edgeCount} graph edges`;
+}
+
+function reasonNodeLabel(node: SecurityGraphNode | undefined): string | undefined {
+  if (node === undefined) {
+    return undefined;
+  }
+  if (!isVerboseCodeLabel(node.label)) {
+    return node.label;
+  }
+  if (node.repoPath !== undefined && node.lineRange !== undefined) {
+    return `${node.repoPath}:${node.lineRange.startLine}`;
+  }
+  return trimWhitespace(node.label).slice(0, 80);
+}
+
+function isVerboseCodeLabel(label: string): boolean {
+  const trimmed = trimWhitespace(label);
+  return (
+    label.includes("\n") ||
+    trimmed.length > 80 ||
+    trimmed.startsWith("function ") ||
+    trimmed.startsWith("async function ") ||
+    trimmed.startsWith("app.use(") ||
+    trimmed.includes("=>")
+  );
+}
+
+function trimWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function stringProperty(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
 function endpointNodeIds(edges: ReadonlyArray<SecurityGraphEdge>): string[] {

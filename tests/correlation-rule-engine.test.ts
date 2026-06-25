@@ -95,6 +95,114 @@ describe("correlateGraphRules candidates", () => {
 
     expect(candidates[0]?.findingIds).toEqual([]);
   });
+
+  it("labels external-input hypotheses by sink taxonomy instead of one generic title", () => {
+    const graph = graphFixture({ sinkType: "sql_execution" });
+    const candidates = correlateGraphRules({
+      graph,
+      rules: [
+        {
+          ...rule(),
+          target: { kinds: ["Sink"], propertyEquals: { sinkType: "sql_execution" } },
+        },
+      ],
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      title: "SQL injection path: external input reaches SQL execution",
+      candidateReason:
+        "SQL injection path: external input reaches SQL execution: POST /submit reaches dangerousOperation across 2 graph edges",
+    });
+  });
+
+  it("labels server-side HTTP client paths as SSRF candidates", () => {
+    const graph = graphFixture({ sinkType: "server_side_request" });
+    const candidates = correlateGraphRules({
+      graph,
+      rules: [
+        {
+          ...rule(),
+          target: { kinds: ["Sink"], propertyEquals: { sinkType: "server_side_request" } },
+        },
+      ],
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      title: "Server-side request forgery path: external input reaches a server-side HTTP client",
+      candidateReason:
+        "Server-side request forgery path: external input reaches a server-side HTTP client: POST /submit reaches dangerousOperation across 2 graph edges",
+    });
+  });
+
+  it("labels HTML and script output paths as XSS candidates", () => {
+    const graph = graphFixture({ sinkType: "cross_site_scripting" });
+    const candidates = correlateGraphRules({
+      graph,
+      rules: [
+        {
+          ...rule(),
+          target: { kinds: ["Sink"], propertyEquals: { sinkType: "cross_site_scripting" } },
+        },
+      ],
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      title: "Cross-site scripting path: external input reaches HTML or script output",
+      candidateReason:
+        "Cross-site scripting path: external input reaches HTML or script output: POST /submit reaches dangerousOperation across 2 graph edges",
+    });
+  });
+
+  it("labels access-control and CSRF sink paths by security semantics", () => {
+    const accessRule = {
+      ...rule(),
+      target: { kinds: ["Sink"], propertyEquals: { sinkType: "access_control" } },
+    } satisfies CorrelationRuleDefinition;
+    const csrfRule = {
+      ...rule(),
+      target: { kinds: ["Sink"], propertyEquals: { sinkType: "csrf_state_change" } },
+    } satisfies CorrelationRuleDefinition;
+
+    expect(
+      correlateGraphRules({
+        graph: graphFixture({ sinkType: "access_control", sinkLabel: "findOne" }),
+        rules: [accessRule],
+      })[0],
+    ).toMatchObject({
+      title: "Access control path: request-controlled resource id reaches owned data access",
+    });
+    expect(
+      correlateGraphRules({
+        graph: graphFixture({ sinkType: "access_control", sinkLabel: "IDOR object access" }),
+        rules: [accessRule],
+      })[0],
+    ).toMatchObject({
+      title: "IDOR path: request-controlled resource id reaches object access",
+    });
+    expect(
+      correlateGraphRules({
+        graph: graphFixture({ sinkType: "csrf_state_change", sinkLabel: "setValue" }),
+        rules: [csrfRule],
+      })[0],
+    ).toMatchObject({
+      title:
+        "CSRF path: state-changing request reaches mutable server-side state without a strong CSRF control",
+    });
+  });
+
+  it("uses source locations instead of verbose code labels in candidate reasons", () => {
+    const graph = graphFixture({
+      boundaryLabel: "function configureApp (app) {\n  app.use(compression())\n}",
+    });
+    const candidates = correlateGraphRules({ graph, rules: [rule()] });
+
+    expect(candidates[0]?.candidateReason).toBe(
+      "External input reaches dangerous operation: src/server.ts:10 reaches dangerousOperation across 2 graph edges",
+    );
+  });
 });
 
 describe("correlateGraphRules bounds and validation", () => {
@@ -199,20 +307,47 @@ describe("correlateGraphRules bounds and validation", () => {
       [...first.map((candidate) => candidate.id)].sort(),
     );
   });
+
+  it("does not cap candidates unless maxCandidatesPerRule is explicit", () => {
+    const graph = graphFixture({ branches: 30 });
+
+    expect(correlateGraphRules({ graph, rules: [rule()] })).toHaveLength(31);
+    expect(correlateGraphRules({ graph, rules: [rule()], maxCandidatesPerRule: 5 })).toHaveLength(
+      5,
+    );
+  });
 });
 
 function graphFixture(
-  opts: { readonly controls?: boolean; readonly branch?: boolean } = {},
+  opts: {
+    readonly controls?: boolean;
+    readonly branch?: boolean;
+    readonly branches?: number;
+    readonly sinkType?: string;
+    readonly sinkLabel?: string;
+    readonly boundaryLabel?: string;
+  } = {},
 ): SecurityGraph {
-  const boundary = node("Boundary", "Boundary:POST /submit", "POST /submit", {
-    boundaryType: "http_route",
-  });
+  const boundary = node(
+    "Boundary",
+    "Boundary:POST /submit",
+    opts.boundaryLabel ?? "POST /submit",
+    {
+      boundaryType: "http_route",
+    },
+    { repoPath: "src/server.ts", lineRange: { startLine: 10, endLine: 10 } },
+  );
   const handler = node("CodeEntity", "CodeEntity:handler", "submitHandler", {
     fullName: "submitHandler",
   });
-  const dangerous = node("Sink", "Sink:dangerous-operation", "dangerousOperation", {
-    sinkType: "command_exec",
-  });
+  const dangerous = node(
+    "Sink",
+    "Sink:dangerous-operation",
+    opts.sinkLabel ?? "dangerousOperation",
+    {
+      sinkType: opts.sinkType ?? "command_exec",
+    },
+  );
   const nodes = [boundary, handler, dangerous];
   const edges = [
     edge("receives", boundary, handler, "receives:boundary:handler"),
@@ -238,6 +373,23 @@ function graphFixture(
     edges.push(
       edge("receives", boundary, alternate, "receives:boundary:alternate"),
       edge("calls", alternate, dangerous, "calls:alternate:dangerous"),
+    );
+  }
+
+  for (let index = 0; index < (opts.branches ?? 0); index += 1) {
+    const stableSuffix = String(index).padStart(2, "0");
+    const branch = node(
+      "CodeEntity",
+      `CodeEntity:branch-${stableSuffix}`,
+      `branch${stableSuffix}`,
+      {
+        fullName: `branch${stableSuffix}`,
+      },
+    );
+    nodes.push(branch);
+    edges.push(
+      edge("receives", boundary, branch, `receives:boundary:branch-${stableSuffix}`),
+      edge("calls", branch, dangerous, `calls:branch-${stableSuffix}:dangerous`),
     );
   }
 
@@ -318,14 +470,21 @@ function node(
   stableKey: string,
   label: string,
   properties: Readonly<Record<string, unknown>>,
+  overrides: {
+    readonly repoPath: string;
+    readonly lineRange: NonNullable<SecurityGraphNode["lineRange"]>;
+  } = {
+    repoPath: "src/app.ts",
+    lineRange: { startLine: 1, endLine: 1 },
+  },
 ): SecurityGraphNode {
   return {
     id: nodeId(stableKey),
     kind,
     stableKey,
     label,
-    repoPath: "src/app.ts",
-    lineRange: { startLine: 1, endLine: 1 },
+    repoPath: overrides.repoPath,
+    lineRange: overrides.lineRange,
     symbol: label,
     properties,
     evidenceIds: ["ev-graph"],

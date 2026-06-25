@@ -98,9 +98,9 @@ never on the raw code, and the sandbox is destroyed when the run ends.
    applicable, skipped, failed, or degraded, the report says so.
 4. **Deterministic triage** — normalize evidence, group findings, rank actions,
    and compute the verdict before any model call.
-5. **Fix Pack** — one optional OpenRouter call improves the explanation and
-   prompt. If it is unavailable or invalid, the deterministic catalog fallback
-   is used.
+5. **Fix Pack** — optional bounded OpenRouter calls improve explanations and
+   prompts. If the model is unavailable, fails, or returns invalid output, the
+   deterministic catalog fallback is used for that batch.
 
 ## Quickstart
 
@@ -114,6 +114,7 @@ pnpm install
 # 2. Optional: enable model-polished Fix Pack wording
 cp .env.example .env
 # set OPENROUTER_API_KEY in .env
+# optionally set VIBESHIELD_REMEDIATION_MODEL to try another OpenRouter model
 # without it, VibeShield still runs with the catalog fallback
 
 # 3. Build and load the scanner toolchain

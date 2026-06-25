@@ -21,9 +21,10 @@ import type {
   ModelProvider,
 } from "../src/ports/model-provider.js";
 import {
-  ATOM_FLOWS_SLICE_PATH,
-  ATOM_MODEL_PATH,
   GITLEAKS_REPORT_PATH,
+  JOERN_ENTITIES_SLICE_PATH,
+  JOERN_FLOWS_SLICE_PATH,
+  JOERN_MODEL_PATH,
   MANIFEST_PATH,
   MANIFEST_SCRIPT_PATH,
   OPENGREP_REPORT_PATH,
@@ -31,6 +32,7 @@ import {
   TRIVY_CACHE_DIR,
   TRIVY_VULN_REPORT_PATH,
 } from "../src/stages/paths.js";
+import { renderRepositoryMap } from "../src/stages/repository-map.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -150,7 +152,7 @@ describe("runScan quick scan vertical slice", () => {
       "--redact=100",
       "--no-banner",
     ]);
-    expect(sandbox.invocations.map((i) => i.command[0])).not.toContain("atom");
+    expect(sandbox.invocations.map((i) => i.command[0])).not.toContain("joern-parse");
   });
 
   it("writes deep reports and repository-map.json when deep scan is requested", async () => {
@@ -171,7 +173,7 @@ describe("runScan quick scan vertical slice", () => {
             Fingerprint: "src/routes/upload.ts:stripe-access-token:10",
           },
         ],
-        { atom: { mode: "success" } },
+        { joern: { mode: "success" } },
       ),
     });
 
@@ -182,7 +184,7 @@ describe("runScan quick scan vertical slice", () => {
       deep: true,
     });
 
-    expect(sandbox.invocations.map((i) => i.command[0])).toContain("atom");
+    expect(sandbox.invocations.map((i) => i.command[0])).toContain("joern-parse");
     expect(outcome.reportPaths.repositoryMap).toBeDefined();
     expect(outcome.assessment.repositoryMapArtifactRef).toMatchObject({
       role: "repository-map.json",
@@ -199,24 +201,71 @@ describe("runScan quick scan vertical slice", () => {
     const report = JSON.parse(await readFile(outcome.reportPaths.json ?? "", "utf8")) as {
       assessment: {
         repositoryMapArtifactRef?: { role: string };
+        hypothesisCandidates?: Array<{ id: string; family: string }>;
         staticHypotheses?: Array<{ id: string; status: string }>;
       };
     };
     expect(report.assessment.repositoryMapArtifactRef?.role).toBe("repository-map.json");
+    expect(report.assessment.hypothesisCandidates?.[0]?.id).toMatch(/^hypothesis_candidate_/);
     expect(report.assessment.staticHypotheses?.[0]?.id).toMatch(/^static_hypothesis_/);
 
     const repositoryMap = JSON.parse(
       await readFile(outcome.reportPaths.repositoryMap ?? "", "utf8"),
-    ) as { boundaries: unknown[]; relationships: unknown[] };
+    ) as { graph: { id: string }; boundaries: unknown[]; relationships: unknown[] };
     expect(repositoryMap.boundaries).toHaveLength(1);
     expect(repositoryMap.relationships.length).toBeGreaterThan(0);
+
+    await rm(outcome.reportPaths.repositoryMap ?? "");
+    const state = new SqliteStateStore(db);
+    const persistedGraph = await state.loadSecurityGraph(outcome.runId, repositoryMap.graph.id);
+    if (persistedGraph === null) {
+      throw new Error("expected persisted security graph");
+    }
+    expect(persistedGraph.id).toBe(repositoryMap.graph.id);
+    expect(persistedGraph.nodes.length).toBeGreaterThan(0);
+    expect(persistedGraph.edges.length).toBeGreaterThan(0);
+    expect(renderRepositoryMap(persistedGraph)).toEqual(repositoryMap);
+    const persistedCoverage = await state.loadDeepCoverage(outcome.runId);
+    expect(persistedCoverage).toMatchObject({
+      runId: outcome.runId,
+      snapshotId: "fixture-source-hash",
+    });
+    expect(persistedCoverage?.entries.some((entry) => entry.area === "call_graph")).toBe(true);
 
     const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
     expect(markdown).toContain("## Likely attack paths");
     expect(markdown).toContain("## What was checked");
   });
 
-  it("adds present-only dependency graph context without mutating Quick Scan findings", async () => {
+  it("raises the verdict when Deep Static finds supported attack paths without quick findings", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(manifestFor(source.path, deepManifestFiles()), [], {
+        joern: { mode: "success" },
+      }),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+      deep: true,
+    });
+
+    expect(outcome.assessment.findings).toHaveLength(0);
+    expect(
+      outcome.assessment.staticHypotheses?.some(
+        (hypothesis) => hypothesis.status === "statically_supported",
+      ),
+    ).toBe(true);
+    expect(outcome.assessment.verdict).toBe("not-ready-to-deploy");
+
+    const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
+    expect(markdown).toContain("**Verdict:** Not ready to deploy");
+    expect(markdown).toContain("1 likely attack path");
+  });
+
+  it("adds package dependency graph context without mutating Quick Scan findings", async () => {
     const source = await writeLocalFixture(dir);
     const blobs = new FilesystemBlobs(dir);
     const sandbox = new FakeSandboxRuntime({
@@ -235,7 +284,7 @@ describe("runScan quick scan vertical slice", () => {
           },
         ],
         {
-          atom: { mode: "success" },
+          joern: { mode: "success" },
           trivyVuln: trivyDependencyReport(),
         },
       ),
@@ -280,12 +329,20 @@ describe("runScan quick scan vertical slice", () => {
       (context) => context.findingId === dependencyFinding?.id,
     );
     expect(dependencyContext).toMatchObject({
-      status: "weakened",
-      reason: "component is present but no import, use, or boundary reachability was observed",
+      status: "linked_to_hypothesis",
       coverageState: "checked",
     });
-    expect(dependencyContext?.graphNodeIds).toHaveLength(1);
-    expect(dependencyContext?.graphEdgeIds).toEqual([]);
+    expect(dependencyContext?.reason).toContain("shares deterministic static candidate");
+    expect(dependencyContext?.graphNodeIds.length).toBeGreaterThan(0);
+    expect(dependencyContext?.graphEdgeIds.length).toBeGreaterThan(0);
+    expect(dependencyContext?.hypothesisIds.length).toBeGreaterThan(0);
+    expect(
+      outcome.assessment.staticHypotheses?.some(
+        (hypothesis) =>
+          hypothesis.title ===
+          "Vulnerable component is imported, used, or reachable in the dependency graph",
+      ),
+    ).toBe(true);
 
     const report = JSON.parse(await readFile(outcome.reportPaths.json ?? "", "utf8")) as {
       assessment: {
@@ -318,7 +375,7 @@ describe("runScan quick scan vertical slice", () => {
       expect.arrayContaining([
         expect.objectContaining({
           findingId: dependencyFinding?.id,
-          status: "weakened",
+          status: "linked_to_hypothesis",
         }),
       ]),
     );
@@ -338,7 +395,7 @@ describe("runScan quick scan vertical slice", () => {
     );
     const modelOn = await runGate4DeepScan(dir, source, model);
 
-    expect(model.hypothesisInputs).toHaveLength(1);
+    expect(model.hypothesisInputs.map((input) => input.hypotheses.length)).toEqual([2]);
     expect(deepDeterministicProjection(modelOn.assessment)).toEqual(
       deepDeterministicProjection(modelOff.assessment),
     );
@@ -389,7 +446,7 @@ describe("runScan quick scan vertical slice", () => {
 
     const outcome = await runGate4DeepScan(dir, source, model);
 
-    expect(model.hypothesisInputs).toHaveLength(1);
+    expect(model.hypothesisInputs.map((input) => input.hypotheses.length)).toEqual([2, 1, 1]);
     expect(outcome.assessment.staticHypotheses?.length).toBeGreaterThan(0);
     expect(
       outcome.assessment.hypothesisEnrichments?.every((item) => item.source === "catalog"),
@@ -416,7 +473,7 @@ describe("runScan quick scan vertical slice", () => {
             Fingerprint: "src/config.ts:stripe-access-token:3",
           },
         ],
-        { atom: { mode: "fail" } },
+        { joern: { mode: "fail" } },
       ),
     });
 
@@ -441,6 +498,82 @@ describe("runScan quick scan vertical slice", () => {
         (hypothesis) => hypothesis.status === "statically_supported",
       ),
     ).toBe(false);
+  });
+
+  it("keeps partial Deep Static results when Joern data-flow extraction times out", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, deepManifestFiles()),
+        [
+          {
+            RuleID: "stripe-access-token",
+            Description: "Stripe Access Token",
+            File: "src/routes/upload.ts",
+            StartLine: 10,
+            EndLine: 10,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/routes/upload.ts:stripe-access-token:10",
+          },
+        ],
+        { joern: { mode: "data-flow-timeout" } },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+      deep: true,
+    });
+
+    expect(outcome.assessment.verdict).toBe("critical-fix-needed");
+    expect(outcome.reportPaths.repositoryMap).toBeDefined();
+    expect(
+      sandbox.invocations.some(
+        (i) =>
+          i.command[0] === "vibeshield-joern-extract" &&
+          valueAfter(i.command, "--kind") === "flows",
+      ),
+    ).toBe(true);
+    expect(
+      sandbox.invocations.filter(
+        (i) =>
+          i.command[0] === "vibeshield-joern-extract" &&
+          valueAfter(i.command, "-o") === JOERN_ENTITIES_SLICE_PATH,
+      ),
+    ).toHaveLength(1);
+    const joernInvocations = sandbox.invocations.filter(
+      (i) => i.command[0] === "joern-parse" || i.command[0] === "vibeshield-joern-extract",
+    );
+    expect(
+      joernInvocations
+        .filter((i) => valueAfter(i.command, "--kind") === "flows")
+        .every((i) => i.timeoutMs === 60_000),
+    ).toBe(true);
+    expect(
+      joernInvocations
+        .filter((i) => valueAfter(i.command, "--kind") !== "flows")
+        .every((i) => i.timeoutMs === 300_000),
+    ).toBe(true);
+    expect(
+      outcome.assessment.deepCoverage?.some(
+        (entry) =>
+          entry.area === "data_flow" &&
+          entry.state === "failed" &&
+          entry.reason?.includes("Joern flows command timed out after 1m"),
+      ),
+    ).toBe(true);
+    expect(
+      outcome.assessment.deepCoverage?.some(
+        (entry) => entry.area === "call_graph" && entry.state !== "failed",
+      ),
+    ).toBe(true);
+
+    const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
+    expect(markdown).toContain("## Fix these first");
+    expect(markdown).toContain("## What was checked");
   });
 
   it("rejects scanner evidence that is not inside the snapshot manifest", async () => {
@@ -940,14 +1073,15 @@ describe("runScan quick scan vertical slice", () => {
       runRoot: path.join(dir, "runs"),
       toolchainImage: "test-toolchain:latest",
     });
-    const enhanced = await runScan(deps(enhancedSandbox, new FilesystemBlobs(dir), enhancedModel), {
+    const enhancedDeps = deps(enhancedSandbox, new FilesystemBlobs(dir), enhancedModel);
+    const enhanced = await runScan(enhancedDeps, {
       source,
       runRoot: path.join(dir, "runs"),
       toolchainImage: "test-toolchain:latest",
     });
 
-    expect(enhancedModel.inputs).toHaveLength(1);
-    expect(enhancedModel.inputs[0]?.actions).toHaveLength(2);
+    expect(enhancedModel.inputs).toHaveLength(2);
+    expect(enhancedModel.inputs.every((input) => input.actions.length === 1)).toBe(true);
     expect(enhanced.assessment.verdict).toBe(baseline.assessment.verdict);
     expect(enhanced.assessment.findings.map((finding) => finding.id)).toEqual(
       baseline.assessment.findings.map((finding) => finding.id),
@@ -959,6 +1093,12 @@ describe("runScan quick scan vertical slice", () => {
       enhanced.assessment.rankedActions.every((action) => !action.remediation.fromCatalog),
     ).toBe(true);
     expect(enhanced.assessment.rankedActions[0]?.remediation.title).toMatch(/^AI:/);
+    expect(
+      enhancedDeps.events.events
+        .filter((event) => event.type === "scan-progress")
+        .filter((event) => event.stageId === "remediation.generate")
+        .map((event) => event.details?.publicLabel),
+    ).toEqual(["Writing fixes 0/2", "Writing fixes 1/2", "Writing fixes 2/2"]);
   });
 
   it("caps model remediation input while preserving deterministic findings", async () => {
@@ -1122,7 +1262,7 @@ async function runGate4DeepScan(
           Fingerprint: "src/routes/upload.ts:stripe-access-token:10",
         },
       ],
-      { atom: { mode: "success" } },
+      { joern: { mode: "success" } },
     ),
   });
   return runScan(deps(sandbox, new FilesystemBlobs(root), model), {
@@ -1172,6 +1312,19 @@ function deepDeterministicProjection(assessment: SecurityAssessment) {
       hypothesisIds: [...context.hypothesisIds],
       coverageState: context.coverageState,
     })),
+    hypothesisCandidates: (assessment.hypothesisCandidates ?? []).map((candidate) => ({
+      id: candidate.id,
+      ruleId: candidate.ruleId,
+      family: candidate.family,
+      title: candidate.title,
+      findingIds: [...candidate.findingIds],
+      supportingNodeIds: [...candidate.supportingNodeIds],
+      supportingEdgeIds: [...candidate.supportingEdgeIds],
+      contradictingNodeIds: [...candidate.contradictingNodeIds],
+      contradictingEdgeIds: [...candidate.contradictingEdgeIds],
+      coverageRefs: [...candidate.coverageRefs],
+      requiredValidation: [...candidate.requiredValidation],
+    })),
     staticHypotheses: (assessment.staticHypotheses ?? []).map((hypothesis) => ({
       id: hypothesis.id,
       candidateId: hypothesis.candidateId,
@@ -1219,8 +1372,8 @@ interface FakeScannerOverrides {
     readonly metadata?: Record<string, unknown> | null;
   };
   readonly trivyVuln?: unknown;
-  readonly atom?: {
-    readonly mode: "success" | "fail";
+  readonly joern?: {
+    readonly mode: "success" | "fail" | "data-flow-timeout";
   };
 }
 
@@ -1276,34 +1429,49 @@ function fakeQuickScanExec(
     if (bin === "zizmor" && command[1] !== "--version") {
       return overrides.zizmor ?? { exitCode: 0, stdout: "[]", stderr: "" };
     }
-    if (bin === "atom" && overrides.atom !== undefined) {
-      if (overrides.atom.mode === "fail") {
-        return { exitCode: 2, stdout: "", stderr: "atom crashed" };
+    if (bin === "joern-parse" && overrides.joern !== undefined) {
+      if (overrides.joern.mode === "fail") {
+        return { exitCode: 2, stdout: "", stderr: "joern crashed" };
       }
-      writeAtomOutput(command, session);
+      writeJoernOutput(command, session);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
+    if (bin === "vibeshield-joern-extract" && overrides.joern !== undefined) {
+      if (
+        overrides.joern.mode === "data-flow-timeout" &&
+        valueAfter(command, "--kind") === "flows"
+      ) {
+        return { exitCode: 124, stdout: "", stderr: "" };
+      }
+      writeJoernOutput(command, session);
       return { exitCode: 0, stdout: "", stderr: "" };
     }
     return { exitCode: 0, stdout: "", stderr: "" };
   };
 }
 
-function writeAtomOutput(command: string[], session: Parameters<FakeExecHandler>[1]): void {
-  if (command[1] === "-o") {
-    session.files.set(ATOM_MODEL_PATH, encoder.encode("fake atom model"));
+function writeJoernOutput(command: string[], session: Parameters<FakeExecHandler>[1]): void {
+  if (command[0] === "joern-parse") {
+    session.files.set(JOERN_MODEL_PATH, encoder.encode("fake joern cpg"));
     return;
   }
-  const slicePath = command[command.indexOf("-s") + 1];
+  const slicePath = valueAfter(command, "-o");
   if (slicePath === undefined) {
     return;
   }
   const slices =
-    slicePath === ATOM_FLOWS_SLICE_PATH
+    slicePath === JOERN_FLOWS_SLICE_PATH
       ? { graph: { nodes: [], edges: [] }, paths: [["source", "sink"]] }
-      : positiveAtomSlices();
+      : positiveJoernSlices();
   session.files.set(slicePath, jsonBytes(slices));
 }
 
-function positiveAtomSlices() {
+function valueAfter(command: ReadonlyArray<string>, flag: string): string | undefined {
+  const index = command.indexOf(flag);
+  return index < 0 ? undefined : command[index + 1];
+}
+
+function positiveJoernSlices() {
   return {
     objectSlices: [
       {
@@ -1473,6 +1641,20 @@ function trivyDependencyReport() {
     Results: [
       {
         Target: "package.json",
+        Packages: [
+          {
+            ID: "fixture-app",
+            Name: "fixture-app",
+            Relationship: "root",
+            DependsOn: ["lodash@4.17.20"],
+          },
+          {
+            ID: "lodash@4.17.20",
+            Name: "lodash",
+            Version: "4.17.20",
+            Relationship: "direct",
+          },
+        ],
         Vulnerabilities: [
           {
             VulnerabilityID: "CVE-2024-1234",

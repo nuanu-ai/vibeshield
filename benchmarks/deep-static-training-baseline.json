@@ -1,0 +1,163 @@
+{
+  "version": 1,
+  "repositories": [
+    {
+      "name": "WebGoat Java",
+      "match": {
+        "originUrl": "https://github.com/WebGoat/WebGoat.git"
+      },
+      "minFindings": 24,
+      "minHypothesisCandidates": 258,
+      "minSupportedHypotheses": 258,
+      "requiredFamilies": {
+        "external_input_to_dangerous_operation": 258
+      },
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 496,
+          "minTotalCount": 496
+        },
+        "data_flow": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 129
+        },
+        "component_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "ci_iac": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      }
+    },
+    {
+      "name": "Juice Shop JS/TS",
+      "match": {
+        "originUrl": "https://github.com/juice-shop/juice-shop.git"
+      },
+      "minFindings": 76,
+      "minHypothesisCandidates": 239,
+      "minSupportedHypotheses": 239,
+      "requiredFamilies": {
+        "external_input_to_dangerous_operation": 236,
+        "ci_supply_chain_path": 3
+      },
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 652,
+          "minTotalCount": 652
+        },
+        "data_flow": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 103
+        },
+        "component_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "ci_iac": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      }
+    },
+    {
+      "name": "Freeland JS/TS local",
+      "match": {
+        "localPathSuffix": "/freeland_app"
+      },
+      "minFindings": 6,
+      "minHypothesisCandidates": 164,
+      "minSupportedHypotheses": 164,
+      "requiredFamilies": {
+        "external_input_to_dangerous_operation": 163,
+        "ci_supply_chain_path": 1
+      },
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 635,
+          "minTotalCount": 635
+        },
+        "data_flow": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 62
+        },
+        "component_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "ci_iac": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      }
+    },
+    {
+      "name": "Vulnerable-Flask-App Python",
+      "match": {
+        "originUrl": "https://github.com/videvelopers/Vulnerable-Flask-App.git"
+      },
+      "minHypothesisCandidates": 32,
+      "minSupportedHypotheses": 32,
+      "requiredFamilies": {
+        "external_input_to_dangerous_operation": 32
+      },
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 2,
+          "minTotalCount": 2
+        },
+        "data_flow": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 16
+        },
+        "component_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      }
+    },
+    {
+      "name": "go-dvwa Go",
+      "match": {
+        "originUrl": "https://github.com/sqreen/go-dvwa.git"
+      },
+      "minFindings": 102,
+      "minHypothesisCandidates": 88,
+      "minSupportedHypotheses": 88,
+      "requiredFamilies": {
+        "dependency_usage_path": 82,
+        "external_input_to_dangerous_operation": 6
+      },
+      "coverage": {
+        "language_support": {
+          "stateIn": ["partial"],
+          "minCoveredCount": 54,
+          "minTotalCount": 55,
+          "reasonIncludes": "php=1"
+        },
+        "data_flow": {
+          "stateIn": ["checked"],
+          "minCoveredCount": 3
+        },
+        "dependency_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "component_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "ci_iac": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      }
+    }
+  ]
+}

@@ -37,6 +37,8 @@ export interface Finding {
   readonly evidenceIds: ReadonlyArray<string>;
   /** Stable dedup key over tool + rule + location. */
   readonly fingerprint: string;
+  /** Tool-specific normalized facts that are safe to expose and useful for graph joins. */
+  readonly metadata?: Readonly<Record<string, string>>;
   /** Links into the remediation catalog; absent for uncatalogued findings. */
   readonly remediationKey?: string;
 }

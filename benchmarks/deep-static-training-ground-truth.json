@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "repositories": [
+    {
+      "name": "WebGoat Java ground truth slice",
+      "match": {
+        "originUrl": "https://github.com/WebGoat/WebGoat.git"
+      },
+      "groundTruth": [
+        {
+          "id": "webgoat.sql-injection",
+          "title": "SQL injection lessons have static input-to-SQL traces",
+          "kind": "hypothesis",
+          "family": "external_input_to_dangerous_operation",
+          "candidateReasonIncludes": "/SqlInjection/",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.xxe",
+          "title": "XXE lessons have static input-to-XML parser traces",
+          "kind": "hypothesis",
+          "family": "external_input_to_dangerous_operation",
+          "candidateReasonIncludes": "/xxe/",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.insecure-deserialization",
+          "title": "Insecure deserialization reaches command execution",
+          "kind": "hypothesis",
+          "family": "external_input_to_dangerous_operation",
+          "candidateReasonIncludes": "/InsecureDeserialization/task reaches exec",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.ssrf",
+          "title": "SSRF task reaches a server-side fetch or file read sink",
+          "kind": "hypothesis",
+          "family": "external_input_to_dangerous_operation",
+          "candidateReasonIncludes": "/SSRF/task2",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.path-traversal",
+          "title": "Path traversal or upload flow reaches a filesystem sink",
+          "kind": "hypothesis",
+          "family": "external_input_to_dangerous_operation",
+          "candidateReasonIncludes": "/fileupload reaches deleteIfExists",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.open-redirect",
+          "title": "Open redirect flow reaches a redirect sink",
+          "kind": "hypothesis",
+          "family": "external_input_to_dangerous_operation",
+          "candidateReasonIncludes": "RedirectView",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.jwt-secret",
+          "title": "JWT lesson exposes token material as a direct finding",
+          "kind": "finding",
+          "ruleId": "jwt",
+          "category": "secret",
+          "filePathIncludes": "lessons/jwt"
+        },
+        {
+          "id": "webgoat.xss",
+          "title": "XSS lessons should be classified as XSS, not hidden behind generic sinks",
+          "kind": "hypothesis",
+          "titleIncludes": "Cross-site scripting",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.idor",
+          "title": "IDOR lessons should model principal/resource authorization semantics",
+          "kind": "hypothesis",
+          "titleIncludes": "IDOR",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.csrf",
+          "title": "CSRF lessons should be classified as missing anti-CSRF protection",
+          "kind": "hypothesis",
+          "titleIncludes": "CSRF",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "webgoat.missing-function-access-control",
+          "title": "Missing function-level access-control lessons should be classified as access control",
+          "kind": "hypothesis",
+          "titleIncludes": "Access control",
+          "candidateReasonIncludes": "access-control/users",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "webgoat.vulnerable-components",
+          "title": "Vulnerable Components lesson should produce dependency reachability",
+          "kind": "family",
+          "family": "dependency_usage_path",
+          "minCount": 1,
+          "expected": "known_gap"
+        }
+      ]
+    },
+    {
+      "name": "Juice Shop JS/TS ground truth slice",
+      "match": {
+        "originUrl": "https://github.com/juice-shop/juice-shop.git"
+      },
+      "groundTruth": [
+        {
+          "id": "juice.hardcoded-secrets",
+          "title": "Hardcoded secrets are reported as direct findings",
+          "kind": "finding",
+          "category": "secret",
+          "remediationKey": "live-secret-in-source",
+          "minCount": 1
+        },
+        {
+          "id": "juice.eval",
+          "title": "Dangerous JavaScript eval usage is reported as a direct finding",
+          "kind": "finding",
+          "ruleId": "vibeshield.javascript-eval",
+          "category": "code-pattern",
+          "minCount": 1
+        },
+        {
+          "id": "juice.xml-function-constructor",
+          "title": "Dynamic XML parser code construction is reported as a direct finding",
+          "kind": "finding",
+          "ruleId": "vibeshield.javascript-function-constructor",
+          "category": "code-pattern",
+          "filePathIncludes": "lib/xml.ts"
+        },
+        {
+          "id": "juice.file-read",
+          "title": "External input reaches a filesystem read sink",
+          "kind": "hypothesis",
+          "family": "external_input_to_dangerous_operation",
+          "candidateReasonIncludes": "readFile",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.ci-supply-chain",
+          "title": "CI workflow artifact paths are modeled as supply-chain hypotheses",
+          "kind": "family",
+          "family": "ci_supply_chain_path",
+          "minCount": 3
+        },
+        {
+          "id": "juice.sql-injection",
+          "title": "SQL injection challenges should be classified as SQL injection",
+          "kind": "hypothesis",
+          "titleIncludes": "SQL injection",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.xss",
+          "title": "XSS challenges should be classified as XSS",
+          "kind": "hypothesis",
+          "titleIncludes": "Cross-site scripting",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.access-control",
+          "title": "Basket/order authorization challenges should model principal/resource ownership",
+          "kind": "hypothesis",
+          "titleIncludes": "Access control",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.open-redirect",
+          "title": "Open redirect challenges should be classified as open redirect",
+          "kind": "hypothesis",
+          "titleIncludes": "Open redirect",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.ssrf",
+          "title": "SSRF challenges should be classified as server-side request forgery",
+          "kind": "hypothesis",
+          "titleIncludes": "Server-side request forgery",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.insecure-deserialization-rce",
+          "title": "Insecure deserialization RCE challenges should be classified as deserialization/code execution",
+          "kind": "hypothesis",
+          "titleIncludes": "Insecure deserialization",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.nosql",
+          "title": "NoSQL injection challenges should be classified as NoSQL injection",
+          "kind": "hypothesis",
+          "titleIncludes": "NoSQL",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.xxe",
+          "title": "XXE Data Access and XXE DoS challenges should be classified as XXE",
+          "kind": "hypothesis",
+          "titleIncludes": "XXE",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.file-exposure",
+          "title": "Confidential Document and Local File Read challenges should be classified as file exposure",
+          "kind": "hypothesis",
+          "titleIncludes": "Path traversal or file access",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.upload-validation",
+          "title": "Upload Size, Upload Type, and Poison Null Byte challenges should model upload validation bypasses",
+          "kind": "hypothesis",
+          "titleIncludes": "File upload",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.vulnerable-components",
+          "title": "Vulnerable component challenges should produce dependency reachability",
+          "kind": "family",
+          "family": "dependency_usage_path",
+          "minCount": 1,
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.ssti",
+          "title": "SSTi challenge should be classified as server-side template injection",
+          "kind": "hypothesis",
+          "titleIncludes": "Server-side template injection",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        }
+      ]
+    }
+  ]
+}

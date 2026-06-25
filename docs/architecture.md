@@ -60,7 +60,7 @@ vibeshield scan <github-url-or-local-git-root>
        deterministic priority, verdict impact, and verdict
   -> remediation.generate
        catalog remediation for every action
-       optional one bounded OpenRouter call for wording/prompt enhancement
+       optional bounded OpenRouter calls for wording/prompt enhancement
   -> report.compose
        one SecurityAssessment
   -> report render
@@ -126,6 +126,8 @@ action. The optional model call is enhancement-only:
 - OpenRouter key comes from `OPENROUTER_API_KEY`;
 - model name comes from `VIBESHIELD_REMEDIATION_MODEL` or the default in code;
 - only the top bounded action set is sent;
+- each action is enhanced in a separate bounded request with limited
+  concurrency;
 - per-action context is capped to representative findings/files plus summary
   counts;
 - model output is validated against expected candidate IDs and unsafe path

@@ -14,6 +14,7 @@ import type { DeepCoverageEntry } from "./deep-coverage.js";
 import type { Evidence } from "./evidence.js";
 import type { Finding, FindingCluster } from "./finding.js";
 import type { FindingContextAssessment } from "./finding-context-assessment.js";
+import type { HypothesisCandidate } from "./hypothesis-candidate.js";
 import type { HypothesisEnrichment } from "./hypothesis-enrichment.js";
 import type { ManifestSummary, ToolchainSummary } from "./manifest-summary.js";
 import type { ArtifactRef } from "./run.js";
@@ -33,6 +34,7 @@ export interface SecurityAssessment {
   readonly findingClusters: ReadonlyArray<FindingCluster>;
   readonly rankedActions: ReadonlyArray<RankedAction>;
   readonly findingContextAssessments?: ReadonlyArray<FindingContextAssessment>;
+  readonly hypothesisCandidates?: ReadonlyArray<HypothesisCandidate>;
   readonly staticHypotheses?: ReadonlyArray<StaticHypothesis>;
   readonly validationRecipes?: ReadonlyArray<ValidationRecipe>;
   readonly hypothesisEnrichments?: ReadonlyArray<HypothesisEnrichment>;

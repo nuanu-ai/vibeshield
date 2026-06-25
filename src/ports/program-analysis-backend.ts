@@ -1,9 +1,9 @@
 import type { Manifest } from "../domain/manifest.js";
 import type { ArtifactRef } from "../domain/run.js";
 
-export const PROGRAM_ANALYSIS_BACKEND_VERSION = "atom@2.5.6";
+export const PROGRAM_ANALYSIS_BACKEND_VERSION = "joern@4.0.565";
 
-export type ProgramAnalysisLanguage = "javascript" | "typescript" | "python";
+export type ProgramAnalysisLanguage = "javascript" | "typescript" | "python" | "java" | "go";
 
 export type ProgramAnalysisCoverageState =
   | "checked"
@@ -19,7 +19,8 @@ export type ProgramAnalysisCoverageArea =
   | "boundaries"
   | "call_edges"
   | "flows"
-  | "component_usage";
+  | "component_usage"
+  | "ci_iac";
 
 export type ProgramAnalysisExtractionKind =
   | "entities"
@@ -36,7 +37,7 @@ export interface ProgramAnalysisBuildInput {
 }
 
 export interface ProgramAnalysisModelRef {
-  readonly backend: "atom";
+  readonly backend: "joern";
   readonly backendVersion: string;
   readonly language: ProgramAnalysisLanguage;
   readonly sourceDir: string;
@@ -46,7 +47,7 @@ export interface ProgramAnalysisModelRef {
 }
 
 export interface ProgramAnalysisExtractionArtifact {
-  readonly backend: "atom";
+  readonly backend: "joern";
   readonly backendVersion: string;
   readonly kind: ProgramAnalysisExtractionKind;
   readonly language: ProgramAnalysisLanguage;
@@ -74,7 +75,7 @@ export interface ProgramAnalysisLanguageSupport {
 export interface ProgramAnalysisCoverage {
   readonly area: ProgramAnalysisCoverageArea;
   readonly state: ProgramAnalysisCoverageState;
-  readonly producer: "atom";
+  readonly producer: "joern";
   readonly producerVersion: string;
   readonly coveredCount?: number;
   readonly totalCount?: number;
@@ -125,7 +126,9 @@ const SUPPORTED_EXTENSIONS = new Map<string, ProgramAnalysisLanguage>([
   [".mts", "typescript"],
   [".ts", "typescript"],
   [".tsx", "typescript"],
+  [".java", "java"],
   [".py", "python"],
+  [".go", "go"],
 ]);
 
 const UNSUPPORTED_SOURCE_EXTENSIONS = new Map<string, string>([
@@ -133,8 +136,6 @@ const UNSUPPORTED_SOURCE_EXTENSIONS = new Map<string, string>([
   [".cc", "c++"],
   [".cpp", "c++"],
   [".cs", "csharp"],
-  [".go", "go"],
-  [".java", "java"],
   [".kt", "kotlin"],
   [".php", "php"],
   [".rb", "ruby"],
@@ -162,7 +163,7 @@ export function languageSupportFromManifest(manifest: Manifest): ProgramAnalysis
 
   const supportedCounts = sortedCounts(supported);
   const unsupportedCounts = sortedCounts(unsupported);
-  const selectedLanguage = selectLanguage(supported);
+  const selectedLanguage = selectLanguage(manifest.files.map((file) => file.path));
   const totalSourceFiles = countFiles(supportedCounts) + countFiles(unsupportedCounts);
   const coverageState = languageCoverageState(supportedCounts.length, unsupportedCounts.length);
   const reason = languageCoverageReason(supportedCounts, unsupportedCounts);
@@ -193,15 +194,56 @@ function countFiles(counts: ReadonlyArray<ProgramAnalysisLanguageCount>): number
   return counts.reduce((total, item) => total + item.fileCount, 0);
 }
 
-function selectLanguage(
-  supported: ReadonlyMap<ProgramAnalysisLanguage, number>,
-): ProgramAnalysisLanguage | undefined {
-  for (const language of ["typescript", "javascript", "python"] as const) {
-    if ((supported.get(language) ?? 0) > 0) {
-      return language;
+function selectLanguage(paths: ReadonlyArray<string>): ProgramAnalysisLanguage | undefined {
+  const scores = new Map<ProgramAnalysisLanguage, number>();
+  for (const repoPath of paths) {
+    const language = SUPPORTED_EXTENSIONS.get(extensionOf(repoPath));
+    if (language === undefined) {
+      continue;
+    }
+    const score = languageSelectionScore(language, repoPath);
+    scores.set(language, (scores.get(language) ?? 0) + score);
+  }
+  let selected: ProgramAnalysisLanguage | undefined;
+  let selectedScore = 0;
+  for (const language of ["typescript", "javascript", "java", "python", "go"] as const) {
+    const score = scores.get(language) ?? 0;
+    if (score > selectedScore) {
+      selected = language;
+      selectedScore = score;
     }
   }
-  return undefined;
+  return selected;
+}
+
+function languageSelectionScore(language: ProgramAnalysisLanguage, repoPath: string): number {
+  if ((language === "javascript" || language === "typescript") && isLikelyStaticAsset(repoPath)) {
+    return 1;
+  }
+  return 10;
+}
+
+function isLikelyStaticAsset(repoPath: string): boolean {
+  const normalized = repoPath.toLowerCase().replaceAll("\\", "/");
+  const parts = normalized.split("/");
+  const assetDirectories = new Set([
+    "assets",
+    "build",
+    "dist",
+    "docs",
+    "public",
+    "static",
+    "template",
+    "templates",
+    "vendor",
+    "wwwroot",
+  ]);
+  return (
+    parts.some((part) => assetDirectories.has(part)) ||
+    normalized.includes("-doc/") ||
+    normalized.endsWith(".min.js") ||
+    normalized.endsWith(".bundle.js")
+  );
 }
 
 function languageCoverageState(
@@ -225,10 +267,10 @@ function languageCoverageReason(
   unsupported: ReadonlyArray<ProgramAnalysisLanguageCount>,
 ): string | undefined {
   if (supported.length === 0 && unsupported.length === 0) {
-    return "No JS, TS, Python, or known unsupported source files were present in the snapshot.";
+    return "No JS, TS, Java, Python, Go, or known unsupported source files were present in the snapshot.";
   }
   if (supported.length === 0) {
-    return `No supported JS/TS/Python source files found; unsupported source languages: ${formatCounts(unsupported)}.`;
+    return `No supported JS/TS/Java/Python/Go source files found; unsupported source languages: ${formatCounts(unsupported)}.`;
   }
   if (unsupported.length > 0) {
     return `Some source languages are not supported by Deep Static v1: ${formatCounts(unsupported)}.`;

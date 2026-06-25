@@ -106,6 +106,7 @@ export interface GraphCoverage {
 }
 
 export type GraphCoverageArea =
+  | "entities"
   | "boundaries"
   | "call_graph"
   | "data_flow"
@@ -162,6 +163,7 @@ const EDGE_KINDS = new Set<SecurityGraphEdgeKind>([
 ]);
 
 const COVERAGE_AREAS = new Set<GraphCoverageArea>([
+  "entities",
   "boundaries",
   "call_graph",
   "data_flow",

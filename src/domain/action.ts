@@ -4,7 +4,7 @@
  * An `ActionCandidate` is purely deterministic: priority and verdict impact are
  * rule-computed from findings, before any model call. A `RemediationAction`
  * fills in the plain-language explanation and the coding-agent prompt, either
- * from the one model call or the deterministic catalog fallback.
+ * from bounded model enhancement or the deterministic catalog fallback.
  */
 
 import type { Severity } from "./finding.js";

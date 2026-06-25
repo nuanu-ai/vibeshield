@@ -1,5 +1,6 @@
 import type { ArtifactRef } from "../domain/run.js";
 import type { ArtifactStore } from "../ports/artifact-store.js";
+import type { EventSink } from "../ports/event-sink.js";
 import {
   languageSupportFromManifest,
   type ProgramAnalysisBackend,
@@ -13,54 +14,77 @@ import {
   type ProgramAnalysisLanguage,
   type ProgramAnalysisModelRef,
 } from "../ports/program-analysis-backend.js";
-import type { SandboxSession } from "../ports/sandbox-runtime.js";
+import type { SandboxExecEvent, SandboxSession } from "../ports/sandbox-runtime.js";
 import {
-  ATOM_BOUNDARIES_SLICE_PATH,
-  ATOM_CALL_EDGES_SLICE_PATH,
-  ATOM_COMPONENT_USAGE_SLICE_PATH,
-  ATOM_ENTITIES_SLICE_PATH,
-  ATOM_FLOWS_SLICE_PATH,
-  ATOM_MODEL_PATH,
+  JOERN_BOUNDARIES_SLICE_PATH,
+  JOERN_CALL_EDGES_SLICE_PATH,
+  JOERN_COMPONENT_USAGE_SLICE_PATH,
+  JOERN_ENTITIES_SLICE_PATH,
+  JOERN_FLOWS_SLICE_PATH,
+  JOERN_MODEL_PATH,
 } from "../stages/paths.js";
 
-const DEFAULT_ATOM_BIN = "atom";
-const DEFAULT_ATOM_VERSION = "2.5.6";
+const DEFAULT_JOERN_PARSE_BIN = "joern-parse";
+const DEFAULT_JOERN_EXTRACT_BIN = "vibeshield-joern-extract";
+const DEFAULT_JOERN_VERSION = "4.0.565";
+const DEFAULT_JOERN_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_JOERN_FLOW_COMMAND_TIMEOUT_MS = 60 * 1000;
 const MAX_ERROR_OUTPUT = 4000;
 const MAX_PUBLIC_ERROR_OUTPUT = 500;
 const MAX_SLICE_SHARDS = 999;
 const encoder = new TextEncoder();
 
-export interface AtomProgramAnalysisBackendOptions {
+export interface JoernProgramAnalysisBackendOptions {
   readonly session: SandboxSession;
   readonly artifacts: ArtifactStore;
-  readonly atomBin?: string;
-  readonly atomVersion?: string;
+  readonly events?: EventSink;
+  readonly joernParseBin?: string;
+  readonly joernExtractBin?: string;
+  readonly joernVersion?: string;
+  readonly commandTimeoutMs?: number;
+  readonly flowCommandTimeoutMs?: number;
 }
 
-export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
+export class JoernProgramAnalysisBackend implements ProgramAnalysisBackend {
   private readonly session: SandboxSession;
   private readonly artifacts: ArtifactStore;
-  private readonly atomBin: string;
-  private readonly atomVersion: string;
+  private readonly events: EventSink | undefined;
+  private readonly joernParseBin: string;
+  private readonly joernExtractBin: string;
+  private readonly joernVersion: string;
+  private readonly commandTimeoutMs: number;
+  private readonly flowCommandTimeoutMs: number;
 
-  constructor(options: AtomProgramAnalysisBackendOptions) {
+  constructor(options: JoernProgramAnalysisBackendOptions) {
     this.session = options.session;
     this.artifacts = options.artifacts;
-    this.atomBin = options.atomBin ?? DEFAULT_ATOM_BIN;
-    this.atomVersion = options.atomVersion ?? DEFAULT_ATOM_VERSION;
+    this.events = options.events;
+    this.joernParseBin = options.joernParseBin ?? DEFAULT_JOERN_PARSE_BIN;
+    this.joernExtractBin = options.joernExtractBin ?? DEFAULT_JOERN_EXTRACT_BIN;
+    this.joernVersion = options.joernVersion ?? DEFAULT_JOERN_VERSION;
+    this.commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_JOERN_COMMAND_TIMEOUT_MS;
+    this.flowCommandTimeoutMs =
+      options.flowCommandTimeoutMs ?? DEFAULT_JOERN_FLOW_COMMAND_TIMEOUT_MS;
   }
 
   async buildModel(input: ProgramAnalysisBuildInput): Promise<ProgramAnalysisModelRef> {
     const language = this.selectLanguage(input);
-    const modelPath = input.outputPath ?? ATOM_MODEL_PATH;
-    const command = [this.atomBin, "-o", modelPath, "-l", language, input.sourceDir];
+    const modelPath = input.outputPath ?? JOERN_MODEL_PATH;
+    const command = [
+      this.joernParseBin,
+      "--language",
+      joernParseLanguage(language),
+      "-o",
+      modelPath,
+      input.sourceDir,
+    ];
 
-    await this.execAtom(command, "model");
+    await this.execJoern(command, "model");
     const modelBytes = await this.readRequired(modelPath, "model");
     const stored = await this.artifacts.store(modelBytes);
 
     return {
-      backend: "atom",
+      backend: "joern",
       backendVersion: this.versionLabel(),
       language,
       sourceDir: input.sourceDir,
@@ -73,34 +97,29 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
   async extractEntities(
     model: ProgramAnalysisModelRef,
   ): Promise<ProgramAnalysisExtractionArtifact> {
-    return await this.extractSlice(model, "entities", "usages", ATOM_ENTITIES_SLICE_PATH);
+    return await this.extractSlice(model, "entities", JOERN_ENTITIES_SLICE_PATH);
   }
 
   async extractBoundaries(
     model: ProgramAnalysisModelRef,
   ): Promise<ProgramAnalysisExtractionArtifact> {
-    return await this.extractSlice(model, "boundaries", "usages", ATOM_BOUNDARIES_SLICE_PATH);
+    return await this.extractSlice(model, "boundaries", JOERN_BOUNDARIES_SLICE_PATH);
   }
 
   async extractCallEdges(
     model: ProgramAnalysisModelRef,
   ): Promise<ProgramAnalysisExtractionArtifact> {
-    return await this.extractSlice(model, "call_edges", "reachables", ATOM_CALL_EDGES_SLICE_PATH);
+    return await this.extractSlice(model, "call_edges", JOERN_CALL_EDGES_SLICE_PATH);
   }
 
   async extractFlows(model: ProgramAnalysisModelRef): Promise<ProgramAnalysisExtractionArtifact> {
-    return await this.extractSlice(model, "flows", "data-flow", ATOM_FLOWS_SLICE_PATH);
+    return await this.extractSlice(model, "flows", JOERN_FLOWS_SLICE_PATH);
   }
 
   async extractComponentUsage(
     model: ProgramAnalysisModelRef,
   ): Promise<ProgramAnalysisExtractionArtifact> {
-    return await this.extractSlice(
-      model,
-      "component_usage",
-      "reachables",
-      ATOM_COMPONENT_USAGE_SLICE_PATH,
-    );
+    return await this.extractSlice(model, "component_usage", JOERN_COMPONENT_USAGE_SLICE_PATH);
   }
 
   reportCoverage(input: ProgramAnalysisCoverageInput): ReadonlyArray<ProgramAnalysisCoverage> {
@@ -114,24 +133,24 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
       coverageRecord(
         "language_support",
         languageSupport.coverageState,
-        this.atomVersion,
+        this.joernVersion,
         languageCoverageOptions,
       ),
     ];
 
     if (input.model !== undefined) {
-      coverage.push(coverageRecord("model", "checked", this.atomVersion));
+      coverage.push(coverageRecord("model", "checked", this.joernVersion));
     } else if (languageSupport.selectedLanguage !== undefined) {
       coverage.push(
-        coverageRecord("model", "skipped", this.atomVersion, {
-          reason: "Atom model has not been built yet.",
+        coverageRecord("model", "skipped", this.joernVersion, {
+          reason: "Joern CPG has not been built yet.",
         }),
       );
     }
 
     for (const failure of input.failures ?? []) {
       coverage.push(
-        coverageRecord(failure.area, "failed", this.atomVersion, {
+        coverageRecord(failure.area, "failed", this.joernVersion, {
           reason: failure.reason,
         }),
       );
@@ -148,7 +167,8 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
     if (support.selectedLanguage === undefined) {
       throw new ProgramAnalysisBackendError(
         "unsupported_language",
-        support.reason ?? "No supported JS/TS/Python source files found for Atom analysis.",
+        support.reason ??
+          "No supported JS/TS/Java/Python/Go source files found for Joern analysis.",
         { sourceDir: input.sourceDir },
       );
     }
@@ -156,34 +176,33 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
   }
 
   private versionLabel(): string {
-    return `atom@${this.atomVersion}`;
+    return `joern@${this.joernVersion}`;
   }
 
   private async extractSlice(
     model: ProgramAnalysisModelRef,
     kind: ProgramAnalysisExtractionKind,
-    subcommand: "usages" | "reachables" | "data-flow",
     slicePath: string,
   ): Promise<ProgramAnalysisExtractionArtifact> {
     const command = [
-      this.atomBin,
-      subcommand,
-      "-o",
+      this.joernExtractBin,
+      "--kind",
+      kind,
+      "--cpg",
       model.modelPath,
-      "-s",
-      slicePath,
-      "-l",
-      model.language,
+      "--source-root",
       model.sourceDir,
+      "-o",
+      slicePath,
     ];
 
-    await this.execAtom(command, kind);
+    await this.execJoern(command, kind);
     const sliceBytes = await this.readRequiredSlice(slicePath, kind);
     const parsed = parseSliceJson(sliceBytes, kind);
     const stored = await this.artifacts.store(sliceBytes);
 
     return {
-      backend: "atom",
+      backend: "joern",
       backendVersion: this.versionLabel(),
       kind,
       language: model.language,
@@ -195,17 +214,37 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
     };
   }
 
-  private async execAtom(
+  private async execJoern(
     command: ReadonlyArray<string>,
     area: ProgramAnalysisCoverageArea,
   ): Promise<void> {
+    this.emitProgress(area);
+    const timeoutMs = area === "flows" ? this.flowCommandTimeoutMs : this.commandTimeoutMs;
     try {
-      const result = await this.session.exec([...command]);
+      const result = await this.session.exec([...command], {
+        timeoutMs,
+        onEvent: (event) => {
+          this.emitSandboxEvent(area, event);
+        },
+      });
+      if (result.exitCode === 124 || result.exitCode === 137) {
+        throw new ProgramAnalysisBackendError(
+          "joern_timeout",
+          `Joern ${area} command timed out after ${formatDuration(timeoutMs)}.`,
+          {
+            area,
+            command,
+            timeoutMs,
+            stdout: truncate(result.stdout),
+            stderr: truncate(result.stderr),
+          },
+        );
+      }
       if (result.exitCode !== 0) {
         const output = publicOutputSummary(result);
         throw new ProgramAnalysisBackendError(
-          "atom_exit_nonzero",
-          `Atom ${area} command failed with exit code ${result.exitCode}.${output}`,
+          "joern_exit_nonzero",
+          `Joern ${area} command failed with exit code ${result.exitCode}.${output}`,
           {
             area,
             command,
@@ -220,8 +259,8 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
       }
       const message = error instanceof Error ? error.message : String(error);
       throw new ProgramAnalysisBackendError(
-        "atom_unavailable",
-        `Atom ${area} command failed: ${message}`,
+        "joern_unavailable",
+        `Joern ${area} command failed: ${message}`,
         {
           area,
           command,
@@ -230,12 +269,48 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
     }
   }
 
+  private emitProgress(area: ProgramAnalysisCoverageArea): void {
+    const label = joernProgressLabel(area);
+    this.events?.emit({
+      type: "scan-progress",
+      stageId: "deep.static.compose",
+      message: label,
+      details: {
+        publicLabel: label,
+        source: "sandbox",
+        producer: "joern",
+        area,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  private emitSandboxEvent(area: ProgramAnalysisCoverageArea, event: SandboxExecEvent): void {
+    const label = joernProgressLabel(area);
+    this.events?.emit({
+      type: "scan-progress",
+      stageId: "deep.static.compose",
+      message: label,
+      details: {
+        publicLabel: label,
+        source: "sandbox",
+        producer: "joern",
+        area,
+        event: event.type,
+        ...(event.type === "stdout" || event.type === "stderr"
+          ? { stream: event.type, bytes: event.data.length }
+          : {}),
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   private async readRequired(path: string, area: ProgramAnalysisCoverageArea): Promise<Uint8Array> {
     const bytes = await this.readOptional(path);
     if (bytes.byteLength === 0) {
       throw new ProgramAnalysisBackendError(
-        "atom_output_missing",
-        `Atom ${area} output is missing: ${path}`,
+        "joern_output_missing",
+        `Joern ${area} output is missing: ${path}`,
         {
           area,
           path,
@@ -252,8 +327,8 @@ export class AtomProgramAnalysisBackend implements ProgramAnalysisBackend {
     const chunks = await this.readSliceChunks(path);
     if (chunks.length === 0) {
       throw new ProgramAnalysisBackendError(
-        "atom_output_missing",
-        `Atom ${kind} output is missing: ${path}`,
+        "joern_output_missing",
+        `Joern ${kind} output is missing: ${path}`,
         {
           kind,
           path,
@@ -306,8 +381,8 @@ function parseSliceJson(bytes: Uint8Array, kind: ProgramAnalysisExtractionKind):
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new ProgramAnalysisBackendError(
-      "atom_invalid_json",
-      `Atom ${kind} slice JSON is invalid: ${message}`,
+      "joern_invalid_json",
+      `Joern ${kind} slice JSON is invalid: ${message}`,
       {
         kind,
       },
@@ -322,7 +397,7 @@ function artifactRef(blobSha256: string, role: ArtifactRef["role"], bytes: numbe
 function coverageRecord(
   area: ProgramAnalysisCoverageArea,
   state: ProgramAnalysisCoverage["state"],
-  atomVersion: string,
+  joernVersion: string,
   options: {
     readonly coveredCount?: number;
     readonly totalCount?: number;
@@ -332,12 +407,33 @@ function coverageRecord(
   return {
     area,
     state,
-    producer: "atom",
-    producerVersion: `atom@${atomVersion}`,
+    producer: "joern",
+    producerVersion: `joern@${joernVersion}`,
     ...(options.coveredCount === undefined ? {} : { coveredCount: options.coveredCount }),
     ...(options.totalCount === undefined ? {} : { totalCount: options.totalCount }),
     ...(options.reason === undefined ? {} : { reason: options.reason }),
   };
+}
+
+function joernProgressLabel(area: ProgramAnalysisCoverageArea): string {
+  switch (area) {
+    case "model":
+      return "Building the code map";
+    case "entities":
+      return "Reading project structure";
+    case "boundaries":
+      return "Finding entry points";
+    case "call_edges":
+      return "Tracing code paths";
+    case "flows":
+      return "Tracing data flow";
+    case "component_usage":
+      return "Checking dependency usage";
+    case "ci_iac":
+      return "Checking CI and IaC context";
+    case "language_support":
+      return "Checking language support";
+  }
 }
 
 function countCovered(counts: ReadonlyArray<{ readonly fileCount: number }>): number {
@@ -370,6 +466,11 @@ function truncatePublic(value: string): string {
     : value;
 }
 
+function formatDuration(ms: number): string {
+  const seconds = Math.ceil(ms / 1000);
+  return seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`;
+}
+
 function sliceShardPath(path: string, index: number): string {
   return path.endsWith(".json")
     ? `${path.slice(0, -".json".length)}_${index}.json`
@@ -399,13 +500,27 @@ function mergeSliceChunks(
     );
   }
   throw new ProgramAnalysisBackendError(
-    "atom_invalid_json",
-    `Atom ${kind} sharded slice JSON cannot be merged: expected arrays or objectSlices objects.`,
+    "joern_invalid_json",
+    `Joern ${kind} sharded slice JSON cannot be merged: expected arrays or objectSlices objects.`,
     {
       kind,
       chunks: chunks.length,
     },
   );
+}
+
+function joernParseLanguage(language: ProgramAnalysisLanguage): string {
+  switch (language) {
+    case "typescript":
+    case "javascript":
+      return "javascript";
+    case "java":
+      return "javasrc";
+    case "python":
+      return "python";
+    case "go":
+      return "golang";
+  }
 }
 
 function hasObjectSlices(value: unknown): value is { readonly objectSlices: unknown[] } {

@@ -64,7 +64,7 @@ describe("renderRepositoryMap", () => {
     expect(map.factGaps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "coverage:call_graph:atom",
+          id: "coverage:call_graph:joern",
           source: "coverage",
           area: "call_graph",
           state: "partial",
@@ -162,8 +162,8 @@ function graph(overrides: Partial<SecurityGraph> = {}): SecurityGraph {
         state: "checked",
         coveredCount: 1,
         totalCount: 1,
-        producer: "atom",
-        producerVersion: "1",
+        producer: "joern",
+        producerVersion: "joern@4.0.565",
       },
       {
         area: "call_graph",
@@ -171,8 +171,8 @@ function graph(overrides: Partial<SecurityGraph> = {}): SecurityGraph {
         coveredCount: 2,
         totalCount: 3,
         reason: "One dynamic call target was not resolved.",
-        producer: "atom",
-        producerVersion: "1",
+        producer: "joern",
+        producerVersion: "joern@4.0.565",
       },
       {
         area: "language_support",
