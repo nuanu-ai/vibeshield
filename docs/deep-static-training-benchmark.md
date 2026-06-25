@@ -22,7 +22,7 @@ limitations.
 ```bash
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-baseline.json \
-  /Users/dmitry/.vibeshield/runs/20260625192250-d4b4c8af \
+  /Users/dmitry/.vibeshield/runs/20260625193151-0e533df6 \
   /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 \
   /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a \
   /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e \
@@ -35,7 +35,7 @@ Run the curated ground-truth slice separately. Normal mode allows tracked
 ```bash
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-ground-truth.json \
-  /Users/dmitry/.vibeshield/runs/20260625192250-d4b4c8af \
+  /Users/dmitry/.vibeshield/runs/20260625193151-0e533df6 \
   /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2
 ```
 
@@ -45,7 +45,7 @@ To keep every known gap as a hard failure when future gaps are added:
 pnpm benchmark:deep \
   --strict-ground-truth \
   --expect benchmarks/deep-static-training-ground-truth.json \
-  /Users/dmitry/.vibeshield/runs/20260625192250-d4b4c8af \
+  /Users/dmitry/.vibeshield/runs/20260625193151-0e533df6 \
   /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2
 ```
 
@@ -53,7 +53,7 @@ pnpm benchmark:deep \
 
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |
 | --- | --- | --- | ---: | --- | --- |
-| Java | WebGoat | `20260625192250-d4b4c8af` | 294 | `dependency_usage_path=36`, `external_input_to_dangerous_operation=258` | `data_flow` 129/222, `dependency_usage` 36/36, `language_support` checked 496/496 |
+| Java | WebGoat | `20260625193151-0e533df6` | 466 | `dependency_usage_path=36`, `external_input_to_dangerous_operation=430` | `data_flow` 215/222, `dependency_usage` 36/36, `language_support` checked 496/496 |
 | JS/TS | Juice Shop | `20260625190926-0443bfe2` | 804 | `dependency_usage_path=31`, `external_input_to_dangerous_operation=770`, `ci_supply_chain_path=3` | `data_flow` 333/333, `dependency_usage` 12/12, `language_support` checked 652/652 |
 | JS/TS local | Freeland | `20260625164008-81d5eb5a` | 164 | `external_input_to_dangerous_operation=163`, `ci_supply_chain_path=1` | `data_flow` 62/380, `language_support` checked 635/635 |
 | Python | Vulnerable-Flask-App | `20260625164510-1cef7e1e` | 32 | `external_input_to_dangerous_operation=32` | `data_flow` 16/36, `language_support` checked 2/2 |
@@ -63,7 +63,8 @@ The current WebGoat and Juice Shop runs classify generic external-input paths
 into sink-specific titles, including `SQL injection path`, `XXE path`, `Path
 traversal or file access path`, `Open redirect path`, `Server-side request
 forgery path`, `Cross-site scripting path`, `Code execution path`, `IDOR path`,
-`CSRF path`, and `Access control path`.
+`CSRF path`, `Access control path`, `Cryptographic weakness path`,
+`JWT token trust path`, `Authentication bypass path`, and `Password reset path`.
 
 ## Expectation Files
 
@@ -86,12 +87,10 @@ vulnerability classes for WebGoat and Juice Shop as either:
 
 Current normal result on the latest WebGoat and Juice Shop runs:
 
-- WebGoat: 12/16 covered, 4 known gaps.
+- WebGoat: 16/16 covered, 0 known gaps.
 - Juice Shop: 17/17 covered, 0 known gaps.
 
-Current strict result fails on the four WebGoat known gaps: cryptography
-semantics, JWT token-trust semantics, authentication-bypass verification
-semantics, and password-reset/account-recovery semantics.
+Current strict result passes on the latest WebGoat and Juice Shop runs.
 
 Optional `groundTruth` entries are reserved for curated expected vulnerability
 classes. They should describe product-observable signals or documented

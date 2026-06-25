@@ -7,11 +7,11 @@
         "originUrl": "https://github.com/WebGoat/WebGoat.git"
       },
       "minFindings": 60,
-      "minHypothesisCandidates": 294,
-      "minSupportedHypotheses": 294,
+      "minHypothesisCandidates": 466,
+      "minSupportedHypotheses": 466,
       "requiredFamilies": {
         "dependency_usage_path": 36,
-        "external_input_to_dangerous_operation": 258
+        "external_input_to_dangerous_operation": 430
       },
       "coverage": {
         "language_support": {
@@ -21,7 +21,7 @@
         },
         "data_flow": {
           "stateIn": ["checked"],
-          "minCoveredCount": 129
+          "minCoveredCount": 215
         },
         "component_usage": {
           "stateIn": ["checked"],

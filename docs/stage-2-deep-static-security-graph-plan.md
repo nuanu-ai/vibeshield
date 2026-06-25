@@ -169,8 +169,8 @@ Status:
   Joern CPG artifact is stored as a blob; no path step is created without a
   `SecurityGraphEdge` and evidence.
   Evidence: current live `--deep` runs produced supported attack paths on
-  WebGoat (Java, run `20260625192250-d4b4c8af`, 294 supported static
-  hypotheses, `data_flow` checked 129/222, `component_usage` checked 3086/3086,
+  WebGoat (Java, run `20260625193151-0e533df6`, 466 supported static
+  hypotheses, `data_flow` checked 215/222, `component_usage` checked 3086/3086,
   `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
   `20260625190926-0443bfe2`, 804, `data_flow` checked 333/333,
   `component_usage` checked 2194/2194, `dependency_usage` checked 12/12,
@@ -185,13 +185,10 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625192250-d4b4c8af /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
-  The curated ground-truth slice now passes in normal benchmark mode with the
-  next lesson-level gaps surfaced: WebGoat covers 12/16 expectations and reports
-  4 known gaps (cryptography semantics, JWT token-trust semantics,
-  authentication-bypass verification semantics, and password-reset/account
-  recovery semantics); Juice Shop covers 17/17 expectations and reports 0 known
-  gaps. Strict ground truth currently fails on those four WebGoat gaps. Fresh run
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625193151-0e533df6 /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  The curated ground-truth slice now passes in normal and strict benchmark mode:
+  WebGoat covers 16/16 expectations and reports 0 known gaps; Juice Shop covers
+  17/17 expectations and reports 0 known gaps. Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run
   `20260625184641-02d6d398` resolved the prior XXE classification gap through
@@ -200,7 +197,9 @@ Status:
   reachability by scanning Syft SBOMs with Trivy and exact package manifests
   with OSV. Fresh run `20260625192250-d4b4c8af` resolved the missing
   function-level access-control classification gap without counting the fixed
-  `users-admin-fix` route as covered.
+  `users-admin-fix` route as covered. Fresh run `20260625193151-0e533df6`
+  resolved the cryptography, JWT token-trust, authentication-bypass, and
+  password-reset/account-recovery semantic gaps.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
   forgery, cross-site scripting, code execution, IDOR, CSRF, and access-control)

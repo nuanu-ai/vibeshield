@@ -105,8 +105,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Cryptographic",
           "candidateReasonIncludes": "/crypto/",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "webgoat.jwt-token-trust",
@@ -114,8 +113,7 @@
           "kind": "hypothesis",
           "titleIncludes": "JWT",
           "candidateReasonIncludes": "/JWT/",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "webgoat.auth-bypass-security-questions",
@@ -123,8 +121,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Authentication bypass",
           "candidateReasonIncludes": "/auth-bypass/verify-account",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "webgoat.password-reset-account-recovery",
@@ -132,8 +129,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Password reset",
           "candidateReasonIncludes": "/PasswordReset/",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         }
       ]
     },
