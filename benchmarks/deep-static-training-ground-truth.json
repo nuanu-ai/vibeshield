@@ -98,6 +98,42 @@
           "kind": "family",
           "family": "dependency_usage_path",
           "minCount": 1
+        },
+        {
+          "id": "webgoat.crypto-weak-hashing",
+          "title": "Cryptography lessons should classify weak digest and encoding misuse",
+          "kind": "hypothesis",
+          "titleIncludes": "Cryptographic",
+          "candidateReasonIncludes": "/crypto/",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "webgoat.jwt-token-trust",
+          "title": "JWT lessons should classify token signing, claim, and header trust bypasses",
+          "kind": "hypothesis",
+          "titleIncludes": "JWT",
+          "candidateReasonIncludes": "/JWT/",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "webgoat.auth-bypass-security-questions",
+          "title": "Authentication bypass lesson should classify incomplete security-question verification",
+          "kind": "hypothesis",
+          "titleIncludes": "Authentication bypass",
+          "candidateReasonIncludes": "/auth-bypass/verify-account",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "webgoat.password-reset-account-recovery",
+          "title": "Password reset lessons should classify weak account-recovery flows",
+          "kind": "hypothesis",
+          "titleIncludes": "Password reset",
+          "candidateReasonIncludes": "/PasswordReset/",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
         }
       ]
     },

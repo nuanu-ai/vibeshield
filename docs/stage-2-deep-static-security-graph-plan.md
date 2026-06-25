@@ -186,9 +186,12 @@ Status:
   supported set).
   The fresh matrix passes
   `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625192250-d4b4c8af /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
-  The curated ground-truth slice now passes in normal and strict benchmark mode:
-  WebGoat covers 12/12 expectations and reports 0 known gaps; Juice Shop covers
-  17/17 expectations and reports 0 known gaps. Fresh run
+  The curated ground-truth slice now passes in normal benchmark mode with the
+  next lesson-level gaps surfaced: WebGoat covers 12/16 expectations and reports
+  4 known gaps (cryptography semantics, JWT token-trust semantics,
+  authentication-bypass verification semantics, and password-reset/account
+  recovery semantics); Juice Shop covers 17/17 expectations and reports 0 known
+  gaps. Strict ground truth currently fails on those four WebGoat gaps. Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run
   `20260625184641-02d6d398` resolved the prior XXE classification gap through
