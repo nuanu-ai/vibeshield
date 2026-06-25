@@ -21,7 +21,8 @@ export type ProgramAnalysisCoverageArea =
   | "flows"
   | "component_usage"
   | "ci_iac"
-  | "content_assets";
+  | "content_assets"
+  | "smart_contracts";
 
 export type ProgramAnalysisExtractionKind =
   | "entities"

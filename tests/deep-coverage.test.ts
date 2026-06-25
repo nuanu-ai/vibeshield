@@ -93,6 +93,7 @@ describe("composeDeepCoverage", () => {
       ["entities", "skipped", "vibeshield"],
       ["language_support", "partial", "joern"],
       ["model", "checked", "joern"],
+      ["smart_contracts", "skipped", "vibeshield"],
     ]);
   });
 

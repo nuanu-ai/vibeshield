@@ -433,6 +433,8 @@ function joernProgressLabel(area: ProgramAnalysisCoverageArea): string {
       return "Checking CI and IaC context";
     case "content_assets":
       return "Checking content and static assets";
+    case "smart_contracts":
+      return "Checking smart contracts";
     case "language_support":
       return "Checking language support";
   }

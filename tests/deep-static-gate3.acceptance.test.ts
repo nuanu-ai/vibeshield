@@ -68,7 +68,8 @@ describe("Deep Static Gate 3 acceptance", () => {
       expect(hypothesis?.supportingEvidenceIds.length).toBeGreaterThan(0);
       if (
         family !== "external_input_to_dangerous_operation" &&
-        family !== "content_resource_exposure_path"
+        family !== "content_resource_exposure_path" &&
+        family !== "smart_contract_risk_path"
       ) {
         expect(candidate?.findingIds.length).toBeGreaterThan(0);
       }
@@ -220,6 +221,27 @@ function baseGraph(options: Gate3Options): SecurityGraph {
       evidenceIds: ["ev-content"],
     },
   );
+  const smartContract = node("Resource", "SmartContract:Bank", "Bank", {
+    repoPath: "contracts/Bank.sol",
+    properties: {
+      resourceType: "smart_contract",
+      contractName: "Bank",
+    },
+    evidenceIds: ["ev-contract"],
+  });
+  const smartContractSink = node(
+    "Sink",
+    "SmartContractRisk:Bank:withdraw",
+    "Bank.withdraw sends value before updating balances",
+    {
+      repoPath: "contracts/Bank.sol",
+      properties: {
+        sinkType: "smart_contract_reentrancy",
+        riskType: "reentrancy_value_transfer_before_state_update",
+      },
+      evidenceIds: ["ev-contract"],
+    },
+  );
   const control =
     options.addExternalContradiction === true
       ? node("Control", "Control:destination-allowlist", "destination allowlist", {
@@ -250,6 +272,7 @@ function baseGraph(options: Gate3Options): SecurityGraph {
       "ev-secret-impact",
     ]),
     edge("exposes", contentResource, contentSink, "exposes:content:hidden-route", ["ev-content"]),
+    edge("flows_to", smartContract, smartContractSink, "flows_to:contract:risk", ["ev-contract"]),
     ...(control === undefined
       ? []
       : [edge("protected_by", handler, control, "protected_by:handler:allowlist", ["ev-control"])]),
@@ -271,6 +294,8 @@ function baseGraph(options: Gate3Options): SecurityGraph {
       service,
       contentResource,
       contentSink,
+      smartContract,
+      smartContractSink,
       ...(control === undefined ? [] : [control]),
       ...Object.values(findings),
     ],
@@ -433,6 +458,7 @@ function checkedCoverage(): GraphCoverage[] {
     "dependency_usage",
     "ci_iac",
     "content_assets",
+    "smart_contracts",
     "language_support",
   ].map((area) => ({
     area: area as GraphCoverage["area"],
@@ -454,6 +480,7 @@ function gate3Manifest(): Manifest {
       { path: "src/config.ts", size: 80, sha256: "config-sha" },
       { path: "package.json", size: 60, sha256: "package-sha" },
       { path: ".github/workflows/ci.yml", size: 120, sha256: "ci-sha" },
+      { path: "contracts/Bank.sol", size: 120, sha256: "contract-sha" },
     ],
     exclusions: [],
     toolchain: { imageTag: "test-toolchain:latest", tools: [] },

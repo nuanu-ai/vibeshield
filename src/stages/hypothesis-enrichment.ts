@@ -613,6 +613,8 @@ function impactText(family: string, hypothesis: StaticHypothesis): string {
       return "A secret context may reach a privileged integration or exposed resource, increasing operational impact.";
     case "content_resource_exposure_path":
       return "Hidden routes, private assets, or content clues may be exposed through static application content rather than protected by authorization.";
+    case "smart_contract_risk_path":
+      return "A smart contract may transfer value before updating internal accounting, which can enable reentrancy or repeated withdrawal.";
     default:
       return `Static graph evidence produced ${hypothesis.status} support for this hypothesis.`;
   }
@@ -656,6 +658,11 @@ const FAMILY_COPY: Readonly<Record<string, FamilyCopy>> = {
     concern:
       "Static application content exposes a hidden route, private asset, or content clue that should not rely on obscurity.",
     fix: "Protect the route or asset with an explicit authorization check, remove the exposed clue, or confirm the resource is intentionally public.",
+  },
+  smart_contract_risk_path: {
+    concern:
+      "A smart contract sends value before updating internal state for the withdrawing account.",
+    fix: "Move state updates before external calls, add a reentrancy guard, or otherwise prove the external call cannot reenter the withdrawal path.",
   },
 };
 

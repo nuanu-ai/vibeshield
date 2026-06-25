@@ -141,6 +141,7 @@ function positiveFixtures(): FamilyFixture[] {
     ciFixture(),
     secretFixture(),
     contentResourceFixture(),
+    smartContractFixture(),
   ];
 }
 
@@ -301,6 +302,29 @@ function contentResourceFixture(): FamilyFixture {
   };
 }
 
+function smartContractFixture(): FamilyFixture {
+  const contract = node("Resource", "SmartContract:Bank", "Bank", {
+    resourceType: "smart_contract",
+    contractName: "Bank",
+  });
+  const sink = node("Sink", "SmartContractRisk:Bank:withdraw", "Bank.withdraw reentrancy risk", {
+    sinkType: "smart_contract_reentrancy",
+    riskType: "reentrancy_value_transfer_before_state_update",
+  });
+  const flows = edge("flows_to", contract, sink, "flows_to:contract:risk");
+
+  return {
+    family: "smart_contract_risk_path",
+    graph: graph([contract, sink], [flows]),
+    negativeGraph: graph([contract, sink], []),
+    contexts: [],
+    negativeContexts: [],
+    expectedNodeIds: [contract.id, sink.id],
+    expectedEdgeIds: [flows.id],
+    contextRequired: false,
+  };
+}
+
 function familyCandidates(
   family: Stage2HypothesisFamily,
   sourceGraph: SecurityGraph,
@@ -344,6 +368,12 @@ function graph(
       },
       {
         area: "content_assets",
+        state: "checked",
+        producer: "test-fixture",
+        producerVersion: GRAPH_VERSION,
+      },
+      {
+        area: "smart_contracts",
         state: "checked",
         producer: "test-fixture",
         producerVersion: GRAPH_VERSION,

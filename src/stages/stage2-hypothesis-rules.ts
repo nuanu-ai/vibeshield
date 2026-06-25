@@ -10,6 +10,7 @@ export const STAGE2_HYPOTHESIS_FAMILIES = [
   "ci_supply_chain_path",
   "secret_impact_chain",
   "content_resource_exposure_path",
+  "smart_contract_risk_path",
 ] as const;
 
 export type Stage2HypothesisFamily = (typeof STAGE2_HYPOTHESIS_FAMILIES)[number];
@@ -116,6 +117,19 @@ export function stage2HypothesisRules(
       },
       coverageRefs: ["stage2:content_assets"],
       requiredValidation: ["content_route_review", "asset_exposure_review"],
+    },
+    {
+      id: "stage2.smart-contract-risk-path",
+      family: "smart_contract_risk_path",
+      title: "Smart contract risk path: contract sends value before updating state",
+      source: { kinds: ["Resource"], propertyEquals: { resourceType: "smart_contract" } },
+      target: { kinds: ["Sink"], propertyEquals: { sinkType: "smart_contract_reentrancy" } },
+      path: {
+        allowedEdgeKinds: ["flows_to"],
+        maxPathLength: 1,
+      },
+      coverageRefs: ["stage2:smart_contracts"],
+      requiredValidation: ["smart_contract_reentrancy_review", "contract_unit_or_fork_test"],
     },
   ];
 }

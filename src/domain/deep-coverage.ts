@@ -27,7 +27,8 @@ export type DeepCoverageArea =
   | "component_usage"
   | "dependency_usage"
   | "ci_iac"
-  | "content_assets";
+  | "content_assets"
+  | "smart_contracts";
 
 export type DeepCoverageState = "checked" | "skipped" | "failed" | "degraded" | "partial";
 
@@ -42,6 +43,7 @@ const COVERAGE_AREAS = new Set<DeepCoverageArea>([
   "dependency_usage",
   "ci_iac",
   "content_assets",
+  "smart_contracts",
 ]);
 
 const COVERAGE_STATES = new Set<DeepCoverageState>([

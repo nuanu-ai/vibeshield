@@ -47,6 +47,7 @@ const TERMINAL_COVERAGE_AREAS = [
   "dependency_usage",
   "ci_iac",
   "content_assets",
+  "smart_contracts",
 ] as const;
 
 // Friendly, deduplicated progress labels. Internal stage ids never reach the
@@ -432,7 +433,7 @@ function familyCounts(
   }
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 4)
+    .slice(0, 5)
     .map(([family, count]) => ({ label: familyLabel(family), count }));
 }
 
@@ -501,6 +502,8 @@ function familyLabel(family: string): string {
       return "secret impact";
     case "content_resource_exposure_path":
       return "hidden content";
+    case "smart_contract_risk_path":
+      return "smart contract";
     default:
       return family.replaceAll("_", " ");
   }
@@ -518,6 +521,8 @@ function coverageLabel(area: string): string {
       return "CI/IaC";
     case "content_assets":
       return "content assets";
+    case "smart_contracts":
+      return "smart contracts";
     default:
       return area.replaceAll("_", " ");
   }

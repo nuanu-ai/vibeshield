@@ -61,6 +61,12 @@ import {
 import { composeProgramAnalysisGraph } from "./program-analysis-graph.js";
 import { composeQuickScanGraph } from "./quick-scan-graph-import.js";
 import { renderRepositoryMap } from "./repository-map.js";
+import {
+  composeSmartContractContext,
+  isSolidityPath,
+  type SmartContractRiskObservation,
+  smartContractRiskObservationsFromText,
+} from "./smart-contract-context.js";
 import { correlateStage2Hypotheses } from "./stage2-hypothesis-rules.js";
 import { validateStaticHypotheses } from "./static-hypothesis-validator.js";
 import { composeValidationRecipes } from "./validation-recipes.js";
@@ -302,11 +308,20 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     graph,
     failures: compositionFailures,
   });
+  emitDeepProgress(ctx, "Checking hidden content and assets");
   const graphWithContentResources = await composeContentResourcesOrDegrade({
     ctx,
     sourceDir,
     manifest,
     graph: graphWithCiIac,
+    failures: compositionFailures,
+  });
+  emitDeepProgress(ctx, "Checking smart contracts");
+  const graphWithSmartContracts = await composeSmartContractsOrDegrade({
+    ctx,
+    sourceDir,
+    manifest,
+    graph: graphWithContentResources,
     failures: compositionFailures,
   });
   emitDeepProgress(ctx, "Checking reachability");
@@ -318,7 +333,7 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
     failures: compositionFailures,
   });
   const reachability = composeReachabilityOrDegrade({
-    graph: graphWithContentResources,
+    graph: graphWithSmartContracts,
     manifest,
     artifacts: programArtifacts,
     dependencyObservations,
@@ -611,6 +626,53 @@ async function composeContentResourcesOrDegrade(input: {
     });
     return input.graph;
   }
+}
+
+async function composeSmartContractsOrDegrade(input: {
+  readonly ctx: StageContext;
+  readonly sourceDir: string;
+  readonly manifest: Manifest;
+  readonly graph: SecurityGraph;
+  readonly failures: ProgramAnalysisFailure[];
+}): Promise<SecurityGraph> {
+  try {
+    const scan = await smartContractRiskObservationsFromSnapshot(input);
+    return composeSmartContractContext({
+      graph: input.graph,
+      manifest: input.manifest,
+      observations: scan.observations,
+      scannedFileCount: scan.scannedFileCount,
+    });
+  } catch (error) {
+    input.failures.push({
+      area: "smart_contracts",
+      reason: publicReason("Deep Static smart-contract projection failed", error),
+    });
+    return input.graph;
+  }
+}
+
+async function smartContractRiskObservationsFromSnapshot(input: {
+  readonly ctx: StageContext;
+  readonly sourceDir: string;
+  readonly manifest: Manifest;
+}): Promise<{
+  readonly observations: ReadonlyArray<SmartContractRiskObservation>;
+  readonly scannedFileCount: number;
+}> {
+  const observations: SmartContractRiskObservation[] = [];
+  let scannedFileCount = 0;
+
+  for (const file of input.manifest.files) {
+    if (!isSolidityPath(file.path)) {
+      continue;
+    }
+    scannedFileCount += 1;
+    const text = await readSnapshotText(input.ctx, input.sourceDir, file.path);
+    observations.push(...smartContractRiskObservationsFromText(file.path, text));
+  }
+
+  return { observations, scannedFileCount };
 }
 
 async function contentResourceObservationsFromSnapshot(input: {

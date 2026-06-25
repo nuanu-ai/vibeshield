@@ -35,9 +35,10 @@ What Stage 2 builds and where the boundaries are.
   queue consumer, webhook, scheduled job, file parser, upload handler, and CI
   trigger. Framework-specific packs can raise coverage later without changing the
   graph model.
-- Five deterministic correlation rule families: external input to dangerous
+- Seven deterministic correlation rule families: external input to dangerous
   operation, Quick SAST finding to reachable path, dependency vulnerability to
-  usage path, CI supply-chain path, and secret impact chain.
+  usage path, CI supply-chain path, secret impact chain, hidden content/resource
+  exposure, and smart-contract risk.
 - Static hypotheses use only these statuses: `candidate`, `statically_supported`,
   `statically_contradicted`, `inconclusive`. `confirmed` is reserved for the
   later runtime-validation stage.
@@ -345,7 +346,7 @@ owner can act on. It still does not execute the application.
 #### Gate 3 - deterministic hypotheses from graph evidence
 
 Closes when: `vibeshield scan <real-repo-with-deep-fixtures> --deep` produces
-static hypotheses for all six rule families, and a negative fixture proves that
+static hypotheses for all seven rule families, and a negative fixture proves that
 missing or contradicted graph evidence yields `inconclusive` or
 `statically_contradicted` instead of a high-confidence claim.
 
@@ -354,8 +355,8 @@ Status:
 - [ ] **Gate 3 acceptance.** A live fixture matrix produces at least one
   hypothesis for external input to dangerous operation, SAST reachable path,
   dependency usage path, CI supply-chain path, secret impact chain, and hidden
-  content/resource exposure; every hypothesis cites bounded graph paths and
-  coverage; a control or missing edge
+  content/resource exposure, and smart-contract risk; every hypothesis cites
+  bounded graph paths and coverage; a control or missing edge
   fixture blocks promotion.
 - [x] **Correlation rule engine.** In: `SecurityGraph`, contextual findings,
   coverage, and rule definitions. Do: implement deterministic rule evaluation
@@ -365,16 +366,17 @@ Status:
   same graph produces stable candidates in stable order without any model call.
   Evidence: `tests/correlation-rule-engine.test.ts` covers bounded path search,
   required edge kinds, contradiction capture, stable ids, and sink taxonomy.
-- [x] **Six rule families.** In: rule engine and graph facts. Do: implement:
+- [x] **Seven rule families.** In: rule engine and graph facts. Do: implement:
   external input -> dangerous operation; Quick SAST finding -> reachable path;
   vulnerable component -> imported/used/reachable path; untrusted CI trigger ->
   mutable build dependency -> privileged credential -> artifact or repository
   write; secret finding -> configuration reference -> privileged integration ->
   exposed service or build job; hidden route/private asset/content clue ->
-  content exposure. Out: candidate hypotheses for each family. Done: each rule
-  has a positive and negative fixture that fails if evidence is guessed.
+  content exposure; Solidity value transfer before state update -> smart-contract
+  risk. Out: candidate hypotheses for each family. Done: each rule has a
+  positive and negative fixture that fails if evidence is guessed.
   Evidence: `tests/stage2-hypothesis-rules.test.ts` covers positive and negative
-  fixtures for all six families, context linking, determinism, and candidate
+  fixtures for all seven families, context linking, determinism, and candidate
   bounds; `tests/deep-static-gate3.acceptance.test.ts` exercises all families
   together.
 - [x] **Static hypothesis validator.** In: candidates, graph paths, observed
@@ -486,8 +488,9 @@ coherent.
 - **SecurityFlow**: `id`, `sourceNodeId`, `sinkNodeId`, `pathEdgeIds`,
   `controlNodeIds`, `coverageState`, `confidence`, `evidenceIds`.
 - **GraphCoverage**: `area` (`boundaries`, `call_graph`, `data_flow`,
-  `dependency_usage`, `ci_iac`, `language_support`), `state`, `coveredCount?`,
-  `totalCount?`, `reason?`, `producer`, `producerVersion`.
+  `dependency_usage`, `ci_iac`, `content_assets`, `smart_contracts`,
+  `language_support`), `state`, `coveredCount?`, `totalCount?`, `reason?`,
+  `producer`, `producerVersion`.
 - **ProgramAnalysisBackend**: `buildModel(sourceDir, manifest)`,
   `extractEntities(modelRef)`, `extractBoundaries(modelRef)`,
   `extractCallEdges(modelRef)`, `extractFlows(modelRef)`,
@@ -543,7 +546,7 @@ continuous monitoring.
 
 - Which real repo or fixture proves Gate 1 with a boundary -> cross-file call ->
   dangerous sink path.
-- Which fixture proves all six deterministic rule families without turning the
+- Which fixture proves all seven deterministic rule families without turning the
   test suite into a fake scanner.
 - How much of `repository-map.json` should be owner-visible versus kept as a
   debugging artifact.

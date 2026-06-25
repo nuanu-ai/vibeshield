@@ -108,6 +108,12 @@ export function composeDeepCoverage(input: ComposeDeepCoverageInput): DeepCovera
     "Content and static asset projection is not wired into Deep Static yet.",
     producerVersion,
   );
+  addKnownGap(
+    entries,
+    "smart_contracts",
+    "Smart-contract risk projection is not wired into Deep Static yet.",
+    producerVersion,
+  );
 
   return validateDeepCoverage({
     runId: input.runId,
