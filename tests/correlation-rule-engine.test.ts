@@ -266,7 +266,7 @@ describe("correlateGraphRules candidates", () => {
     }
   });
 
-  it("labels Juice Shop auth, LLM, and coupon trust paths by sink or route semantics", () => {
+  it("labels Juice Shop auth, LLM, coupon, and misconfiguration paths by sink or route semantics", () => {
     for (const { boundaryLabel, sinkType, title } of [
       {
         boundaryLabel: "jwtChallenge",
@@ -301,6 +301,18 @@ describe("correlateGraphRules candidates", () => {
         sinkType: "coupon_encoding_trust",
         title:
           "Coupon encoding trust path: request-controlled coupon data reaches reversible discount logic",
+      },
+      {
+        boundaryLabel: "routes/verify.ts::program:errorHandlingChallenge",
+        sinkType: "security_misconfiguration",
+        title:
+          "Security misconfiguration path: request-controlled check reaches insecure configuration behavior",
+      },
+      {
+        boundaryLabel: "verifySvgInjectionChallenge",
+        sinkType: "cross_site_scripting",
+        title:
+          "Security misconfiguration path: request-controlled check reaches insecure configuration behavior",
       },
     ]) {
       const candidates = correlateGraphRules({

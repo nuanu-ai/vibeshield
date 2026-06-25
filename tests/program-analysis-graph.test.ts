@@ -280,7 +280,7 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(5);
   });
 
-  it("marks Juice Shop auth, LLM, and coupon lesson semantics as sinks", () => {
+  it("marks Juice Shop auth, LLM, coupon, and misconfiguration lesson semantics as sinks", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", juiceShopTrustSemanticsSlices())] }),
     );
@@ -297,9 +297,13 @@ describe("composeProgramAnalysisGraph path", () => {
         ["TOTP token trust", "two_factor_token_trust"],
         ["LLM tool trust", "llm_tool_trust"],
         ["Coupon encoding trust", "coupon_encoding_trust"],
+        ["deprecated interface exposure", "security_misconfiguration"],
+        ["verbose error exposure", "security_misconfiguration"],
+        ["support account hardcoded login", "security_misconfiguration"],
+        ["SVG redirect policy trust", "security_misconfiguration"],
       ]),
     );
-    expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(6);
+    expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(10);
   });
 
   it("connects route handlers to sinks inside nested Joern lambda entities", () => {
@@ -1077,6 +1081,82 @@ function juiceShopTrustSemanticsSlices() {
               code: "challengeUtils.solveIf(challenges.weakPasswordChallenge, () => req.body.email === 'admin@example.com' && req.body.password === 'admin123')",
               label: "CALL",
               lineNumber: 59,
+            },
+          },
+          {
+            targetObj: {
+              name: "solveIf",
+              resolvedMethod: "lib/challengeUtils.solveIf",
+              code: "challengeUtils.solveIf(challenges.loginSupportChallenge, () => req.body.email === 'support@' + config.get<string>('application.domain') && req.body.password === 'J6aVjTgOpRs@?5l!Zkq2AYnCE@RF$P')",
+              label: "CALL",
+              lineNumber: 60,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/fileUpload.ts::program:handleXmlUpload:<lambda>3",
+        fileName: "routes/fileUpload.ts",
+        lineNumber: 72,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/fileUpload.ts::program:handleXmlUpload",
+          sourceName: "request",
+        },
+        parameters: [{ name: "file", typeFullName: "express.Request.file" }],
+        usages: [
+          {
+            targetObj: {
+              name: "solveIf",
+              resolvedMethod: "lib/challengeUtils.solveIf",
+              code: "challengeUtils.solveIf(challenges.deprecatedInterfaceChallenge, () => { return true })",
+              label: "CALL",
+              lineNumber: 72,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/verify.ts::program:errorHandlingChallenge",
+        fileName: "routes/verify.ts",
+        lineNumber: 79,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/verify.ts::program:errorHandlingChallenge",
+          sourceName: "request",
+        },
+        parameters: [{ name: "err", typeFullName: "unknown" }],
+        usages: [
+          {
+            targetObj: {
+              name: "solveIf",
+              resolvedMethod: "lib/challengeUtils.solveIf",
+              code: "challengeUtils.solveIf(challenges.errorHandlingChallenge, () => { return err && (statusCode === 200 || statusCode > 401) })",
+              label: "CALL",
+              lineNumber: 80,
+            },
+          },
+        ],
+      },
+      {
+        fullName:
+          "lib/startup/registerWebsocketEvents.ts::program:<lambda>0:<lambda>1:<lambda>8:<lambda>9",
+        fileName: "lib/startup/registerWebsocketEvents.ts",
+        lineNumber: 46,
+        boundary: {
+          boundaryType: "socket-event",
+          routeOrName: "verifySvgInjectionChallenge",
+          sourceName: "data",
+        },
+        parameters: [{ name: "data", typeFullName: "socket.payload" }],
+        usages: [
+          {
+            targetObj: {
+              name: "isRedirectAllowed",
+              resolvedMethod: "lib/insecurity.isRedirectAllowed",
+              code: "security.isRedirectAllowed(data)",
+              label: "CALL",
+              lineNumber: 46,
             },
           },
         ],
@@ -2167,6 +2247,11 @@ function manifest(): Manifest {
       { path: "routes/login.ts", size: 100, sha256: "juice-login-sha" },
       { path: "routes/resetPassword.ts", size: 100, sha256: "juice-reset-password-sha" },
       { path: "routes/verify.ts", size: 100, sha256: "juice-verify-sha" },
+      {
+        path: "lib/startup/registerWebsocketEvents.ts",
+        size: 100,
+        sha256: "juice-websocket-sha",
+      },
       { path: "apps/web/src/lib/external-links.ts", size: 100, sha256: "external-links-sha" },
       { path: "routes/proxy.ts", size: 100, sha256: "proxy-ts-sha" },
       { path: "routes/api.ts", size: 100, sha256: "api-sha" },

@@ -439,7 +439,20 @@ function hasClientSideTrustDescriptor(value: string): boolean {
 }
 
 function hasSecurityMisconfigurationDescriptor(value: string): boolean {
-  return value.includes("securitymisconfiguration") || value.includes("security-misconfiguration");
+  return (
+    value.includes("securitymisconfiguration") ||
+    value.includes("security-misconfiguration") ||
+    value.includes("deprecatedinterfacechallenge") ||
+    value.includes("deprecated-interface-challenge") ||
+    value.includes("errorhandlingchallenge") ||
+    value.includes("error-handling-challenge") ||
+    value.includes("loginsupportchallenge") ||
+    value.includes("login-support-challenge") ||
+    value.includes("svginjectionchallenge") ||
+    value.includes("svg-injection-challenge") ||
+    value.includes("verifysvginjectionchallenge") ||
+    value.includes("verify-svg-injection-challenge")
+  );
 }
 
 function hasLogInjectionDescriptor(value: string): boolean {

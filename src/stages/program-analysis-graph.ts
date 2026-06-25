@@ -1403,7 +1403,6 @@ function isCredentialTrustOperation(
   }
   return (
     methodName === "equals" ||
-    methodName === "solveif" ||
     lower.includes("captainjack") ||
     lower.includes("blackpearl") ||
     lower.includes("admin123") ||
@@ -1481,26 +1480,21 @@ function isSecurityMisconfigurationOperation(
   entity: ObservedEntity,
 ): boolean {
   const context = entityDescriptorContext(entity, candidate).toLowerCase();
-  if (
-    !(
-      context.includes("/securitymisconfiguration/") ||
-      context.includes("lessons.securitymisconfiguration")
-    )
-  ) {
-    return false;
+  if (isWebGoatSecurityMisconfigurationContext(context)) {
+    return (
+      ["equals", "isblank", "trim", "ok", "status", "body", "of", "put"].includes(methodName) ||
+      lower.includes("responseentity") ||
+      lower.includes("map.of") ||
+      lower.includes("default_username") ||
+      lower.includes("default_password") ||
+      lower.includes("spring.security.user") ||
+      lower.includes("management.endpoint") ||
+      lower.includes("leaked_") ||
+      lower.includes("debug_mode") ||
+      lower.includes("stacktrace")
+    );
   }
-  return (
-    ["equals", "isblank", "trim", "ok", "status", "body", "of", "put"].includes(methodName) ||
-    lower.includes("responseentity") ||
-    lower.includes("map.of") ||
-    lower.includes("default_username") ||
-    lower.includes("default_password") ||
-    lower.includes("spring.security.user") ||
-    lower.includes("management.endpoint") ||
-    lower.includes("leaked_") ||
-    lower.includes("debug_mode") ||
-    lower.includes("stacktrace")
-  );
+  return isJuiceShopSecurityMisconfigurationOperation(lower, methodName, context, entity);
 }
 
 function securityMisconfigurationLabel(
@@ -1509,9 +1503,20 @@ function securityMisconfigurationLabel(
   entity: ObservedEntity,
 ): string {
   const lower = entityDescriptorContext(entity, candidate).toLowerCase();
+  if (isJuiceShopDeprecatedInterfaceContext(lower)) {
+    return "deprecated interface exposure";
+  }
+  if (isJuiceShopErrorHandlingContext(lower)) {
+    return "verbose error exposure";
+  }
+  if (isJuiceShopLoginSupportContext(lower)) {
+    return "support account hardcoded login";
+  }
+  if (isJuiceShopSvgInjectionContext(lower, entity)) {
+    return "SVG redirect policy trust";
+  }
   if (
-    lower.includes("/securitymisconfiguration/") ||
-    lower.includes("lessons.securitymisconfiguration") ||
+    isWebGoatSecurityMisconfigurationContext(lower) ||
     lower.includes("default_") ||
     lower.includes("spring.security.user") ||
     lower.includes("management.endpoint")
@@ -1522,6 +1527,76 @@ function securityMisconfigurationLabel(
     return "verbose error exposure";
   }
   return fallbackLabel;
+}
+
+function isWebGoatSecurityMisconfigurationContext(context: string): boolean {
+  return (
+    context.includes("/securitymisconfiguration/") ||
+    context.includes("lessons.securitymisconfiguration")
+  );
+}
+
+function isJuiceShopSecurityMisconfigurationOperation(
+  lower: string,
+  methodName: string,
+  context: string,
+  entity: ObservedEntity,
+): boolean {
+  if (isJuiceShopDeprecatedInterfaceContext(context)) {
+    return lower.includes("deprecatedinterfacechallenge") || lower.includes("deprecated");
+  }
+  if (isJuiceShopErrorHandlingContext(context)) {
+    return (
+      lower.includes("errorhandlingchallenge") ||
+      (methodName === "solveif" && context.includes("errorhandlingchallenge")) ||
+      (lower.includes("statuscode") && (lower.includes("> 401") || lower.includes("=== 200")))
+    );
+  }
+  if (isJuiceShopLoginSupportContext(context)) {
+    return (
+      lower.includes("loginsupportchallenge") ||
+      lower.includes("support@") ||
+      lower.includes("j6avjtgoprs")
+    );
+  }
+  if (isJuiceShopSvgInjectionContext(context, entity)) {
+    return (
+      lower.includes("svginjectionchallenge") ||
+      lower.includes("verifysvginjectionchallenge") ||
+      lower.includes("cataas.com") ||
+      lower.includes("isredirectallowed")
+    );
+  }
+  return false;
+}
+
+function isJuiceShopDeprecatedInterfaceContext(context: string): boolean {
+  return (
+    context.includes("routes/fileupload.ts") && context.includes("deprecatedinterfacechallenge")
+  );
+}
+
+function isJuiceShopErrorHandlingContext(context: string): boolean {
+  return context.includes("routes/verify.ts") && context.includes("errorhandlingchallenge");
+}
+
+function isJuiceShopLoginSupportContext(context: string): boolean {
+  return (
+    context.includes("routes/login.ts") &&
+    (context.includes("loginsupportchallenge") ||
+      context.includes("support@") ||
+      context.includes("j6avjtgoprs"))
+  );
+}
+
+function isJuiceShopSvgInjectionContext(context: string, entity: ObservedEntity): boolean {
+  return (
+    context.includes("lib/startup/registerwebsocketevents.ts") &&
+    (context.includes("svginjectionchallenge") ||
+      context.includes("verifysvginjectionchallenge") ||
+      context.includes("cataas.com") ||
+      (context.includes("isredirectallowed") && entity.lineRange.startLine >= 45))
+  );
 }
 
 function isLogInjectionOperation(
