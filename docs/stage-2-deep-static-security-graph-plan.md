@@ -190,7 +190,7 @@ Status:
   The fresh matrix passes
   `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625211743-16001fa8 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
   The curated ground-truth slice passes in normal and strict benchmark modes:
-  WebGoat covers 21/21 expectations and Juice Shop covers 34/34 expectations
+  WebGoat covers 21/21 expectations and Juice Shop covers 35/35 expectations
   with no known gaps.
   The Juice Shop inventory audit
   `pnpm benchmark:inventory --source juice-shop=/tmp/vibeshield-juice-shop-probe`
@@ -379,7 +379,7 @@ Status:
   Evidence: `tests/deep-static-gate3.acceptance.test.ts` proves all seven rule
   families from deterministic graph evidence, stable ordering, dependency
   missing-edge suppression, and contradicted control handling. The fresh WebGoat
-  and Juice Shop ground-truth benchmark runs cover 21/21 and 34/34 expectations,
+  and Juice Shop ground-truth benchmark runs cover 21/21 and 35/35 expectations,
   including `content_resource_exposure_path=11` and
   `smart_contract_risk_path=1`.
 - [x] **Correlation rule engine.** In: `SecurityGraph`, contextual findings,

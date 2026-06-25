@@ -402,6 +402,14 @@
           "statusIn": ["statically_supported"]
         },
         {
+          "id": "juice.crypto-premium-paywall-hidden-route",
+          "title": "Premium Paywall challenge should classify the hidden paywall route as exposed static content",
+          "kind": "hypothesis",
+          "titleIncludes": "Hidden content/resource",
+          "candidateReasonIncludes": "/this/page/is/hidden/behind/an/incredibly/high/paywall",
+          "statusIn": ["statically_supported"]
+        },
+        {
           "id": "juice.file-exposure",
           "title": "Confidential Document and Local File Read challenges should be classified as file exposure",
           "kind": "hypothesis",

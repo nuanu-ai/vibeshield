@@ -120,7 +120,7 @@ vulnerability classes for WebGoat and Juice Shop as either:
 Current normal and strict results on the latest WebGoat and Juice Shop runs:
 
 - WebGoat: 21/21 covered, 0 known gaps.
-- Juice Shop: 34/34 covered, 0 known gaps.
+- Juice Shop: 35/35 covered, 0 known gaps.
 
 Future `known_gap` entries should be temporary, explicit backlog items and must
 fail under `--strict-ground-truth`.
