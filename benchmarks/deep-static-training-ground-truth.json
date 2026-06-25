@@ -90,8 +90,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Access control",
           "candidateReasonIncludes": "access-control/users",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "webgoat.vulnerable-components",
