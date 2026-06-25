@@ -67,8 +67,12 @@
           ]
         },
         "Security through Obscurity": {
-          "groundTruthIds": ["juice.file-exposure"],
-          "limitation": "Obfuscated route discovery and steganography require asset/UI analysis beyond the current static code graph."
+          "groundTruthIds": [
+            "juice.obscurity-token-sale-route",
+            "juice.obscurity-privacy-policy-proof",
+            "juice.obscurity-hidden-image"
+          ],
+          "note": "Covers obfuscated frontend route discovery, hidden private asset proof routes, and static steganography clue exposure."
         },
         "Sensitive Data Exposure": {
           "groundTruthIds": [

@@ -330,6 +330,30 @@
           "statusIn": ["statically_supported"]
         },
         {
+          "id": "juice.obscurity-token-sale-route",
+          "title": "Token Sale challenge should classify obfuscated frontend route discovery as hidden content exposure",
+          "kind": "hypothesis",
+          "titleIncludes": "Hidden content/resource",
+          "candidateReasonIncludes": "tokenMatcher",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.obscurity-privacy-policy-proof",
+          "title": "Privacy Policy Inspection challenge should classify hidden private asset proof route",
+          "kind": "hypothesis",
+          "titleIncludes": "Hidden content/resource",
+          "candidateReasonIncludes": "frontend/dist/frontend/assets/private/thank-you.jpg",
+          "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.obscurity-hidden-image",
+          "title": "Steganography challenge should classify static image and verifier clue exposure",
+          "kind": "hypothesis",
+          "titleIncludes": "Hidden content/resource",
+          "candidateReasonIncludes": "pickle rick",
+          "statusIn": ["statically_supported"]
+        },
+        {
           "id": "juice.jwt-token-trust",
           "title": "Unsigned and forged JWT challenges should classify token trust",
           "kind": "hypothesis",
