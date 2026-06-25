@@ -173,9 +173,10 @@ Status:
   WebGoat (Java, run `20260625194251-245a4c68`, 616 supported static
   hypotheses, `data_flow` checked 290/290, `component_usage` checked 3086/3086,
   `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
-  `20260625210410-9e7e54aa`, 1784, `data_flow` checked 727/727,
+  `20260625211743-16001fa8`, 1785, `data_flow` checked 727/727,
   `component_usage` checked 2194/2194, `dependency_usage` checked 12/12,
-  `ci_iac` checked 18/18, `content_assets` checked 1067/1067), Freeland (JS/TS,
+  `ci_iac` checked 18/18, `content_assets` checked 1067/1067,
+  `smart_contracts` checked 17/17), Freeland (JS/TS,
   run `20260625164008-81d5eb5a`, 164, `data_flow` checked 62/380,
   `component_usage` checked 883/883, `dependency_usage` checked 0/0, `ci_iac`
   checked 7/7), Vulnerable-Flask-App
@@ -187,16 +188,16 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625210410-9e7e54aa /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625211743-16001fa8 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
   The curated ground-truth slice passes in normal and strict benchmark modes:
-  WebGoat covers 21/21 expectations and Juice Shop covers 33/33 expectations
+  WebGoat covers 21/21 expectations and Juice Shop covers 34/34 expectations
   with no known gaps.
   The Juice Shop inventory audit
   `pnpm benchmark:inventory --source juice-shop=/tmp/vibeshield-juice-shop-probe`
-  maps 113 challenges across 16 categories to curated ground truth or explicit
-  static-analysis limitations; the stricter
+  maps 113 challenges across 16 categories to curated ground truth with 0
+  explicit static-analysis limitations; the stricter
   `pnpm benchmark:inventory --fail-on-limitations --source juice-shop=/tmp/vibeshield-juice-shop-probe`
-  gate is still intentionally red on Miscellaneous.
+  gate passes with no limitations.
   Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run
@@ -222,7 +223,12 @@ Status:
   behavior, and the password-reset brute-force overlap. Fresh run
   `20260625210410-9e7e54aa` resolved Security through Obscurity expectations,
   including obfuscated frontend route discovery, hidden private asset proof
-  routes, and static steganography clue exposure.
+  routes, and static steganography clue exposure. Fresh run
+  `20260625211743-16001fa8` resolved the security-relevant Miscellaneous Wallet
+  Depletion expectation by detecting Solidity value transfer before state update
+  in `ETHWalletBank.withdraw`; remaining Miscellaneous product and
+  due-diligence goals are documented as non-static/non-vulnerability category
+  notes rather than strict limitations.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
   forgery, cross-site scripting, code execution, IDOR, CSRF, access-control, JWT

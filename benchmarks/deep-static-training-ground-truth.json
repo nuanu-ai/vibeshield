@@ -428,6 +428,14 @@
           "kind": "hypothesis",
           "titleIncludes": "Server-side template injection",
           "statusIn": ["statically_supported"]
+        },
+        {
+          "id": "juice.web3-wallet-withdrawal-reentrancy",
+          "title": "Wallet Depletion challenge should classify value transfer before state update in Solidity withdrawal logic",
+          "kind": "hypothesis",
+          "titleIncludes": "Smart contract risk",
+          "candidateReasonIncludes": "ETHWalletBank.withdraw",
+          "statusIn": ["statically_supported"]
         }
       ]
     }
