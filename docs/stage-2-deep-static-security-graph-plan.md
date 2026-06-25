@@ -169,7 +169,7 @@ Status:
   Joern CPG artifact is stored as a blob; no path step is created without a
   `SecurityGraphEdge` and evidence.
   Evidence: current live `--deep` runs produced supported attack paths on
-  WebGoat (Java, run `20260625190836-4b827481`, 294 supported static
+  WebGoat (Java, run `20260625191742-d8f27f65`, 294 supported static
   hypotheses, `data_flow` checked 129/222, `component_usage` checked 3086/3086,
   `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
   `20260625190926-0443bfe2`, 804, `data_flow` checked 333/333,
@@ -185,10 +185,9 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625190836-4b827481 /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
-  The curated ground-truth slice now passes in normal benchmark mode with known
-  gaps surfaced: WebGoat covers 11/12 expectations and reports 1 known gap
-  (missing function-level access control classification); Juice Shop covers
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625191742-d8f27f65 /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  The curated ground-truth slice now passes in normal and strict benchmark mode:
+  WebGoat covers 12/12 expectations and reports 0 known gaps; Juice Shop covers
   17/17 expectations and reports 0 known gaps. Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run
@@ -196,7 +195,9 @@ Status:
   JavaScript route middleware registration linking; fresh runs
   `20260625190836-4b827481` and `20260625190926-0443bfe2` resolved dependency
   reachability by scanning Syft SBOMs with Trivy and exact package manifests
-  with OSV.
+  with OSV. Fresh run `20260625191742-d8f27f65` resolved the missing
+  function-level access-control classification gap without counting the fixed
+  `users-admin-fix` route as covered.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
   forgery, cross-site scripting, code execution, IDOR, CSRF, and access-control)
