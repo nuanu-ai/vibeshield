@@ -298,6 +298,7 @@ async function composeDeepStaticData(ctx: StageContext): Promise<DeepStaticData>
   emitDeepProgress(ctx, "Checking reachability");
   const dependencyObservations = await componentDependencyObservationsFromEvidence({
     ctx,
+    manifest,
     evidence,
     findings,
     failures: compositionFailures,
@@ -1081,6 +1082,7 @@ function componentUsageObservationsFromArtifacts(
 
 async function componentDependencyObservationsFromEvidence(input: {
   readonly ctx: StageContext;
+  readonly manifest: Manifest;
   readonly evidence: ReadonlyArray<FindingEvidence>;
   readonly findings: ReadonlyArray<Finding>;
   readonly failures: ProgramAnalysisFailure[];
@@ -1117,6 +1119,7 @@ async function componentDependencyObservationsFromEvidence(input: {
 
     for (const observation of componentDependencyObservationsFromTrivyRaw({
       raw: parsed,
+      manifestPaths: packageManifestPaths(input.manifest),
       fallbackEvidenceIds: rawEvidence.map((item) => item.id),
       evidenceIdsByPackage,
     })) {
@@ -1139,6 +1142,7 @@ async function componentDependencyObservationsFromEvidence(input: {
 
 function componentDependencyObservationsFromTrivyRaw(input: {
   readonly raw: unknown;
+  readonly manifestPaths: ReadonlyArray<string>;
   readonly fallbackEvidenceIds: ReadonlyArray<string>;
   readonly evidenceIdsByPackage: ReadonlyMap<string, ReadonlyArray<string>>;
 }): ComponentDependencyObservation[] {
@@ -1149,7 +1153,7 @@ function componentDependencyObservationsFromTrivyRaw(input: {
   const observations: ComponentDependencyObservation[] = [];
 
   for (const result of recordArray(root.Results)) {
-    const manifestPath = normalizeTrivyTarget(stringValue(result.Target));
+    const manifestPath = trivyDependencyManifestPath(result, input.manifestPaths);
     const packages = recordArray(result.Packages);
     if (manifestPath === undefined || packages.length === 0) {
       continue;
@@ -1187,6 +1191,77 @@ function componentDependencyObservationsFromTrivyRaw(input: {
   }
 
   return observations;
+}
+
+function packageManifestPaths(manifest: Manifest): string[] {
+  return manifest.files
+    .map((file) => file.path)
+    .filter((file) =>
+      /(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|pom\.xml|build\.gradle|build\.gradle\.kts|go\.(mod|sum)|requirements\.txt|poetry\.lock|Pipfile\.lock|pyproject\.toml)$/i.test(
+        file,
+      ),
+    );
+}
+
+function trivyDependencyManifestPath(
+  result: Readonly<Record<string, unknown>>,
+  manifestPaths: ReadonlyArray<string>,
+): string | undefined {
+  const target = normalizeTrivyTarget(stringValue(result.Target));
+  if (target !== undefined && manifestPaths.includes(target)) {
+    return target;
+  }
+  const ecosystem = trivyResultPackageEcosystem(result);
+  if (ecosystem === "maven") {
+    return firstManifestPath(manifestPaths, ["pom.xml", "build.gradle", "build.gradle.kts"]);
+  }
+  if (ecosystem === "npm") {
+    return firstManifestPath(manifestPaths, [
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "package.json",
+    ]);
+  }
+  if (ecosystem === "golang") {
+    return firstManifestPath(manifestPaths, ["go.sum", "go.mod"]);
+  }
+  if (ecosystem === "pypi") {
+    return firstManifestPath(manifestPaths, [
+      "requirements.txt",
+      "poetry.lock",
+      "Pipfile.lock",
+      "pyproject.toml",
+    ]);
+  }
+  return manifestPaths[0];
+}
+
+function trivyResultPackageEcosystem(
+  result: Readonly<Record<string, unknown>>,
+): string | undefined {
+  for (const pkg of recordArray(result.Packages)) {
+    const identifier = recordValue(pkg.Identifier) ?? recordValue(pkg.PkgIdentifier);
+    const purl = stringValue(identifier?.PURL);
+    const ecosystem = purl?.match(/^pkg:([^/]+)\//)?.[1]?.toLowerCase();
+    if (ecosystem !== undefined) {
+      return ecosystem;
+    }
+  }
+  return undefined;
+}
+
+function firstManifestPath(
+  manifestPaths: ReadonlyArray<string>,
+  names: ReadonlyArray<string>,
+): string | undefined {
+  for (const name of names) {
+    const matched = manifestPaths.find((file) => file === name || file.endsWith(`/${name}`));
+    if (matched !== undefined) {
+      return matched;
+    }
+  }
+  return undefined;
 }
 
 function trivyPackagesById(

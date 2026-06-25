@@ -463,6 +463,47 @@ describe("runScan quick scan vertical slice", () => {
     ]);
   });
 
+  it("uses Trivy SBOM package graph evidence for dependency reachability", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          ...gate2ManifestFiles(),
+          { path: "pom.xml", size: 120, sha256: "pom-sha" },
+        ]),
+        [],
+        { joern: { mode: "success" }, trivyVuln: trivyMavenSbomReport() },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+      deep: true,
+    });
+
+    const dependencyFinding = outcome.assessment.findings.find(
+      (finding) => finding.ruleId === "CVE-2013-7285",
+    );
+    const dependencyContext = outcome.assessment.findingContextAssessments?.find(
+      (context) => context.findingId === dependencyFinding?.id,
+    );
+
+    expect(dependencyContext).toMatchObject({
+      status: "linked_to_hypothesis",
+      coverageState: "checked",
+    });
+    expect(dependencyContext?.hypothesisIds.length).toBeGreaterThan(0);
+    expect(
+      outcome.assessment.deepCoverage?.find((area) => area.area === "dependency_usage"),
+    ).toMatchObject({
+      state: "checked",
+      coveredCount: 1,
+      totalCount: 1,
+    });
+  });
+
   it("keeps deterministic Deep Static facts stable when model enrichment is enabled", async () => {
     const source = await writeLocalFixture(dir);
     const modelOff = await runGate4DeepScan(dir, source, new NullModelProvider());
@@ -1773,6 +1814,25 @@ function trivyMavenSbomReport() {
         Target: "Java",
         Class: "lang-pkgs",
         Type: "jar",
+        Packages: [
+          {
+            ID: "org.owasp.webgoat:webgoat:2026.2-SNAPSHOT",
+            Name: "org.owasp.webgoat:webgoat",
+            Identifier: {
+              PURL: "pkg:maven/org.owasp.webgoat/webgoat@2026.2-SNAPSHOT",
+            },
+            Version: "2026.2-SNAPSHOT",
+            DependsOn: ["com.thoughtworks.xstream:xstream:1.4.5"],
+          },
+          {
+            ID: "com.thoughtworks.xstream:xstream:1.4.5",
+            Name: "com.thoughtworks.xstream:xstream",
+            Identifier: {
+              PURL: "pkg:maven/com.thoughtworks.xstream/xstream@1.4.5",
+            },
+            Version: "1.4.5",
+          },
+        ],
         Vulnerabilities: [
           {
             VulnerabilityID: "CVE-2013-7285",
