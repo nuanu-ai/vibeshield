@@ -274,6 +274,60 @@
           "statusIn": ["statically_supported"]
         },
         {
+          "id": "juice.jwt-token-trust",
+          "title": "Unsigned and forged JWT challenges should classify token trust",
+          "kind": "hypothesis",
+          "titleIncludes": "JWT token trust",
+          "candidateReasonIncludes": "routes/verify.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.credential-trust",
+          "title": "Weak, default, and exposed login credential challenges should classify credential trust",
+          "kind": "hypothesis",
+          "titleIncludes": "Credential trust",
+          "candidateReasonIncludes": "routes/login.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.password-reset-security-questions",
+          "title": "Password reset challenges should classify security-question account recovery trust",
+          "kind": "hypothesis",
+          "titleIncludes": "Password reset",
+          "candidateReasonIncludes": "routes/resetPassword.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.two-factor-token-trust",
+          "title": "Two-factor authentication challenge should classify TOTP secret and setup-token trust",
+          "kind": "hypothesis",
+          "titleIncludes": "Two-factor",
+          "candidateReasonIncludes": "routes/2fa.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.llm-tool-prompt-trust",
+          "title": "Chatbot prompt-injection challenges should classify LLM prompt and tool trust",
+          "kind": "hypothesis",
+          "titleIncludes": "LLM",
+          "candidateReasonIncludes": "routes/chat.ts",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
+          "id": "juice.coupon-encoding-trust",
+          "title": "Coupon forgery and discount challenges should classify reversible coupon encoding trust",
+          "kind": "hypothesis",
+          "titleIncludes": "Coupon",
+          "candidateReasonIncludes": "coupon",
+          "statusIn": ["statically_supported"],
+          "expected": "known_gap"
+        },
+        {
           "id": "juice.file-exposure",
           "title": "Confidential Document and Local File Read challenges should be classified as file exposure",
           "kind": "hypothesis",

@@ -88,9 +88,11 @@ vulnerability classes for WebGoat and Juice Shop as either:
 Current normal result on the latest WebGoat and Juice Shop runs:
 
 - WebGoat: 21/21 covered, 0 known gaps.
-- Juice Shop: 17/17 covered, 0 known gaps.
+- Juice Shop: 17/23 covered, 6 known gaps.
 
-Current strict result passes on the latest WebGoat and Juice Shop runs.
+Current strict result fails on the six Juice Shop known gaps: JWT token trust,
+credential trust, password-reset security questions, two-factor token trust, LLM
+prompt/tool trust, and coupon encoding trust.
 
 Optional `groundTruth` entries are reserved for curated expected vulnerability
 classes. They should describe product-observable signals or documented
