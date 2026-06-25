@@ -185,13 +185,10 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625193151-0e533df6 /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
-  The curated ground-truth slice now passes in normal benchmark mode with the
-  next lesson-level gaps surfaced: WebGoat covers 16/21 expectations and reports
-  5 known gaps (cookie/session trust, credential trust, client-side trust,
-  security misconfiguration, and logging semantics); Juice Shop covers 17/17
-  expectations and reports 0 known gaps. Strict ground truth currently fails on
-  those five WebGoat gaps. Fresh run
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625190926-0443bfe2 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  The curated ground-truth slice now passes in normal and strict benchmark mode:
+  WebGoat covers 21/21 expectations and reports 0 known gaps; Juice Shop covers
+  17/17 expectations and reports 0 known gaps. Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run
   `20260625184641-02d6d398` resolved the prior XXE classification gap through
@@ -202,7 +199,10 @@ Status:
   function-level access-control classification gap without counting the fixed
   `users-admin-fix` route as covered. Fresh run `20260625193151-0e533df6`
   resolved the cryptography, JWT token-trust, authentication-bypass, and
-  password-reset/account-recovery semantic gaps.
+  password-reset/account-recovery semantic gaps. Fresh run
+  `20260625194251-245a4c68` resolved cookie/session trust, hardcoded/default
+  credential trust, client-side trust, security misconfiguration, and logging
+  semantic gaps.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
   forgery, cross-site scripting, code execution, IDOR, CSRF, and access-control)

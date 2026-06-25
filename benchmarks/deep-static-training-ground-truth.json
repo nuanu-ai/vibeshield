@@ -137,8 +137,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Cookie trust",
           "candidateReasonIncludes": "Cookie",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "webgoat.insecure-credential-trust",
@@ -146,16 +145,14 @@
           "kind": "hypothesis",
           "titleIncludes": "Credential trust",
           "candidateReasonIncludes": "Login",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "webgoat.client-side-trust",
           "title": "Client-side filtering, HTML tampering, and bypass restriction lessons should classify client-side trust bypasses",
           "kind": "hypothesis",
           "titleIncludes": "Client-side trust",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "webgoat.security-misconfiguration",
@@ -163,8 +160,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Security misconfiguration",
           "candidateReasonIncludes": "/SecurityMisconfiguration/",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "webgoat.log-spoofing",
@@ -172,8 +168,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Log",
           "candidateReasonIncludes": "/LogSpoofing/",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         }
       ]
     },
