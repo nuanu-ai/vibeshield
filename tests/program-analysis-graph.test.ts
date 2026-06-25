@@ -259,6 +259,27 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(authGraph.flows).toHaveLength(1);
   });
 
+  it("marks WebGoat trust, misconfiguration, and logging lesson semantics as sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", webGoatTrustSemanticsSlices())] }),
+    );
+    const sinks = graph.nodes
+      .filter((node) => node.kind === "Sink")
+      .map((node) => [node.label, node.properties.sinkType])
+      .sort();
+
+    expect(sinks).toEqual(
+      expect.arrayContaining([
+        ["Cookie trust", "session_cookie_trust"],
+        ["Credential trust", "credential_trust"],
+        ["client-side price trust", "client_side_trust"],
+        ["Security misconfiguration", "security_misconfiguration"],
+        ["Log injection", "log_injection"],
+      ]),
+    );
+    expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(5);
+  });
+
   it("connects route handlers to sinks inside nested Joern lambda entities", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", nestedLambdaSqlSlices())] }),
@@ -838,6 +859,151 @@ function authBypassSlices() {
               code: "verificationHelper.verifyAccount(Integer.valueOf(userId), submittedAnswers)",
               label: "CALL",
               lineNumber: 14,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function webGoatTrustSemanticsSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName:
+          "org.owasp.webgoat.lessons.hijacksession.HijackSessionAssignment.login:<unresolvedSignature>(4)",
+        fileName:
+          "src/main/java/org/owasp/webgoat/lessons/hijacksession/HijackSessionAssignment.java",
+        lineNumber: 36,
+        boundary: {
+          boundaryType: "spring",
+          routeOrName: "/HijackSession/login",
+          method: "POST",
+          sourceName: "request",
+        },
+        parameters: [
+          { name: "cookieValue", typeFullName: "java.lang.String" },
+          { name: "response", typeFullName: "jakarta.servlet.http.HttpServletResponse" },
+        ],
+        usages: [
+          {
+            targetObj: {
+              name: "addCookie",
+              resolvedMethod: "jakarta.servlet.http.HttpServletResponse.addCookie:void(Cookie)",
+              code: "response.addCookie(cookie)",
+              label: "CALL",
+              lineNumber: 63,
+            },
+          },
+        ],
+      },
+      {
+        fullName:
+          "org.owasp.webgoat.lessons.insecurelogin.InsecureLoginTask.completed:<unresolvedSignature>(2)",
+        fileName: "src/main/java/org/owasp/webgoat/lessons/insecurelogin/InsecureLoginTask.java",
+        lineNumber: 18,
+        boundary: {
+          boundaryType: "spring",
+          routeOrName: "/InsecureLogin/task",
+          method: "POST",
+          sourceName: "request",
+        },
+        parameters: [
+          { name: "username", typeFullName: "java.lang.String" },
+          { name: "password", typeFullName: "java.lang.String" },
+        ],
+        usages: [
+          {
+            targetObj: {
+              name: "equals",
+              resolvedMethod: "java.lang.String.equals:boolean(java.lang.Object)",
+              code: '"CaptainJack".equals(username) && "BlackPearl".equals(password)',
+              label: "CALL",
+              lineNumber: 20,
+            },
+          },
+        ],
+      },
+      {
+        fullName:
+          "org.owasp.webgoat.lessons.htmltampering.HtmlTamperingTask.completed:<unresolvedSignature>(2)",
+        fileName: "src/main/java/org/owasp/webgoat/lessons/htmltampering/HtmlTamperingTask.java",
+        lineNumber: 22,
+        boundary: {
+          boundaryType: "spring",
+          routeOrName: "/HtmlTampering/task",
+          method: "POST",
+          sourceName: "request",
+        },
+        parameters: [
+          { name: "QTY", typeFullName: "java.lang.String" },
+          { name: "Total", typeFullName: "java.lang.String" },
+        ],
+        usages: [
+          {
+            targetObj: {
+              name: "parseFloat",
+              resolvedMethod: "java.lang.Float.parseFloat:float(java.lang.String)",
+              code: "Float.parseFloat(QTY) * 2999.99 > Float.parseFloat(Total) + 1",
+              label: "CALL",
+              lineNumber: 24,
+            },
+          },
+        ],
+      },
+      {
+        fullName:
+          "org.owasp.webgoat.lessons.securitymisconfiguration.ConfigHardeningTask.submitConfig:<unresolvedSignature>(4)",
+        fileName:
+          "src/main/java/org/owasp/webgoat/lessons/securitymisconfiguration/ConfigHardeningTask.java",
+        lineNumber: 35,
+        boundary: {
+          boundaryType: "spring",
+          routeOrName: "/SecurityMisconfiguration/task4",
+          method: "POST",
+          sourceName: "request",
+        },
+        parameters: [
+          { name: "envEnabled", typeFullName: "java.lang.String" },
+          { name: "defaultPassword", typeFullName: "java.lang.String" },
+        ],
+        usages: [
+          {
+            targetObj: {
+              name: "equals",
+              resolvedMethod: "java.util.Map.equals:boolean(java.lang.Object)",
+              code: 'current.equals(EXPECTED) && EXPECTED.containsKey("spring.security.user.password")',
+              label: "CALL",
+              lineNumber: 49,
+            },
+          },
+        ],
+      },
+      {
+        fullName:
+          "org.owasp.webgoat.lessons.logging.LogSpoofingTask.completed:<unresolvedSignature>(2)",
+        fileName: "src/main/java/org/owasp/webgoat/lessons/logging/LogSpoofingTask.java",
+        lineNumber: 21,
+        boundary: {
+          boundaryType: "spring",
+          routeOrName: "/LogSpoofing/log-spoofing",
+          method: "POST",
+          sourceName: "request",
+        },
+        parameters: [
+          { name: "username", typeFullName: "java.lang.String" },
+          { name: "password", typeFullName: "java.lang.String" },
+        ],
+        usages: [
+          {
+            targetObj: {
+              name: "replace",
+              resolvedMethod:
+                "java.lang.String.replace:java.lang.String(java.lang.CharSequence,java.lang.CharSequence)",
+              code: 'username.replace("\\n", "<br/>")',
+              label: "CALL",
+              lineNumber: 27,
             },
           },
         ],
@@ -1805,6 +1971,31 @@ function manifest(): Manifest {
         path: "src/main/java/example/auth/VerifyAccount.java",
         size: 90,
         sha256: "auth-java-sha",
+      },
+      {
+        path: "src/main/java/org/owasp/webgoat/lessons/hijacksession/HijackSessionAssignment.java",
+        size: 90,
+        sha256: "hijack-session-sha",
+      },
+      {
+        path: "src/main/java/org/owasp/webgoat/lessons/insecurelogin/InsecureLoginTask.java",
+        size: 90,
+        sha256: "insecure-login-sha",
+      },
+      {
+        path: "src/main/java/org/owasp/webgoat/lessons/htmltampering/HtmlTamperingTask.java",
+        size: 90,
+        sha256: "html-tampering-sha",
+      },
+      {
+        path: "src/main/java/org/owasp/webgoat/lessons/securitymisconfiguration/ConfigHardeningTask.java",
+        size: 90,
+        sha256: "security-misconfiguration-sha",
+      },
+      {
+        path: "src/main/java/org/owasp/webgoat/lessons/logging/LogSpoofingTask.java",
+        size: 90,
+        sha256: "log-spoofing-sha",
       },
       { path: "src/main/java/example/Controller.java", size: 100, sha256: "controller-sha" },
       { path: "src/app/service.ts", size: 100, sha256: "service-sha" },

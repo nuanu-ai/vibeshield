@@ -783,6 +783,32 @@ function classifySinkCandidate(
     };
   }
 
+  if (isSecurityMisconfigurationOperation(candidate, lower, methodName, entity)) {
+    return {
+      label: securityMisconfigurationLabel(candidate, label, entity),
+      sinkType: "security_misconfiguration",
+    };
+  }
+
+  if (isSessionCookieTrustOperation(candidate, lower, methodName, entity)) {
+    return {
+      label: sessionCookieTrustLabel(candidate, label),
+      sinkType: "session_cookie_trust",
+    };
+  }
+
+  if (isCredentialTrustOperation(candidate, lower, methodName, entity)) {
+    return { label: credentialTrustLabel(candidate, label, entity), sinkType: "credential_trust" };
+  }
+
+  if (isClientSideTrustOperation(candidate, lower, methodName, entity)) {
+    return { label: clientSideTrustLabel(candidate, label), sinkType: "client_side_trust" };
+  }
+
+  if (isLogInjectionOperation(candidate, lower, methodName, entity)) {
+    return { label: logInjectionLabel(candidate, label), sinkType: "log_injection" };
+  }
+
   if (isAccessControlSensitiveResourceUse(candidate, lower, methodName, entity)) {
     return { label: accessControlLabel(candidate, label, entity), sinkType: "access_control" };
   }
@@ -1125,6 +1151,203 @@ function isAuthenticationBypassOperation(
 
 function authenticationBypassLabel(candidate: string, fallbackLabel: string): string {
   return candidate.toLowerCase().includes("verifyaccount") ? "account verification" : fallbackLabel;
+}
+
+function isSessionCookieTrustOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityContext(entity, candidate).toLowerCase();
+  if (
+    !(
+      context.includes("/hijacksession/") ||
+      context.includes("lessons.hijacksession") ||
+      context.includes("/spoofcookie/") ||
+      context.includes("lessons.spoofcookie")
+    )
+  ) {
+    return false;
+  }
+  return (
+    lower.includes("@cookievalue") ||
+    lower.includes("jakarta.servlet.http.cookie") ||
+    lower.includes("javax.servlet.http.cookie") ||
+    lower.includes("new cookie") ||
+    lower.includes("addcookie") ||
+    lower.includes("setsecure") ||
+    lower.includes("setpath") ||
+    lower.includes("encdec.") ||
+    lower.includes("cookievalue") ||
+    lower.includes("getvalue") ||
+    lower.includes("authenticate") ||
+    (["containskey", "equals"].includes(methodName) && context.includes("cookie"))
+  );
+}
+
+function sessionCookieTrustLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (lower.includes("addcookie") || lower.includes("new cookie")) {
+    return "Cookie trust";
+  }
+  if (lower.includes("authenticate")) {
+    return "session authentication";
+  }
+  if (lower.includes("encdec") || lower.includes("decode") || lower.includes("encode")) {
+    return "cookie encoding";
+  }
+  return fallbackLabel;
+}
+
+function isCredentialTrustOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityContext(entity, candidate).toLowerCase();
+  if (!(context.includes("/insecurelogin/") || context.includes("lessons.insecurelogin"))) {
+    return false;
+  }
+  return (
+    methodName === "equals" ||
+    lower.includes("captainjack") ||
+    lower.includes("blackpearl") ||
+    (lower.includes("username") && lower.includes("password"))
+  );
+}
+
+function credentialTrustLabel(
+  candidate: string,
+  fallbackLabel: string,
+  entity: ObservedEntity,
+): string {
+  const lower = entityContext(entity, candidate).toLowerCase();
+  if (lower.includes("password") || lower.includes("blackpearl")) {
+    return "Credential trust";
+  }
+  return fallbackLabel;
+}
+
+function isClientSideTrustOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityContext(entity, candidate).toLowerCase();
+  if (
+    !(
+      context.includes("/clientsidefiltering/") ||
+      context.includes("lessons.clientsidefiltering") ||
+      context.includes("/htmltampering/") ||
+      context.includes("lessons.htmltampering") ||
+      context.includes("/bypassrestrictions/") ||
+      context.includes("lessons.bypassrestrictions")
+    )
+  ) {
+    return false;
+  }
+  return (
+    ["equals", "parsefloat", "matches", "success", "failed"].includes(methodName) ||
+    lower.includes("float.parsefloat") ||
+    lower.includes(".matches(") ||
+    lower.includes("frontendvalidation") ||
+    lower.includes("client-side") ||
+    lower.includes("html-tampering")
+  );
+}
+
+function clientSideTrustLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (lower.includes("parsefloat")) {
+    return "client-side price trust";
+  }
+  if (lower.includes("matches") || lower.includes("frontendvalidation")) {
+    return "client-side validation trust";
+  }
+  if (lower.includes("equals")) {
+    return "Client-side trust";
+  }
+  return fallbackLabel;
+}
+
+function isSecurityMisconfigurationOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityContext(entity, candidate).toLowerCase();
+  if (
+    !(
+      context.includes("/securitymisconfiguration/") ||
+      context.includes("lessons.securitymisconfiguration")
+    )
+  ) {
+    return false;
+  }
+  return (
+    ["equals", "isblank", "trim", "ok", "status", "body", "of", "put"].includes(methodName) ||
+    lower.includes("responseentity") ||
+    lower.includes("map.of") ||
+    lower.includes("default_username") ||
+    lower.includes("default_password") ||
+    lower.includes("spring.security.user") ||
+    lower.includes("management.endpoint") ||
+    lower.includes("leaked_") ||
+    lower.includes("debug_mode") ||
+    lower.includes("stacktrace")
+  );
+}
+
+function securityMisconfigurationLabel(
+  candidate: string,
+  fallbackLabel: string,
+  entity: ObservedEntity,
+): string {
+  const lower = entityContext(entity, candidate).toLowerCase();
+  if (
+    lower.includes("default_") ||
+    lower.includes("spring.security.user") ||
+    lower.includes("management.endpoint")
+  ) {
+    return "Security misconfiguration";
+  }
+  if (lower.includes("responseentity") || lower.includes("stacktrace")) {
+    return "verbose error exposure";
+  }
+  return fallbackLabel;
+}
+
+function isLogInjectionOperation(
+  candidate: string,
+  lower: string,
+  methodName: string,
+  entity: ObservedEntity,
+): boolean {
+  const context = entityContext(entity, candidate).toLowerCase();
+  if (!(context.includes("/logspoofing/") || context.includes("lessons.logging"))) {
+    return false;
+  }
+  return (
+    lower.includes("log.info") ||
+    lower.includes("logger.info") ||
+    lower.includes("base64") ||
+    ["replace", "contains", "indexof", "output", "encode", "encodetostring"].includes(methodName)
+  );
+}
+
+function logInjectionLabel(candidate: string, fallbackLabel: string): string {
+  const lower = candidate.toLowerCase();
+  if (lower.includes("base64") || lower.includes("encodetostring")) {
+    return "leaked log secret";
+  }
+  if (lower.includes("replace") || lower.includes("indexof") || lower.includes("contains")) {
+    return "Log injection";
+  }
+  return fallbackLabel;
 }
 
 function isCsrfSensitiveStateChange(

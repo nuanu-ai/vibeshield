@@ -266,6 +266,72 @@ describe("correlateGraphRules candidates", () => {
     }
   });
 
+  it("labels WebGoat trust, misconfiguration, and logging paths by route semantics", () => {
+    for (const { boundaryLabel, sinkType, title } of [
+      {
+        boundaryLabel: "/HijackSession/login",
+        sinkType: "cross_site_scripting",
+        title:
+          "Cookie trust path: request-controlled cookie or session token reaches trusted session logic",
+      },
+      {
+        boundaryLabel: "/SpoofCookie/login",
+        sinkType: "sql_execution",
+        title:
+          "Cookie trust path: request-controlled cookie or session token reaches trusted session logic",
+      },
+      {
+        boundaryLabel: "/InsecureLogin/task",
+        sinkType: "credential_trust",
+        title:
+          "Credential trust path: request-controlled login data reaches hardcoded or default credential logic",
+      },
+      {
+        boundaryLabel: "/clientSideFiltering/attack1",
+        sinkType: "client_side_trust",
+        title:
+          "Client-side trust path: request-controlled client-side value reaches server-side trust decision",
+      },
+      {
+        boundaryLabel: "/HtmlTampering/task",
+        sinkType: "client_side_trust",
+        title:
+          "Client-side trust path: request-controlled client-side value reaches server-side trust decision",
+      },
+      {
+        boundaryLabel: "/BypassRestrictions/frontendValidation",
+        sinkType: "client_side_trust",
+        title:
+          "Client-side trust path: request-controlled client-side value reaches server-side trust decision",
+      },
+      {
+        boundaryLabel: "/SecurityMisconfiguration/task4",
+        sinkType: "credential_trust",
+        title:
+          "Security misconfiguration path: request-controlled check reaches insecure configuration behavior",
+      },
+      {
+        boundaryLabel: "/LogSpoofing/log-spoofing",
+        sinkType: "cross_site_scripting",
+        title:
+          "Log injection path: request-controlled value reaches logging or leaked log-secret flow",
+      },
+    ]) {
+      const candidates = correlateGraphRules({
+        graph: graphFixture({ boundaryLabel, sinkType }),
+        rules: [
+          {
+            ...rule(),
+            target: { kinds: ["Sink"], propertyEquals: { sinkType } },
+          },
+        ],
+      });
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]?.title).toBe(title);
+    }
+  });
+
   it("labels HTML and script output paths as XSS candidates", () => {
     const graph = graphFixture({ sinkType: "cross_site_scripting" });
     const candidates = correlateGraphRules({

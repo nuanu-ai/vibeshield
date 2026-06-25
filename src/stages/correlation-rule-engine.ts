@@ -251,6 +251,16 @@ function candidateTitle(
       return "JWT token trust path: external input reaches JWT signing or parsing logic";
     case "authentication_bypass":
       return "Authentication bypass path: request-controlled verification data reaches account verification logic";
+    case "session_cookie_trust":
+      return "Cookie trust path: request-controlled cookie or session token reaches trusted session logic";
+    case "credential_trust":
+      return "Credential trust path: request-controlled login data reaches hardcoded or default credential logic";
+    case "client_side_trust":
+      return "Client-side trust path: request-controlled client-side value reaches server-side trust decision";
+    case "security_misconfiguration":
+      return "Security misconfiguration path: request-controlled check reaches insecure configuration behavior";
+    case "log_injection":
+      return "Log injection path: request-controlled value reaches logging or leaked log-secret flow";
     case "access_control":
       if (target.label.toLowerCase().includes("idor")) {
         return "IDOR path: request-controlled resource id reaches object access";
@@ -286,6 +296,21 @@ function routeSemanticTitleForPath(
   }
   if (descriptors.some(hasAuthenticationBypassDescriptor)) {
     return "Authentication bypass path: request-controlled verification data reaches account verification logic";
+  }
+  if (descriptors.some(hasSecurityMisconfigurationDescriptor)) {
+    return "Security misconfiguration path: request-controlled check reaches insecure configuration behavior";
+  }
+  if (descriptors.some(hasSessionCookieTrustDescriptor)) {
+    return "Cookie trust path: request-controlled cookie or session token reaches trusted session logic";
+  }
+  if (descriptors.some(hasCredentialTrustDescriptor)) {
+    return "Credential trust path: request-controlled login data reaches hardcoded or default credential logic";
+  }
+  if (descriptors.some(hasClientSideTrustDescriptor)) {
+    return "Client-side trust path: request-controlled client-side value reaches server-side trust decision";
+  }
+  if (descriptors.some(hasLogInjectionDescriptor)) {
+    return "Log injection path: request-controlled value reaches logging or leaked log-secret flow";
   }
   if (descriptors.some(hasCryptographicDescriptor)) {
     return "Cryptographic weakness path: external input reaches cryptographic or encoding logic";
@@ -341,6 +366,47 @@ function hasPasswordResetDescriptor(value: string): boolean {
 
 function hasAuthenticationBypassDescriptor(value: string): boolean {
   return value.includes("auth-bypass") || value.includes("authbypass");
+}
+
+function hasSessionCookieTrustDescriptor(value: string): boolean {
+  return (
+    value.includes("hijacksession") ||
+    value.includes("hijack-session") ||
+    value.includes("spoofcookie") ||
+    value.includes("spoof-cookie")
+  );
+}
+
+function hasCredentialTrustDescriptor(value: string): boolean {
+  return (
+    value.includes("insecurelogin") ||
+    value.includes("insecure-login") ||
+    value.includes("default-credential") ||
+    value.includes("defaultcredentials")
+  );
+}
+
+function hasClientSideTrustDescriptor(value: string): boolean {
+  return (
+    value.includes("clientsidefiltering") ||
+    value.includes("client-side-filtering") ||
+    value.includes("htmltampering") ||
+    value.includes("html-tampering") ||
+    value.includes("bypassrestrictions") ||
+    value.includes("bypass-restrictions")
+  );
+}
+
+function hasSecurityMisconfigurationDescriptor(value: string): boolean {
+  return value.includes("securitymisconfiguration") || value.includes("security-misconfiguration");
+}
+
+function hasLogInjectionDescriptor(value: string): boolean {
+  return (
+    value.includes("logspoofing") ||
+    value.includes("log-spoofing") ||
+    value.includes("lessons-logging")
+  );
 }
 
 function hasCryptographicDescriptor(value: string): boolean {
