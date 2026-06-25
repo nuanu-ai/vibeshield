@@ -116,6 +116,52 @@ describe("correlateGraphRules candidates", () => {
     });
   });
 
+  it("labels access-control routes to SQL-backed data access without relabeling generic SQL", () => {
+    const sqlRule = {
+      ...rule(),
+      target: { kinds: ["Sink"], propertyEquals: { sinkType: "sql_execution" } },
+    } satisfies CorrelationRuleDefinition;
+
+    expect(
+      correlateGraphRules({
+        graph: graphFixture({
+          boundaryLabel: "access-control/users",
+          sinkType: "sql_execution",
+        }),
+        rules: [sqlRule],
+      })[0],
+    ).toMatchObject({
+      title:
+        "Access control path: public route reaches SQL-backed data access without observed authorization",
+      candidateReason:
+        "Access control path: public route reaches SQL-backed data access without observed authorization: access-control/users reaches dangerousOperation across 2 graph edges",
+    });
+
+    expect(
+      correlateGraphRules({
+        graph: graphFixture({
+          boundaryLabel: "GET /search",
+          sinkType: "sql_execution",
+        }),
+        rules: [sqlRule],
+      })[0],
+    ).toMatchObject({
+      title: "SQL injection path: external input reaches SQL execution",
+    });
+
+    expect(
+      correlateGraphRules({
+        graph: graphFixture({
+          boundaryLabel: "access-control/users-admin-fix",
+          sinkType: "sql_execution",
+        }),
+        rules: [sqlRule],
+      })[0],
+    ).toMatchObject({
+      title: "SQL injection path: external input reaches SQL execution",
+    });
+  });
+
   it("labels server-side HTTP client paths as SSRF candidates", () => {
     const graph = graphFixture({ sinkType: "server_side_request" });
     const candidates = correlateGraphRules({

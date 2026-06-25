@@ -212,6 +212,10 @@ function candidateTitle(
     return rule.title;
   }
   const sinkType = stringProperty(target.properties.sinkType);
+  const pathNodes = nodesForPath(nodes, path);
+  if (sinkType === "sql_execution" && isAccessControlDataAccessPath(pathNodes)) {
+    return "Access control path: public route reaches SQL-backed data access without observed authorization";
+  }
   switch (sinkType) {
     case "sql_execution":
       return "SQL injection path: external input reaches SQL execution";
@@ -247,6 +251,53 @@ function candidateTitle(
     default:
       return rule.title;
   }
+}
+
+function nodesForPath(
+  nodes: ReadonlyArray<SecurityGraphNode>,
+  path: SearchPath,
+): ReadonlyArray<SecurityGraphNode> {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  return path.nodeIds.flatMap((nodeId) => {
+    const node = nodesById.get(nodeId);
+    return node === undefined ? [] : [node];
+  });
+}
+
+function isAccessControlDataAccessPath(pathNodes: ReadonlyArray<SecurityGraphNode>): boolean {
+  const descriptors = pathNodes.flatMap(nodeDescriptors).map(normalizeDescriptor);
+  if (descriptors.some(isFixedOrSafeDescriptor)) {
+    return false;
+  }
+  return descriptors.some(hasAccessControlDescriptor);
+}
+
+function nodeDescriptors(node: SecurityGraphNode): string[] {
+  return [
+    node.label,
+    node.repoPath,
+    node.symbol,
+    stringProperty(node.properties.routeOrName),
+    stringProperty(node.properties.fullName),
+    stringProperty(node.properties.callName),
+  ].flatMap((value) => (value === undefined ? [] : [value]));
+}
+
+function normalizeDescriptor(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function hasAccessControlDescriptor(value: string): boolean {
+  return (
+    value.includes("access-control") ||
+    value.includes("missing-access-control") ||
+    value.includes("missing-function-ac") ||
+    value.includes("missingac")
+  );
+}
+
+function isFixedOrSafeDescriptor(value: string): boolean {
+  return /(?:^|-)(?:fix|fixed|safe|secure)(?:$|-)/.test(value);
 }
 
 function linkedFindingIds(
