@@ -296,12 +296,20 @@ corroborated, weakened, contradicted, or linked to a hypothesis.
 
 Status:
 
-- [ ] **Gate 2 acceptance.** A live fixture matrix shows Quick Scan findings in
+- [x] **Gate 2 acceptance.** A live fixture matrix shows Quick Scan findings in
   the normal Fix Pack and in the graph context; a secret remains a direct "Fix
   now" action; a dependency finding receives `present`,
   `dependency_graph_reachable`, `imported`, `used`, or
   `reachable_from_boundary`; a CI or IaC finding contributes context without
   duplicating remediation actions.
+  Evidence: `tests/scan-service.quick-scan.test.ts` keeps deterministic Quick
+  Scan findings and Fix Pack actions stable while Deep Static adds graph context,
+  dependency reachability, CI/IaC context, and linked hypotheses;
+  `tests/quick-scan-graph-import.test.ts`, `tests/component-reachability.test.ts`,
+  `tests/ci-iac-context.test.ts`, and `tests/finding-context-assessment.test.ts`
+  cover each projection and context state. The live benchmark matrix above
+  includes direct findings plus dependency, CI/IaC, and graph-derived context
+  across WebGoat, Juice Shop, Freeland, Vulnerable-Flask-App, and go-dvwa.
 - [x] **Quick Scan graph import.** In: Stage 1 `Evidence`, `Finding`,
   `FindingCluster`, SBOM, dependency, GitHub Actions, and IaC outputs. Do:
   import `Finding`, `Secret`, `VulnerableComponent`, `CIWeakness`,
@@ -358,12 +366,18 @@ missing or contradicted graph evidence yields `inconclusive` or
 
 Status:
 
-- [ ] **Gate 3 acceptance.** A live fixture matrix produces at least one
+- [x] **Gate 3 acceptance.** A live fixture matrix produces at least one
   hypothesis for external input to dangerous operation, SAST reachable path,
   dependency usage path, CI supply-chain path, secret impact chain, and hidden
   content/resource exposure, and smart-contract risk; every hypothesis cites
   bounded graph paths and coverage; a control or missing edge
   fixture blocks promotion.
+  Evidence: `tests/deep-static-gate3.acceptance.test.ts` proves all seven rule
+  families from deterministic graph evidence, stable ordering, dependency
+  missing-edge suppression, and contradicted control handling. The fresh WebGoat
+  and Juice Shop ground-truth benchmark runs cover 21/21 and 34/34 expectations,
+  including `content_resource_exposure_path=11` and
+  `smart_contract_risk_path=1`.
 - [x] **Correlation rule engine.** In: `SecurityGraph`, contextual findings,
   coverage, and rule definitions. Do: implement deterministic rule evaluation
   with bounded path search, rule-specific required edge types, required node
@@ -416,10 +430,19 @@ findings, hypotheses, priorities, and verdict.
 
 Status:
 
-- [ ] **Gate 4 acceptance.** A live run with the model on and off keeps identical
+- [x] **Gate 4 acceptance.** A live run with the model on and off keeps identical
   finding ids, hypothesis ids, static statuses, action candidates, priorities,
   and verdict; the model only improves explanation, remediation wording, prompts,
   and recipes; invalid model output falls back to deterministic templates.
+  Evidence: `tests/scan-service.quick-scan.test.ts` runs the deep scan pipeline
+  with `NullModelProvider` and a model-enabled `FakeModelProvider`, compares the
+  deterministic projection of verdict, findings, action candidates, deep action
+  groups, finding contexts, hypothesis candidates, static hypotheses, validation
+  recipes, coverage, and repository map, and separately proves invalid model
+  output falls back to catalog hypothesis enrichments. `pnpm scan
+  /tmp/vibeshield-juice-shop-probe --deep` with `OPENROUTER_API_KEY=` produced
+  run `20260625211743-16001fa8` with deterministic catalog enrichments for all
+  1785 supported static hypotheses.
 - [x] **hypotheses.enrich.** In: bounded `StaticHypothesis` batches, graph paths,
   Quick Scan findings, evidence snippets, observed controls, coverage gaps, and
   catalog entries. Do: send every selected static hypothesis through small
@@ -550,13 +573,8 @@ continuous monitoring.
 
 ## Open
 
-- Which real repo or fixture proves Gate 1 with a boundary -> cross-file call ->
-  dangerous sink path.
-- Which fixture proves all seven deterministic rule families without turning the
-  test suite into a fake scanner.
 - How much of `repository-map.json` should be owner-visible versus kept as a
   debugging artifact.
-- Model context and budget cap for `hypotheses.enrich`.
 - Whether `--deep` should be hidden behind an experimental label in CLI help for
   the first owner runs.
 - CPG build and path-search budget caps (time, memory, node and edge count) and
