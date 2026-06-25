@@ -202,8 +202,7 @@
           "title": "XXE Data Access and XXE DoS challenges should be classified as XXE",
           "kind": "hypothesis",
           "titleIncludes": "XXE",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "juice.file-exposure",
