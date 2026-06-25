@@ -60,8 +60,7 @@
             "juice.security-misconfiguration-error-handling",
             "juice.security-misconfiguration-login-support",
             "juice.security-misconfiguration-svg-imaging"
-          ],
-          "limitation": "Deprecated-interface, error-handling, support-login, and SVG imaging need explicit security-misconfiguration taxonomy before this category can be called fully covered."
+          ]
         },
         "Security through Obscurity": {
           "groundTruthIds": ["juice.file-exposure"],

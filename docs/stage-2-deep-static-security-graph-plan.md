@@ -172,7 +172,7 @@ Status:
   WebGoat (Java, run `20260625194251-245a4c68`, 616 supported static
   hypotheses, `data_flow` checked 290/290, `component_usage` checked 3086/3086,
   `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
-  `20260625200500-77bfa880`, 1667, `data_flow` checked 690/690,
+  `20260625203356-e16112db`, 1677, `data_flow` checked 686/686,
   `component_usage` checked 2194/2194, `dependency_usage` checked 12/12,
   `ci_iac` checked 18/18), Freeland (JS/TS, run `20260625164008-81d5eb5a`,
   164, `data_flow` checked 62/380, `component_usage` checked 883/883,
@@ -185,19 +185,17 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625200500-77bfa880 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
-  The curated ground-truth slice passes in normal benchmark mode: WebGoat covers
-  21/21 expectations and Juice Shop covers 23/27 expectations with 4 known gaps.
-  `--strict-ground-truth` is intentionally red on the four Juice Shop Security
-  Misconfiguration gaps: Deprecated Interface, Error Handling, Login Support
-  Team, and Cross-Site Imaging.
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 /Users/dmitry/.vibeshield/runs/20260625203356-e16112db /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7`.
+  The curated ground-truth slice passes in normal and strict benchmark modes:
+  WebGoat covers 21/21 expectations and Juice Shop covers 27/27 expectations
+  with no known gaps.
   The Juice Shop inventory audit
   `pnpm benchmark:inventory --source juice-shop=/tmp/vibeshield-juice-shop-probe`
   maps 113 challenges across 16 categories to curated ground truth or explicit
   static-analysis limitations; the stricter
   `pnpm benchmark:inventory --fail-on-limitations --source juice-shop=/tmp/vibeshield-juice-shop-probe`
-  gate is still intentionally red on Broken Anti Automation, Miscellaneous,
-  Security Misconfiguration, and Security through Obscurity.
+  gate is still intentionally red on Broken Anti Automation, Miscellaneous, and
+  Security through Obscurity.
   Fresh run
   `20260625183825-9938a3b2` resolved the prior NoSQL, file exposure, upload
   validation, and SSTi classification gaps; fresh run
@@ -214,7 +212,10 @@ Status:
   credential trust, client-side trust, security misconfiguration, and logging
   semantic gaps. Fresh run `20260625200500-77bfa880` resolved Juice Shop JWT
   token trust, credential trust, password-reset security questions, two-factor
-  token trust, LLM prompt/tool trust, and coupon encoding trust.
+  token trust, LLM prompt/tool trust, and coupon encoding trust. Fresh run
+  `20260625203356-e16112db` resolved Juice Shop Security Misconfiguration
+  expectations, including deprecated interface behavior, verbose error handling,
+  support-login credentials, and socket-event SVG imaging.
   Current WebGoat and Juice Shop runs label external-input paths by sink class
   (for example SQL injection, XXE, file access, redirect, server-side request
   forgery, cross-site scripting, code execution, IDOR, CSRF, access-control, JWT

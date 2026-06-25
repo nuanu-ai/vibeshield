@@ -279,8 +279,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Security misconfiguration",
           "candidateReasonIncludes": "routes/fileUpload.ts",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "juice.security-misconfiguration-error-handling",
@@ -288,8 +287,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Security misconfiguration",
           "candidateReasonIncludes": "routes/verify.ts",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "juice.security-misconfiguration-login-support",
@@ -297,8 +295,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Security misconfiguration",
           "candidateReasonIncludes": "routes/login.ts",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "juice.security-misconfiguration-svg-imaging",
@@ -306,8 +303,7 @@
           "kind": "hypothesis",
           "titleIncludes": "Security misconfiguration",
           "candidateReasonIncludes": "registerWebsocketEvents.ts",
-          "statusIn": ["statically_supported"],
-          "expected": "known_gap"
+          "statusIn": ["statically_supported"]
         },
         {
           "id": "juice.jwt-token-trust",
