@@ -1150,11 +1150,12 @@ interface JsonScannerOptions {
     records: ReadonlyArray<unknown>,
     check: string,
     tool: string,
+    inventory: RepositoryInventory,
   ) => ScannerCandidate[];
 }
 
 async function runJsonScanner(ctx: StageContext, opts: JsonScannerOptions): Promise<StageResult> {
-  const { scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
+  const { inventory, scanPlan } = readInput<InventoryData>(ctx, "inventory.detect");
   const planned = plannedCheck(scanPlan, opts.check);
   if (!planned.applicable) {
     return success({
@@ -1258,7 +1259,7 @@ async function runJsonScanner(ctx: StageContext, opts: JsonScannerOptions): Prom
       coverage: { check: opts.check, status: "checked" },
       rawArtifact,
       recordCount: records.length,
-      candidates: opts.candidatesFromRecords(records, opts.check, opts.tool),
+      candidates: opts.candidatesFromRecords(records, opts.check, opts.tool, inventory),
     } satisfies ScannerRunData,
     [artifact],
   );
@@ -1514,6 +1515,7 @@ function candidatesFromActionlint(
   records: ReadonlyArray<unknown>,
   check: string,
   tool: string,
+  _inventory: RepositoryInventory,
 ): ScannerCandidate[] {
   return records.map((record) => {
     const item = isRecord(record) ? record : {};
@@ -1530,6 +1532,7 @@ function candidatesFromZizmor(
   records: ReadonlyArray<unknown>,
   check: string,
   tool: string,
+  _inventory: RepositoryInventory,
 ): ScannerCandidate[] {
   return records.map((record) => {
     const item = isRecord(record) ? record : {};
@@ -1548,6 +1551,7 @@ function candidatesFromSarif(
   records: ReadonlyArray<unknown>,
   check: string,
   tool: string,
+  _inventory: RepositoryInventory,
 ): ScannerCandidate[] {
   return records.map((record) => {
     const item = isRecord(record) ? record : {};
@@ -1574,10 +1578,14 @@ function candidatesFromTrivy(
   records: ReadonlyArray<unknown>,
   check: string,
   tool: string,
+  inventory: RepositoryInventory,
 ): ScannerCandidate[] {
   return records.map((record) => {
     const item = isRecord(record) ? record : {};
     const cause = isRecord(item.CauseMetadata) ? item.CauseMetadata : {};
+    const normalizedPath =
+      normalizeCandidatePath(stringFrom(cause.Resource)) ??
+      normalizeCandidatePath(stringFrom(item.Target));
     return scannerCandidate(check, tool, {
       ruleId:
         stringFrom(item.VulnerabilityID) ??
@@ -1590,8 +1598,9 @@ function candidatesFromTrivy(
         stringFrom(item.Description) ??
         stringFrom(item.MisconfSummary),
       filePath:
-        normalizeCandidatePath(stringFrom(cause.Resource)) ??
-        normalizeCandidatePath(stringFrom(item.Target)),
+        check === "dependencies.trivy"
+          ? dependencyFindingPath(item, normalizedPath, inventory.packageManifests)
+          : normalizedPath,
       startLine: numberFrom(cause.StartLine),
       severity: stringFrom(item.Severity),
       metadata: compactMetadata({
@@ -1607,6 +1616,7 @@ function candidatesFromOsv(
   records: ReadonlyArray<unknown>,
   check: string,
   tool: string,
+  _inventory: RepositoryInventory,
 ): ScannerCandidate[] {
   return records.flatMap((record) => {
     const item = isRecord(record) ? record : {};
@@ -1632,6 +1642,54 @@ function candidatesFromOsv(
       });
     });
   });
+}
+
+function dependencyFindingPath(
+  item: Readonly<Record<string, unknown>>,
+  normalizedPath: string | undefined,
+  packageManifests: ReadonlyArray<string>,
+): string | undefined {
+  if (normalizedPath !== undefined && packageManifests.includes(normalizedPath)) {
+    return normalizedPath;
+  }
+  const purl = stringFrom(isRecord(item.PkgIdentifier) ? item.PkgIdentifier.PURL : undefined);
+  const ecosystem = purl?.match(/^pkg:([^/]+)\//)?.[1]?.toLowerCase();
+  if (ecosystem === "maven") {
+    return firstManifest(packageManifests, ["pom.xml", "build.gradle", "build.gradle.kts"]);
+  }
+  if (ecosystem === "npm") {
+    return firstManifest(packageManifests, [
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "package.json",
+    ]);
+  }
+  if (ecosystem === "golang") {
+    return firstManifest(packageManifests, ["go.sum", "go.mod"]);
+  }
+  if (ecosystem === "pypi") {
+    return firstManifest(packageManifests, [
+      "requirements.txt",
+      "poetry.lock",
+      "Pipfile.lock",
+      "pyproject.toml",
+    ]);
+  }
+  return packageManifests[0];
+}
+
+function firstManifest(
+  packageManifests: ReadonlyArray<string>,
+  names: ReadonlyArray<string>,
+): string | undefined {
+  for (const name of names) {
+    const exact = packageManifests.find((file) => file === name || file.endsWith(`/${name}`));
+    if (exact !== undefined) {
+      return exact;
+    }
+  }
+  return undefined;
 }
 
 function scannerCandidate(

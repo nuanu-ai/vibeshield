@@ -430,6 +430,39 @@ describe("runScan quick scan vertical slice", () => {
     ]);
   });
 
+  it("maps Trivy SBOM language targets back to dependency manifests", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [{ path: "pom.xml", size: 120, sha256: "pom-sha" }]),
+        [],
+        { trivyVuln: trivyMavenSbomReport() },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const dependencyFinding = outcome.assessment.findings.find(
+      (finding) => finding.ruleId === "CVE-2013-7285",
+    );
+    expect(dependencyFinding).toMatchObject({
+      sourceTool: "trivy",
+      category: "dependency",
+      severity: "critical",
+      metadata: {
+        packageName: "com.thoughtworks.xstream:xstream",
+        installedVersion: "1.4.5",
+      },
+    });
+    expect(dependencyFinding?.locations).toEqual([
+      { filePath: "pom.xml", startLine: 1, endLine: 1 },
+    ]);
+  });
+
   it("keeps deterministic Deep Static facts stable when model enrichment is enabled", async () => {
     const source = await writeLocalFixture(dir);
     const modelOff = await runGate4DeepScan(dir, source, new NullModelProvider());
@@ -1726,6 +1759,31 @@ function trivyDependencyReport() {
             Severity: "HIGH",
             Title: "lodash prototype pollution",
             Description: "fixture vulnerability",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function trivyMavenSbomReport() {
+  return {
+    Results: [
+      {
+        Target: "Java",
+        Class: "lang-pkgs",
+        Type: "jar",
+        Vulnerabilities: [
+          {
+            VulnerabilityID: "CVE-2013-7285",
+            PkgName: "com.thoughtworks.xstream:xstream",
+            PkgIdentifier: {
+              PURL: "pkg:maven/com.thoughtworks.xstream/xstream@1.4.5",
+            },
+            InstalledVersion: "1.4.5",
+            FixedVersion: "1.4.7",
+            Severity: "CRITICAL",
+            Title: "XStream remote code execution",
           },
         ],
       },
