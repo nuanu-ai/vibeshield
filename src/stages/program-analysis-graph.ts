@@ -493,6 +493,7 @@ function addObservedCalls(
     if (name === undefined || stringValue(target.label) !== "CALL") {
       continue;
     }
+    addRouteRegistrationHandlerCalls(builder, graphVersion, entity, owner, target);
     const targetNode =
       findTargetCodeEntity(builder, name) ??
       addSinkIfKnown(builder, graphVersion, entity, target, name);
@@ -513,6 +514,37 @@ function addObservedCalls(
   }
 }
 
+function addRouteRegistrationHandlerCalls(
+  builder: GraphBuilder,
+  graphVersion: string,
+  entity: ObservedEntity,
+  owner: SecurityGraphNode,
+  target: ProgramAnalysisObject,
+): void {
+  const code = stringValue(target.code);
+  if (code === undefined || !isJavascriptRouteRegistration(code)) {
+    return;
+  }
+  for (const handlerName of routeRegistrationHandlerNames(code)) {
+    const targetNode = findTargetCodeEntity(builder, handlerName);
+    if (targetNode === undefined || targetNode.id === owner.id) {
+      continue;
+    }
+    addEdge(builder, graphVersion, {
+      kind: "calls",
+      stableKey: `calls:${owner.id}:${targetNode.id}:${entity.repoPath}:${positiveInteger(target.lineNumber) ?? entity.lineRange.startLine}:route-handler`,
+      fromNodeId: owner.id,
+      toNodeId: targetNode.id,
+      properties: {
+        callName: handlerName,
+        callType: "route_handler_registration",
+      },
+      evidenceIds: [entity.evidenceId],
+      producerVersion: entity.producerVersion,
+    });
+  }
+}
+
 function findTargetCodeEntity(builder: GraphBuilder, name: string): SecurityGraphNode | undefined {
   const exactTarget = builder.codeByFullName.get(name);
   if (exactTarget !== undefined) {
@@ -520,6 +552,106 @@ function findTargetCodeEntity(builder: GraphBuilder, name: string): SecurityGrap
   }
   const symbolTargets = builder.codeBySymbol.get(symbolFromFullName(name)) ?? [];
   return symbolTargets.length === 1 ? symbolTargets[0] : undefined;
+}
+
+function isJavascriptRouteRegistration(code: string): boolean {
+  return /\b(?:app|router|server)\.(?:get|post|put|patch|delete|all|use)\s*\(/i.test(code);
+}
+
+function routeRegistrationHandlerNames(code: string): string[] {
+  const args = callArguments(code);
+  if (args.length < 2) {
+    return [];
+  }
+  return unique(
+    args
+      .slice(1)
+      .flatMap(handlerNamesFromRouteArgument)
+      .filter((name) => !isIgnoredRouteHandlerName(name)),
+  );
+}
+
+function callArguments(code: string): string[] {
+  const open = code.indexOf("(");
+  const close = code.lastIndexOf(")");
+  if (open < 0 || close <= open) {
+    return [];
+  }
+  const args: string[] = [];
+  let current = "";
+  let depth = 0;
+  let quote: string | undefined;
+  let escaped = false;
+  for (const char of code.slice(open + 1, close)) {
+    if (quote !== undefined) {
+      current += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === "(" || char === "[" || char === "{") {
+      depth += 1;
+      current += char;
+      continue;
+    }
+    if (char === ")" || char === "]" || char === "}") {
+      depth = Math.max(0, depth - 1);
+      current += char;
+      continue;
+    }
+    if (char === "," && depth === 0) {
+      args.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim() !== "") {
+    args.push(current.trim());
+  }
+  return args;
+}
+
+function handlerNamesFromRouteArgument(argument: string): string[] {
+  const trimmed = argument.trim();
+  if (trimmed === "" || /^["'`]/.test(trimmed) || trimmed.startsWith("{")) {
+    return [];
+  }
+  const direct = trimmed.match(/^([A-Za-z_$][\w$]*)$/)?.[1];
+  if (direct !== undefined) {
+    return [direct];
+  }
+  const wrapped = trimmed.match(/\b([A-Za-z_$][\w$]*)\s*\(\s*\)?\s*$/)?.[1];
+  if (wrapped !== undefined && !trimmed.includes(".")) {
+    return [wrapped];
+  }
+  const asyncWrapped = trimmed.match(/\basyncHandler\s*\(\s*([A-Za-z_$][\w$]*)\s*\(/)?.[1];
+  if (asyncWrapped !== undefined) {
+    return [asyncWrapped];
+  }
+  return [];
+}
+
+function isIgnoredRouteHandlerName(name: string): boolean {
+  return (
+    name === "undefined" ||
+    name === "null" ||
+    name === "true" ||
+    name === "false" ||
+    name === "Number" ||
+    name === "String" ||
+    name === "Boolean"
+  );
 }
 
 function findBoundaryOwner(

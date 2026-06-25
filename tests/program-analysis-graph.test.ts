@@ -355,6 +355,29 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(graph.flows).toHaveLength(0);
   });
 
+  it("connects Express route middleware registrations to imported handler functions", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", expressMiddlewareRegistrationSlices())] }),
+    );
+    const labelsById = new Map(graph.nodes.map((node) => [node.id, node.label]));
+    const calls = graph.edges.filter((edge) => edge.kind === "calls");
+
+    expect(
+      calls.map((edge) => [labelsById.get(edge.fromNodeId), labelsById.get(edge.toNodeId)]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["configureApp", "handleXmlUpload"],
+        ["handleXmlUpload", "parseXmlString"],
+        ["parseXmlString", "fromString"],
+      ]),
+    );
+    expect(graph.nodes.find((node) => node.kind === "Sink")).toMatchObject({
+      label: "fromString",
+      properties: { sinkType: "xml_processing" },
+    });
+    expect(graph.flows.length).toBeGreaterThan(0);
+  });
+
   it("marks Go web handler calls to dangerous sinks", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", goWebSinkSlices())] }),
@@ -1322,6 +1345,79 @@ function genericArrayFindSlices() {
   };
 }
 
+function expressMiddlewareRegistrationSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "server.ts::program:configureApp",
+        fileName: "server.ts",
+        lineNumber: 300,
+        boundary: {
+          boundaryType: "javascript-web",
+          routeOrName: "/file-upload",
+          method: "POST",
+          sourceName: "req",
+        },
+        usages: [
+          {
+            targetObj: {
+              name: "post",
+              resolvedMethod: "express.Application.post",
+              code: "app.post('/file-upload', upload.single('file'), ensureFileIsPassed, checkFileType, handleXmlUpload)",
+              label: "CALL",
+              lineNumber: 309,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "routes/fileUpload.ts::program:ensureFileIsPassed",
+        fileName: "routes/fileUpload.ts",
+        lineNumber: 19,
+        usages: [],
+      },
+      {
+        fullName: "routes/fileUpload.ts::program:checkFileType",
+        fileName: "routes/fileUpload.ts",
+        lineNumber: 62,
+        usages: [],
+      },
+      {
+        fullName: "routes/fileUpload.ts::program:handleXmlUpload",
+        fileName: "routes/fileUpload.ts",
+        lineNumber: 70,
+        usages: [
+          {
+            targetObj: {
+              name: "parseXmlString",
+              resolvedMethod: "lib/xml.ts::program:parseXmlString",
+              code: "parseXmlString(data)",
+              label: "CALL",
+              lineNumber: 76,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "lib/xml.ts::program:parseXmlString",
+        fileName: "lib/xml.ts",
+        lineNumber: 33,
+        usages: [
+          {
+            targetObj: {
+              name: "fromString",
+              resolvedMethod: "libxml2.XmlDocument.fromString",
+              code: "libxml2.XmlDocument.fromString(data, { option })",
+              label: "CALL",
+              lineNumber: 38,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function goWebSinkSlices() {
   return {
     objectSlices: [
@@ -1564,6 +1660,9 @@ function manifest(): Manifest {
       { path: "src/lib/fetch.ts", size: 80, sha256: "fetch-sha" },
       { path: "src/routes/proxy.js", size: 120, sha256: "proxy-sha" },
       { path: "src/lib/fetcher.js", size: 90, sha256: "fetcher-sha" },
+      { path: "server.ts", size: 160, sha256: "server-sha" },
+      { path: "routes/fileUpload.ts", size: 140, sha256: "file-upload-sha" },
+      { path: "lib/xml.ts", size: 80, sha256: "xml-sha" },
       { path: "src/lib/one.ts", size: 70, sha256: "one-sha" },
       { path: "src/lib/two.ts", size: 75, sha256: "two-sha" },
       { path: "src/main/java/example/Lesson.java", size: 140, sha256: "lesson-sha" },
