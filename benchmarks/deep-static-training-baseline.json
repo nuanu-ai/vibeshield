@@ -43,11 +43,11 @@
         "originUrl": "https://github.com/juice-shop/juice-shop.git"
       },
       "minFindings": 88,
-      "minHypothesisCandidates": 1785,
-      "minSupportedHypotheses": 1785,
+      "minHypothesisCandidates": 1787,
+      "minSupportedHypotheses": 1787,
       "requiredFamilies": {
         "dependency_usage_path": 31,
-        "external_input_to_dangerous_operation": 1739,
+        "external_input_to_dangerous_operation": 1741,
         "ci_supply_chain_path": 3,
         "content_resource_exposure_path": 11,
         "smart_contract_risk_path": 1
@@ -60,7 +60,7 @@
         },
         "data_flow": {
           "stateIn": ["checked"],
-          "minCoveredCount": 727
+          "minCoveredCount": 728
         },
         "component_usage": {
           "stateIn": ["checked"],

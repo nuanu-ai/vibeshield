@@ -23,7 +23,7 @@ limitations.
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-baseline.json \
   /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 \
-  /Users/dmitry/.vibeshield/runs/20260625211743-16001fa8 \
+  /Users/dmitry/.vibeshield/runs/20260625213623-574312f3 \
   /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a \
   /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e \
   /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7
@@ -36,7 +36,7 @@ Run the curated ground-truth slice separately. Normal mode allows tracked
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-ground-truth.json \
   /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 \
-  /Users/dmitry/.vibeshield/runs/20260625211743-16001fa8
+  /Users/dmitry/.vibeshield/runs/20260625213623-574312f3
 ```
 
 To keep every known gap as a hard failure when future gaps are added:
@@ -46,7 +46,7 @@ pnpm benchmark:deep \
   --strict-ground-truth \
   --expect benchmarks/deep-static-training-ground-truth.json \
   /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 \
-  /Users/dmitry/.vibeshield/runs/20260625211743-16001fa8
+  /Users/dmitry/.vibeshield/runs/20260625213623-574312f3
 ```
 
 Audit the Juice Shop challenge inventory separately. This checks that every
@@ -82,7 +82,7 @@ pnpm benchmark:inventory \
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |
 | --- | --- | --- | ---: | --- | --- |
 | Java | WebGoat | `20260625194251-245a4c68` | 616 | `dependency_usage_path=36`, `external_input_to_dangerous_operation=580` | `data_flow` 290/290, `dependency_usage` 36/36, `language_support` checked 496/496 |
-| JS/TS | Juice Shop | `20260625211743-16001fa8` | 1785 | `dependency_usage_path=31`, `external_input_to_dangerous_operation=1739`, `ci_supply_chain_path=3`, `content_resource_exposure_path=11`, `smart_contract_risk_path=1` | `data_flow` 727/727, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
+| JS/TS | Juice Shop | `20260625213623-574312f3` | 1787 | `dependency_usage_path=31`, `external_input_to_dangerous_operation=1741`, `ci_supply_chain_path=3`, `content_resource_exposure_path=11`, `smart_contract_risk_path=1` | `data_flow` 728/728, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
 | JS/TS local | Freeland | `20260625164008-81d5eb5a` | 164 | `external_input_to_dangerous_operation=163`, `ci_supply_chain_path=1` | `data_flow` 62/380, `language_support` checked 635/635 |
 | Python | Vulnerable-Flask-App | `20260625164510-1cef7e1e` | 32 | `external_input_to_dangerous_operation=32` | `data_flow` 16/36, `language_support` checked 2/2 |
 | Go | go-dvwa | `20260625164651-d290e2b7` | 88 | `dependency_usage_path=82`, `external_input_to_dangerous_operation=6` | `data_flow` 3/3, `dependency_usage` 82/82, `language_support` partial 54/55 due to one PHP file |
@@ -120,7 +120,7 @@ vulnerability classes for WebGoat and Juice Shop as either:
 Current normal and strict results on the latest WebGoat and Juice Shop runs:
 
 - WebGoat: 21/21 covered, 0 known gaps.
-- Juice Shop: 35/35 covered, 0 known gaps.
+- Juice Shop: 36/36 covered, 0 known gaps.
 
 Future `known_gap` entries should be temporary, explicit backlog items and must
 fail under `--strict-ground-truth`.
@@ -129,7 +129,7 @@ Current Juice Shop inventory audit result:
 
 - default mode passes with 113 challenges across 16 categories; all 16
   categories map to curated ground-truth expectations and 0 categories carry an
-  explicit limitation; 3 categories still carry open challenge-level recall gaps;
+  explicit limitation; 2 categories still carry open challenge-level recall gaps;
 - `--fail-on-limitations` passes with 0 inventory limitations;
 - `--fail-on-gaps` is intentionally red until the remaining challenge-level gaps
   are converted into covered ground-truth expectations.

@@ -122,6 +122,7 @@ const FILE_METHOD_NAMES = new Set([
   "writefile",
   "writestring",
 ]);
+const WEAK_CRYPTO_INDICATORS = ["z85", "base85", "hashids", "md5", "base64"] as const;
 
 const PYTHON_SUBPROCESS_METHODS = new Set([
   "call",
@@ -209,6 +210,7 @@ export function composeProgramAnalysisGraph(
       continue;
     }
     addObservedCalls(builder, input.graphVersion, entity, owner);
+    addEntitySemanticSinks(builder, input.graphVersion, entity, owner);
   }
   addLexicalFlowEdges(builder, input.graphVersion);
 
@@ -513,6 +515,46 @@ function addObservedCalls(
       producerVersion: entity.producerVersion,
     });
   }
+}
+
+function addEntitySemanticSinks(
+  builder: GraphBuilder,
+  graphVersion: string,
+  entity: ObservedEntity,
+  owner: SecurityGraphNode,
+): void {
+  const indicators = weakCryptoVerifierIndicators(entity);
+  if (indicators.length === 0) {
+    return;
+  }
+  const label = "weak crypto indicator verifier";
+  const sink = addNode(builder, graphVersion, {
+    kind: "Sink",
+    stableKey: `Sink:crypto_weakness:${label}:${entity.fullName}:${entity.repoPath}:${entity.lineRange.startLine}`,
+    label,
+    repoPath: entity.repoPath,
+    lineRange: entity.lineRange,
+    symbol: label,
+    properties: {
+      sinkType: "crypto_weakness",
+      semantic: "weak_crypto_indicator_verifier",
+      indicators,
+    },
+    evidenceIds: [entity.evidenceId],
+    producerVersion: entity.producerVersion,
+  });
+
+  addEdge(builder, graphVersion, {
+    kind: "flows_to",
+    stableKey: `flows_to:${owner.id}:${sink.id}:weak-crypto-indicator-verifier`,
+    fromNodeId: owner.id,
+    toNodeId: sink.id,
+    properties: {
+      reason: "weak_crypto_indicator_verifier",
+    },
+    evidenceIds: [entity.evidenceId],
+    producerVersion: entity.producerVersion,
+  });
 }
 
 function addJavascriptSocketEventBoundary(
@@ -1041,6 +1083,31 @@ function isCryptographicOperation(
     (methodName === "getinstance" &&
       /\b(?:md5|sha1|sha-1|des|rc4|rsa|aes|cipher|signature|messagedigest)\b/i.test(candidate))
   );
+}
+
+function weakCryptoVerifierIndicators(entity: ObservedEntity): string[] {
+  const context = entitySemanticContext(entity);
+  if (!hasWeakCryptoVerifierContext(context)) {
+    return [];
+  }
+  const indicators = WEAK_CRYPTO_INDICATORS.filter((indicator) =>
+    weakCryptoIndicatorPattern(indicator).test(context),
+  );
+  return indicators.length >= 2 ? indicators : [];
+}
+
+function entitySemanticContext(entity: ObservedEntity): string {
+  return [entity.fullName, entity.repoPath, JSON.stringify(entity.slice)].join("\n").toLowerCase();
+}
+
+function hasWeakCryptoVerifierContext(context: string): boolean {
+  return /\b(?:op\.like|like|pattern|feedback|complaint|answer|challenge|verify|validator|allowlist|denylist)\b/i.test(
+    context,
+  );
+}
+
+function weakCryptoIndicatorPattern(indicator: string): RegExp {
+  return new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(indicator)}(?:[^a-z0-9]|$)`, "i");
 }
 
 function cryptographicLabel(candidate: string, fallbackLabel: string): string {

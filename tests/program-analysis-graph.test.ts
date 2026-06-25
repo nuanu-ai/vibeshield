@@ -170,6 +170,24 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(graph.flows).toHaveLength(1);
   });
 
+  it("marks weak crypto verifier indicator lists as cryptographic sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", weakCryptoVerifierSlices())] }),
+    );
+    const sink = graph.nodes.find((node) => node.kind === "Sink");
+
+    expect(sink).toMatchObject({
+      label: "weak crypto indicator verifier",
+      repoPath: "routes/feedback.ts",
+      properties: {
+        sinkType: "crypto_weakness",
+        semantic: "weak_crypto_indicator_verifier",
+        indicators: ["z85", "base85", "hashids", "md5", "base64"],
+      },
+    });
+    expect(graph.flows.some((flow) => flow.sinkNodeId === sink?.id)).toBe(true);
+  });
+
   it("does not mark generic update calls as sinks without a dangerous context", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", nonDangerousUpdateSlices())] }),
@@ -812,6 +830,52 @@ function genericUpdateSlices() {
             },
           },
         ],
+      },
+    ],
+  };
+}
+
+function weakCryptoVerifierSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "routes/feedback.ts::program:checkFeedback",
+        fileName: "routes/feedback.ts",
+        lineNumber: 20,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "routes/feedback.ts::program:checkFeedback",
+          sourceName: "request",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "weakCryptoIndicators",
+              resolvedMethod: "routes/feedback.ts::program:weakCryptoIndicators",
+              code: "weakCryptoIndicators()",
+              label: "CALL",
+              lineNumber: 23,
+            },
+          },
+        ],
+      },
+      {
+        code: [
+          "function weakCryptoIndicators () {",
+          "  return [",
+          "    { [Op.like]: '%z85%' },",
+          "    { [Op.like]: '%base85%' },",
+          "    { [Op.like]: '%hashids%' },",
+          "    { [Op.like]: '%md5%' },",
+          "    { [Op.like]: '%base64%' }",
+          "  ]",
+          "}",
+        ].join("\n"),
+        fullName: "routes/feedback.ts::program:weakCryptoIndicators",
+        fileName: "routes/feedback.ts",
+        lineNumber: 30,
+        usages: [],
       },
     ],
   };
@@ -2333,6 +2397,7 @@ function manifest(): Manifest {
       { path: "routes/2fa.ts", size: 100, sha256: "juice-2fa-sha" },
       { path: "routes/chat.ts", size: 100, sha256: "juice-chat-sha" },
       { path: "routes/coupon.ts", size: 100, sha256: "juice-coupon-sha" },
+      { path: "routes/feedback.ts", size: 100, sha256: "juice-feedback-sha" },
       { path: "routes/likeProductReviews.ts", size: 100, sha256: "juice-likes-sha" },
       { path: "routes/login.ts", size: 100, sha256: "juice-login-sha" },
       { path: "routes/resetPassword.ts", size: 100, sha256: "juice-reset-password-sha" },

@@ -36,12 +36,10 @@
           "groundTruthIds": [
             "juice.coupon-encoding-trust",
             "juice.jwt-token-trust",
-            "juice.crypto-premium-paywall-hidden-route"
+            "juice.crypto-premium-paywall-hidden-route",
+            "juice.crypto-weird-crypto-indicator-verifier"
           ],
-          "challengeGaps": [
-            "Weird Crypto challenge-specific cryptographic clues are not individually mapped yet."
-          ],
-          "note": "Covers reversible coupon logic, JWT/token trust, and hidden paywall route exposure."
+          "note": "Covers reversible coupon logic, JWT/token trust, hidden paywall route exposure, and weak crypto indicator verifier logic."
         },
         "Improper Input Validation": {
           "groundTruthIds": [

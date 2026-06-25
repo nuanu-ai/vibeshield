@@ -410,6 +410,14 @@
           "statusIn": ["statically_supported"]
         },
         {
+          "id": "juice.crypto-weird-crypto-indicator-verifier",
+          "title": "Weird Crypto challenge should classify weak cryptographic and encoding indicator verifier logic",
+          "kind": "hypothesis",
+          "titleIncludes": "Cryptographic weakness",
+          "candidateReasonIncludes": "weak crypto indicator verifier",
+          "statusIn": ["statically_supported"]
+        },
+        {
           "id": "juice.file-exposure",
           "title": "Confidential Document and Local File Read challenges should be classified as file exposure",
           "kind": "hypothesis",
