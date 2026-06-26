@@ -310,6 +310,7 @@ describe("composeProgramAnalysisGraph path", () => {
       expect.arrayContaining([
         ["Cookie trust", "session_cookie_trust"],
         ["Credential trust", "credential_trust"],
+        ["reset-link trust", "password_reset_trust"],
         ["client-side price trust", "client_side_trust"],
         ["Security misconfiguration", "security_misconfiguration"],
         ["Log injection", "log_injection"],
@@ -1075,6 +1076,35 @@ function webGoatTrustSemanticsSlices() {
               code: '"CaptainJack".equals(username) && "BlackPearl".equals(password)',
               label: "CALL",
               lineNumber: 20,
+            },
+          },
+        ],
+      },
+      {
+        fullName:
+          "org.owasp.webgoat.lessons.passwordreset.ResetLinkAssignmentForgotPassword.resetPassword:<unresolvedSignature>(2)",
+        fileName:
+          "src/main/java/org/owasp/webgoat/lessons/passwordreset/ResetLinkAssignmentForgotPassword.java",
+        lineNumber: 61,
+        boundary: {
+          boundaryType: "spring",
+          routeOrName: "/PasswordReset/ForgotPassword/create-reset-link",
+          method: "POST",
+          sourceName: "request",
+        },
+        parameters: [
+          { name: "username", typeFullName: "java.lang.String" },
+          { name: "model", typeFullName: "org.springframework.ui.Model" },
+        ],
+        usages: [
+          {
+            targetObj: {
+              name: "put",
+              resolvedMethod:
+                "java.util.Map.put:java.lang.Object(java.lang.Object,java.lang.Object)",
+              code: "resetLinks.put(username, resetLink)",
+              label: "CALL",
+              lineNumber: 72,
             },
           },
         ],
@@ -2619,6 +2649,11 @@ function manifest(): Manifest {
         path: "src/main/java/org/owasp/webgoat/lessons/insecurelogin/InsecureLoginTask.java",
         size: 90,
         sha256: "insecure-login-sha",
+      },
+      {
+        path: "src/main/java/org/owasp/webgoat/lessons/passwordreset/ResetLinkAssignmentForgotPassword.java",
+        size: 90,
+        sha256: "password-reset-sha",
       },
       {
         path: "src/main/java/org/owasp/webgoat/lessons/htmltampering/HtmlTamperingTask.java",

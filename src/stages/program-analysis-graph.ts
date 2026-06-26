@@ -1385,13 +1385,20 @@ function isPasswordResetTrustOperation(
   entity: ObservedEntity,
 ): boolean {
   const context = entityDescriptorContext(entity, candidate).toLowerCase();
-  if (!(context.includes("routes/resetpassword.ts") || context.includes("resetpassword"))) {
+  if (
+    !(
+      context.includes("routes/resetpassword.ts") ||
+      context.includes("resetpassword") ||
+      context.includes("passwordreset")
+    )
+  ) {
     return false;
   }
   return (
-    ["findone", "hmac", "update", "solveif"].includes(methodName) ||
+    ["build", "findone", "hmac", "put", "update", "solveif"].includes(methodName) ||
     lower.includes("securityanswermodel") ||
     lower.includes("security answer") ||
+    lower.includes("resetlink") ||
     lower.includes("verifysecurityanswerchallenges") ||
     lower.includes("newpassword")
   );
@@ -1401,6 +1408,16 @@ function passwordResetTrustLabel(candidate: string, fallbackLabel: string): stri
   const lower = candidate.toLowerCase();
   if (lower.includes("securityanswer") || lower.includes("hmac")) {
     return "security-question reset";
+  }
+  if (
+    lower === "put" ||
+    lower === "build" ||
+    lower.includes(".put:") ||
+    lower.includes("resetlink") ||
+    lower.includes("uri") ||
+    lower.includes("build")
+  ) {
+    return "reset-link trust";
   }
   if (lower.includes("update") || lower.includes("newpassword")) {
     return "password update";

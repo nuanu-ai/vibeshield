@@ -310,10 +310,6 @@ function candidateTitle(
     return "Security misconfiguration path: request-controlled check reaches insecure configuration behavior";
   }
   const pathNodes = nodesForPath(nodes, path);
-  const routeSemanticTitle = routeSemanticTitleForPath(pathNodes);
-  if (routeSemanticTitle !== undefined) {
-    return routeSemanticTitle;
-  }
   if (sinkType === "sql_execution" && isAccessControlDataAccessPath(pathNodes)) {
     return "Access control path: public route reaches SQL-backed data access without observed authorization";
   }
@@ -395,52 +391,6 @@ function nodesForPath(
   });
 }
 
-function routeSemanticTitleForPath(
-  pathNodes: ReadonlyArray<SecurityGraphNode>,
-): string | undefined {
-  const descriptors = entryNodeDescriptors(pathNodes).map(normalizeDescriptor);
-  if (descriptors.some(hasJwtDescriptor)) {
-    return "JWT token trust path: external input reaches JWT signing or parsing logic";
-  }
-  if (descriptors.some(hasPasswordResetDescriptor)) {
-    return "Password reset path: request-controlled recovery data reaches password reset flow";
-  }
-  if (descriptors.some(hasAuthenticationBypassDescriptor)) {
-    return "Authentication bypass path: request-controlled verification data reaches account verification logic";
-  }
-  if (descriptors.some(hasSecurityMisconfigurationDescriptor)) {
-    return "Security misconfiguration path: request-controlled check reaches insecure configuration behavior";
-  }
-  if (descriptors.some(hasSessionCookieTrustDescriptor)) {
-    return "Cookie trust path: request-controlled cookie or session token reaches trusted session logic";
-  }
-  if (descriptors.some(hasCredentialTrustDescriptor)) {
-    return "Credential trust path: request-controlled login data reaches hardcoded or default credential logic";
-  }
-  if (descriptors.some(hasTwoFactorDescriptor)) {
-    return "Two-factor authentication path: request-controlled token data reaches TOTP or setup-token trust";
-  }
-  if (descriptors.some(hasLlmToolDescriptor)) {
-    return "LLM prompt/tool trust path: request-controlled chat data reaches model tools or prompt policy";
-  }
-  if (descriptors.some(hasCouponEncodingDescriptor)) {
-    return "Coupon encoding trust path: request-controlled coupon data reaches reversible discount logic";
-  }
-  if (descriptors.some(hasAntiAutomationDescriptor)) {
-    return "Anti-automation bypass path: request-controlled action reaches weak rate, replay, or duplicate-action control";
-  }
-  if (descriptors.some(hasClientSideTrustDescriptor)) {
-    return "Client-side trust path: request-controlled client-side value reaches server-side trust decision";
-  }
-  if (descriptors.some(hasLogInjectionDescriptor)) {
-    return "Log injection path: request-controlled value reaches logging or leaked log-secret flow";
-  }
-  if (descriptors.some(hasCryptographicDescriptor)) {
-    return "Cryptographic weakness path: external input reaches cryptographic or encoding logic";
-  }
-  return undefined;
-}
-
 function isAccessControlDataAccessPath(pathNodes: ReadonlyArray<SecurityGraphNode>): boolean {
   const descriptors = entryNodeDescriptors(pathNodes).map(normalizeDescriptor);
   if (descriptors.some(isFixedOrSafeDescriptor)) {
@@ -477,113 +427,6 @@ function hasAccessControlDescriptor(value: string): boolean {
     value.includes("missing-function-ac") ||
     value.includes("missingac")
   );
-}
-
-function hasJwtDescriptor(value: string): boolean {
-  return value.includes("jwt") || value.includes("json-web-token");
-}
-
-function hasPasswordResetDescriptor(value: string): boolean {
-  return value.includes("passwordreset") || value.includes("password-reset");
-}
-
-function hasAuthenticationBypassDescriptor(value: string): boolean {
-  return value.includes("auth-bypass") || value.includes("authbypass");
-}
-
-function hasSessionCookieTrustDescriptor(value: string): boolean {
-  return (
-    value.includes("hijacksession") ||
-    value.includes("hijack-session") ||
-    value.includes("spoofcookie") ||
-    value.includes("spoof-cookie")
-  );
-}
-
-function hasCredentialTrustDescriptor(value: string): boolean {
-  return (
-    value.includes("insecurelogin") ||
-    value.includes("insecure-login") ||
-    value.includes("routes-login") ||
-    value.includes("default-credential") ||
-    value.includes("defaultcredentials")
-  );
-}
-
-function hasTwoFactorDescriptor(value: string): boolean {
-  return (
-    value.includes("2fa") ||
-    value.includes("two-factor") ||
-    value.includes("totp") ||
-    value.includes("twofactorauth")
-  );
-}
-
-function hasLlmToolDescriptor(value: string): boolean {
-  return (
-    value.includes("routes-chat") ||
-    value.includes("chatbot") ||
-    value.includes("llm") ||
-    value.includes("buildsystemprompt") ||
-    value.includes("prompt-injection")
-  );
-}
-
-function hasCouponEncodingDescriptor(value: string): boolean {
-  return value.includes("coupon") || value.includes("discountfromcoupon");
-}
-
-function hasAntiAutomationDescriptor(value: string): boolean {
-  return (
-    value.includes("captchabypasschallenge") ||
-    value.includes("captcha-bypass-challenge") ||
-    value.includes("extralanguagechallenge") ||
-    value.includes("extra-language-challenge") ||
-    value.includes("timingattackchallenge") ||
-    value.includes("timing-attack-challenge") ||
-    value.includes("likeproductreviews") ||
-    value.includes("like-product-reviews")
-  );
-}
-
-function hasClientSideTrustDescriptor(value: string): boolean {
-  return (
-    value.includes("clientsidefiltering") ||
-    value.includes("client-side-filtering") ||
-    value.includes("htmltampering") ||
-    value.includes("html-tampering") ||
-    value.includes("bypassrestrictions") ||
-    value.includes("bypass-restrictions")
-  );
-}
-
-function hasSecurityMisconfigurationDescriptor(value: string): boolean {
-  return (
-    value.includes("securitymisconfiguration") ||
-    value.includes("security-misconfiguration") ||
-    value.includes("deprecatedinterfacechallenge") ||
-    value.includes("deprecated-interface-challenge") ||
-    value.includes("errorhandlingchallenge") ||
-    value.includes("error-handling-challenge") ||
-    value.includes("loginsupportchallenge") ||
-    value.includes("login-support-challenge") ||
-    value.includes("svginjectionchallenge") ||
-    value.includes("svg-injection-challenge") ||
-    value.includes("verifysvginjectionchallenge") ||
-    value.includes("verify-svg-injection-challenge")
-  );
-}
-
-function hasLogInjectionDescriptor(value: string): boolean {
-  return (
-    value.includes("logspoofing") ||
-    value.includes("log-spoofing") ||
-    value.includes("lessons-logging")
-  );
-}
-
-function hasCryptographicDescriptor(value: string): boolean {
-  return value.includes("crypto") || value.includes("cryptography");
 }
 
 function isFixedOrSafeDescriptor(value: string): boolean {

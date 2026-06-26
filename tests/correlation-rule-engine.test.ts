@@ -230,17 +230,18 @@ describe("correlateGraphRules candidates", () => {
     }
   });
 
-  it("labels JWT, password reset, crypto, and auth-bypass paths by route semantics", () => {
+  it("does not let JWT or password-reset route names override reached sink semantics", () => {
     for (const { boundaryLabel, sinkType, title } of [
       {
         boundaryLabel: "/JWT/refresh/newToken",
         sinkType: "csrf_state_change",
-        title: "JWT token trust path: external input reaches JWT signing or parsing logic",
+        title:
+          "CSRF path: state-changing request reaches mutable server-side state without a strong CSRF control",
       },
       {
         boundaryLabel: "/PasswordReset/reset/change-password",
         sinkType: "server_side_request",
-        title: "Password reset path: request-controlled recovery data reaches password reset flow",
+        title: "Server-side request forgery path: external input reaches a server-side HTTP client",
       },
       {
         boundaryLabel: "/crypto/hashing/md5",
@@ -275,7 +276,7 @@ describe("correlateGraphRules candidates", () => {
     }
   });
 
-  it("labels Juice Shop auth, LLM, coupon, anti-automation, and misconfiguration paths by sink or route semantics", () => {
+  it("labels Juice Shop trust and misconfiguration paths by reached sink semantics", () => {
     for (const { boundaryLabel, sinkType, title } of [
       {
         boundaryLabel: "jwtChallenge",
@@ -326,8 +327,7 @@ describe("correlateGraphRules candidates", () => {
       {
         boundaryLabel: "routes/likeProductReviews.ts::program:likeProductReviews",
         sinkType: "no_sql_execution",
-        title:
-          "Anti-automation bypass path: request-controlled action reaches weak rate, replay, or duplicate-action control",
+        title: "NoSQL injection path: external input reaches NoSQL query execution",
       },
       {
         boundaryLabel: "routes/verify.ts::program:errorHandlingChallenge",
@@ -338,8 +338,7 @@ describe("correlateGraphRules candidates", () => {
       {
         boundaryLabel: "verifySvgInjectionChallenge",
         sinkType: "cross_site_scripting",
-        title:
-          "Security misconfiguration path: request-controlled check reaches insecure configuration behavior",
+        title: "Cross-site scripting path: external input reaches HTML or script output",
       },
     ]) {
       const candidates = correlateGraphRules({
@@ -357,19 +356,17 @@ describe("correlateGraphRules candidates", () => {
     }
   });
 
-  it("labels WebGoat trust, misconfiguration, and logging paths by route semantics", () => {
+  it("does not let WebGoat lesson route names override reached sink semantics", () => {
     for (const { boundaryLabel, sinkType, title } of [
       {
         boundaryLabel: "/HijackSession/login",
         sinkType: "cross_site_scripting",
-        title:
-          "Cookie trust path: request-controlled cookie or session token reaches trusted session logic",
+        title: "Cross-site scripting path: external input reaches HTML or script output",
       },
       {
         boundaryLabel: "/SpoofCookie/login",
         sinkType: "sql_execution",
-        title:
-          "Cookie trust path: request-controlled cookie or session token reaches trusted session logic",
+        title: "SQL injection path: external input reaches SQL execution",
       },
       {
         boundaryLabel: "/InsecureLogin/task",
@@ -399,13 +396,12 @@ describe("correlateGraphRules candidates", () => {
         boundaryLabel: "/SecurityMisconfiguration/task4",
         sinkType: "credential_trust",
         title:
-          "Security misconfiguration path: request-controlled check reaches insecure configuration behavior",
+          "Credential trust path: request-controlled login data reaches hardcoded or default credential logic",
       },
       {
         boundaryLabel: "/LogSpoofing/log-spoofing",
         sinkType: "cross_site_scripting",
-        title:
-          "Log injection path: request-controlled value reaches logging or leaked log-secret flow",
+        title: "Cross-site scripting path: external input reaches HTML or script output",
       },
     ]) {
       const candidates = correlateGraphRules({
