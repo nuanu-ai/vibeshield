@@ -426,7 +426,7 @@
         }
       },
       "notes": [
-        "Direct finding review is complete for run 20260626100419-8ac77ddd: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
+        "Direct finding review is complete for run 20260626101900-d5e4e6f0: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
         "Seeded from the current coverage-style Juice Shop expectations. Challenge-level static truth and static support review are still required before static precision or recall can be claimed."
       ]
     },
