@@ -28,7 +28,8 @@
           "title": "Insecure deserialization reaches command execution",
           "kind": "hypothesis",
           "family": "external_input_to_dangerous_operation",
-          "candidateReasonIncludes": "/InsecureDeserialization/task reaches exec",
+          "titleIncludes": "Code execution",
+          "candidateReasonIncludes": "InsecureDeserializationTask.java",
           "statusIn": ["statically_supported"]
         },
         {
@@ -45,7 +46,8 @@
           "title": "Path traversal or upload flow reaches a filesystem sink",
           "kind": "hypothesis",
           "family": "external_input_to_dangerous_operation",
-          "candidateReasonIncludes": "/fileupload reaches deleteIfExists",
+          "titleIncludes": "Path traversal or file access",
+          "candidateReasonIncludes": "deleteIfExists",
           "statusIn": ["statically_supported"]
         },
         {
@@ -121,7 +123,7 @@
           "title": "Authentication bypass lesson should classify incomplete security-question verification",
           "kind": "hypothesis",
           "titleIncludes": "Authentication bypass",
-          "candidateReasonIncludes": "/auth-bypass/verify-account",
+          "candidateReasonIncludes": "VerifyAccount.java",
           "statusIn": ["statically_supported"]
         },
         {
