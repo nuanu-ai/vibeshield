@@ -6,16 +6,24 @@ machine-readable hypothesis candidates, supported static hypotheses, no failed
 Deep Static coverage, and complete `dependency_usage` coverage when dependency
 components exist.
 
-This is an external product benchmark, not detector logic. The scanner must not
-special-case WebGoat, Juice Shop, Freeland, or any other benchmark repository.
-Failures should expose systemic gaps in Joern extraction, graph construction,
-rule coverage, or reporting.
+This is a regression gate, not the final scored quality result. The broader
+precision/recall methodology, targets, anti-overfit rules, and Phase 1/Phase 2
+contract live in [benchmark-methodology.md](benchmark-methodology.md). The first
+scored harness is `pnpm benchmark:score`; it intentionally fails target gates
+until curated truth and FP/support review are complete enough to calculate the
+metrics.
 
-It is not yet a lesson-level recall benchmark. Claiming exhaustive coverage for
-WebGoat, Juice Shop, or another intentionally vulnerable app still requires a
-ground-truth inventory of lessons/CWEs and a matcher from expected vulnerability
-classes to VibeShield findings, static hypotheses, or documented static-analysis
-limitations.
+This is also an external product benchmark, not detector logic. The scanner must
+not special-case WebGoat, Juice Shop, Freeland, or any other benchmark
+repository. Failures should expose systemic gaps in Joern extraction, graph
+construction, rule coverage, validation, or reporting.
+
+The scored harness is not yet an achieved TP/FP/FN benchmark. Claiming
+precision, recall, or exhaustive coverage for WebGoat, Juice Shop,
+Vulnerable-Flask-App, go-dvwa, or another intentionally vulnerable app still
+requires pinned curated truth, static-detectability markings, complete
+FP/support review, coverage-aware denominators, and matchers from expected
+vulnerability classes to VibeShield findings or static hypotheses.
 
 ## Command
 
@@ -77,6 +85,18 @@ pnpm benchmark:inventory \
   --source juice-shop=/tmp/vibeshield-juice-shop-probe
 ```
 
+Run the scored harness against the same pinned reports. This command is the
+Phase 1 measurement surface for TP/FP/FN-style targets. It is expected to fail
+until the scored truth file is complete:
+
+```bash
+pnpm benchmark:score \
+  /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 \
+  /Users/dmitry/.vibeshield/runs/20260625215333-ffdb9e36 \
+  /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e \
+  /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7
+```
+
 ## Current Baseline
 
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |
@@ -125,6 +145,21 @@ Current normal and strict results on the latest WebGoat and Juice Shop runs:
 Future `known_gap` entries should be temporary, explicit backlog items and must
 fail under `--strict-ground-truth`.
 
+These `groundTruth` entries are coverage-style expectations, not scored truth
+items. They answer "does the report expose at least one matching signal for this
+curated class?" They do not yet compute TP, FP, FN, precision, recall, F0.5,
+support precision, false contradiction, or true-but-uncurated buckets.
+
+The scored seed lives at `benchmarks/deep-static-scored-ground-truth.json`. It
+contains the four scored repositories and the Phase 1 target values. WebGoat and
+Juice Shop include a small seed from the current curated slice. Python and Go
+now include pinned static-truth slices curated from their READMEs and source:
+Vulnerable-Flask-App currently scores static candidate recall at 4/9, and
+go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
+Direct-finding truth, FP review, and static-support review are still incomplete,
+so `pnpm benchmark:score` reports scoreability failures instead of pretending
+precision/support-precision can already be claimed.
+
 Current Juice Shop inventory audit result:
 
 - default mode passes with 113 challenges across 16 categories; all 16
@@ -152,11 +187,23 @@ only when it comes from a curated benchmark expectation, such as a WebGoat
 lesson, Juice Shop challenge, known vulnerable fixture, or an intentionally
 documented static-analysis limitation.
 
-## Next Gate
+## Next Methodology Gate
 
-The next quality gate should continue expanding the curated file into
-lesson/CWE-level coverage for WebGoat and challenge-level coverage for Juice
-Shop. Each expected item should map to one of:
+The next quality gate should turn the current regression slice into the first
+scored baseline described in [benchmark-methodology.md](benchmark-methodology.md).
+That means:
+
+- keep expanding WebGoat and Juice Shop from category/class expectations toward
+  lesson/CWE or challenge-level scored truth;
+- add pinned curated truth for Vulnerable-Flask-App and go-dvwa before claiming
+  Python or Go precision/recall;
+- keep Freeland as a local stability and determinism canary, not a scored
+  precision/recall repository;
+- complete `benchmarks/deep-static-scored-ground-truth.json` so
+  `pnpm benchmark:score` can separate TP, FP, FN, true-but-uncurated, coverage
+  loss, and systemic miss causes.
+
+Each expected item should map to one of:
 
 - a direct Quick Scan finding;
 - a supported static hypothesis family;

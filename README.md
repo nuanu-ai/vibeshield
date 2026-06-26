@@ -203,6 +203,8 @@ pnpm exec vitest run tests/microsandbox-runtime.smoke.test.ts
 | Doc | What's inside |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Architecture notes |
+| [docs/benchmark-methodology.md](docs/benchmark-methodology.md) | Quality measurement, R&D work order, ground truth, targets, and anti-overfit rules |
+| [docs/deep-static-training-benchmark.md](docs/deep-static-training-benchmark.md) | Current Deep Static regression benchmark and commands |
 | [docs/stage-1-deterministic-security-core-plan.md](docs/stage-1-deterministic-security-core-plan.md) | Current Stage 1 implementation plan |
 | [AGENTS.md](AGENTS.md) | Repository conventions for humans and coding agents |
 

@@ -1,0 +1,396 @@
+{
+  "version": 1,
+  "targets": {
+    "directPrecision": 0.9,
+    "directRecall": 0.85,
+    "directF05": 0.88,
+    "staticSupportPrecision": 0.8,
+    "staticCandidateRecall": 0.8,
+    "maxTuningHeldOutGap": 0.1
+  },
+  "repositories": [
+    {
+      "name": "WebGoat Java scored seed",
+      "language": "Java",
+      "split": "tuning",
+      "match": {
+        "originUrl": "https://github.com/WebGoat/WebGoat.git"
+      },
+      "expectedVerdict": "not-ready-to-deploy",
+      "directTruth": "incomplete",
+      "directFpReview": "incomplete",
+      "staticTruth": "incomplete",
+      "staticSupportReview": "incomplete",
+      "directFindings": [
+        {
+          "id": "webgoat.jwt-secret",
+          "title": "JWT lesson exposes token material as a direct finding",
+          "class": "secret",
+          "coverageArea": "language_support",
+          "matcher": {
+            "ruleId": "jwt",
+            "category": "secret",
+            "filePathIncludes": "lessons/jwt"
+          }
+        }
+      ],
+      "staticHypotheses": [
+        {
+          "id": "webgoat.sql-injection",
+          "title": "SQL injection lessons have static input-to-SQL traces",
+          "class": "SQL injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "candidateReasonIncludes": "/SqlInjection/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.ssrf",
+          "title": "SSRF task reaches a server-side fetch or file read sink",
+          "class": "SSRF",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "candidateReasonIncludes": "/SSRF/task2",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.xss",
+          "title": "XSS lessons should be classified as XSS",
+          "class": "XSS",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Cross-site scripting",
+            "statusIn": ["statically_supported"]
+          }
+        }
+      ],
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "data_flow": {
+          "stateIn": ["checked"]
+        },
+        "dependency_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      },
+      "notes": [
+        "Seeded from the current coverage-style WebGoat expectations. Full lesson/CWE truth and FP/support review are still required before precision or recall can be claimed."
+      ]
+    },
+    {
+      "name": "Juice Shop JS/TS scored seed",
+      "language": "JS/TS",
+      "split": "tuning",
+      "match": {
+        "originUrl": "https://github.com/juice-shop/juice-shop.git"
+      },
+      "expectedVerdict": "not-ready-to-deploy",
+      "directTruth": "incomplete",
+      "directFpReview": "incomplete",
+      "staticTruth": "incomplete",
+      "staticSupportReview": "incomplete",
+      "directFindings": [
+        {
+          "id": "juice.hardcoded-secrets",
+          "title": "Hardcoded secrets are reported as direct findings",
+          "class": "secret",
+          "coverageArea": "language_support",
+          "matcher": {
+            "category": "secret",
+            "remediationKey": "live-secret-in-source"
+          }
+        },
+        {
+          "id": "juice.eval",
+          "title": "Dangerous JavaScript eval usage is reported as a direct finding",
+          "class": "code execution",
+          "coverageArea": "language_support",
+          "matcher": {
+            "ruleId": "vibeshield.javascript-eval",
+            "category": "code-pattern"
+          }
+        }
+      ],
+      "staticHypotheses": [
+        {
+          "id": "juice.sql-injection",
+          "title": "SQL injection challenges should be classified as SQL injection",
+          "class": "SQL injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "SQL injection",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.xss",
+          "title": "XSS challenges should be classified as XSS",
+          "class": "XSS",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Cross-site scripting",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.ssrf",
+          "title": "SSRF challenges should be classified as SSRF",
+          "class": "SSRF",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Server-side request forgery",
+            "statusIn": ["statically_supported"]
+          }
+        }
+      ],
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "data_flow": {
+          "stateIn": ["checked"]
+        },
+        "dependency_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "content_assets": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "smart_contracts": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      },
+      "notes": [
+        "Seeded from the current coverage-style Juice Shop expectations. Challenge-level truth and FP/support review are still required before precision or recall can be claimed."
+      ]
+    },
+    {
+      "name": "Vulnerable-Flask-App Python scored static slice",
+      "language": "Python",
+      "split": "held-out",
+      "match": {
+        "originUrl": "https://github.com/videvelopers/Vulnerable-Flask-App.git"
+      },
+      "expectedVerdict": "not-ready-to-deploy",
+      "directTruth": "incomplete",
+      "directFpReview": "incomplete",
+      "staticTruth": "complete",
+      "staticSupportReview": "incomplete",
+      "staticHypotheses": [
+        {
+          "id": "vuln-flask.html-injection",
+          "title": "HTML injection via reflected route parameter",
+          "class": "HTML Injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Cross-site scripting",
+            "candidateReasonIncludes": "/welcome2",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.xss",
+          "title": "XSS via reflected route parameter",
+          "class": "XSS",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Cross-site scripting",
+            "candidateReasonIncludes": "/welcome2",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.ssti",
+          "title": "SSTI via name query parameter rendered by render_template_string",
+          "class": "SSTI",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Template injection",
+            "candidateReasonIncludes": "/hello reaches render_template_string",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.sql-injection",
+          "title": "SQL injection via /user/<name> string-formatted SQL query",
+          "class": "SQL Injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "SQL injection",
+            "candidateReasonIncludes": "/user/<string:name> reaches execute",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.information-disclosure",
+          "title": "Information disclosure via admin email route",
+          "class": "Information Disclosure",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Hidden content",
+            "candidateReasonIncludes": "/get_admin_mail",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.command-injection",
+          "title": "Command injection via user-controlled shell command",
+          "class": "Command Injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Code execution",
+            "candidateReasonIncludes": "/get_users reaches check_output",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.brute-force",
+          "title": "Brute force protection is a runtime authentication policy expectation",
+          "class": "Brute Force",
+          "coverageArea": "data_flow",
+          "candidateFamily": "authentication_bypass_path",
+          "inGraphScope": false,
+          "matcher": {
+            "titleIncludes": "Brute force"
+          }
+        },
+        {
+          "id": "vuln-flask.deserialization",
+          "title": "Insecure deserialization via pickle.loads on socket input",
+          "class": "Deserialization",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Insecure deserialization",
+            "candidateReasonIncludes": "/deserialization/ reaches loads",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.broken-authentication",
+          "title": "Broken authentication via substring credential check",
+          "class": "Broken Authentication",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Authentication bypass",
+            "candidateReasonIncludes": "/login",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.dos",
+          "title": "DoS via expensive factorial recursion is a runtime resource-exhaustion expectation",
+          "class": "DOS",
+          "coverageArea": "data_flow",
+          "candidateFamily": "resource_exhaustion_path",
+          "inGraphScope": false,
+          "matcher": {
+            "titleIncludes": "Denial of service"
+          }
+        },
+        {
+          "id": "vuln-flask.file-upload",
+          "title": "File upload endpoint accepts and saves user-controlled files",
+          "class": "File Upload",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "File upload",
+            "candidateReasonIncludes": "/upload",
+            "statusIn": ["statically_supported"]
+          }
+        }
+      ],
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "complete": true
+        },
+        "data_flow": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Static slice curated from the pinned README vulnerability list and the two Flask app files. Brute force and DoS are kept out of the static graph denominator because they require runtime policy/resource behavior validation."
+      ]
+    },
+    {
+      "name": "go-dvwa Go scored static slice",
+      "language": "Go",
+      "split": "held-out",
+      "match": {
+        "originUrl": "https://github.com/sqreen/go-dvwa.git"
+      },
+      "expectedVerdict": "not-ready-to-deploy",
+      "directTruth": "incomplete",
+      "directFpReview": "incomplete",
+      "staticTruth": "complete",
+      "staticSupportReview": "incomplete",
+      "staticHypotheses": [
+        {
+          "id": "go-dvwa.sql-injection",
+          "title": "SQL injection via /products category query parameter",
+          "class": "SQL Injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "SQL injection",
+            "candidateReasonIncludes": "reaches QueryContext",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "go-dvwa.shell-injection",
+          "title": "Shell injection via /api/health extra query parameter",
+          "class": "Shell Injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "titleIncludes": "Code execution",
+            "candidateReasonIncludes": "reaches CommandContext",
+            "statusIn": ["statically_supported"]
+          }
+        }
+      ],
+      "coverage": {
+        "language_support": {
+          "stateIn": ["partial"],
+          "reasonIncludes": "php=1"
+        },
+        "data_flow": {
+          "stateIn": ["checked"]
+        },
+        "dependency_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      },
+      "notes": [
+        "Static slice curated from the pinned README. SQL injection and shell injection are implemented; NoSQL injection and SSRF are documented as unchecked future items and are not included in the denominator."
+      ]
+    }
+  ]
+}

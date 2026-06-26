@@ -286,8 +286,16 @@ exclusions, source hash, tool versions, and DB freshness.
 
 ## Benchmarks
 
+`docs/benchmark-methodology.md` is the quality measurement contract for the R&D
+path: Phase 1 proves capability against curated external truth, and Phase 2
+optimizes cost, latency, and stack size without dropping below the same metric
+floor. It defines the scored surfaces, ground-truth rules, precision/recall
+targets, anti-overfit discipline, baseline procedure, and gap-driven R&D work
+order.
+
 `docs/deep-static-training-benchmark.md` is the current regression gate for the
-Joern-backed Deep Static pipeline. The checked matrix covers:
+Joern-backed Deep Static pipeline. It is an input to the methodology, not the
+full scored TP/FP/FN harness yet. The checked matrix covers:
 
 - WebGoat (Java);
 - Juice Shop (JS/TS);
@@ -298,9 +306,13 @@ Joern-backed Deep Static pipeline. The checked matrix covers:
 The benchmark asserts machine-readable candidate families, supported static
 hypotheses, no failed Deep Static coverage, complete dependency-usage coverage
 where dependency components exist, and curated ground-truth expectations for
-WebGoat and Juice Shop. Benchmark repositories are product benchmarks, not
-training patches: failures should expose systemic gaps in Joern extraction,
-graph construction, rule taxonomy, validation logic, or reporting.
+WebGoat and Juice Shop. Python and Go scored precision/recall require pinned
+curated truth for Vulnerable-Flask-App and go-dvwa first. Freeland is a local
+stability and determinism canary, not a precision/recall source.
+
+Benchmark repositories are product benchmarks, not training patches: failures
+should expose systemic gaps in Joern extraction, graph construction, rule
+taxonomy, validation logic, or reporting.
 
 Do not add repository-specific detector behavior to make benchmark runs pass.
 
