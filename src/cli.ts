@@ -5,6 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { FilesystemBlobs } from "./adapters/filesystem-blobs.js";
 import { MicrosandboxRuntime } from "./adapters/microsandbox/runtime.js";
+import { NullModelProvider } from "./adapters/null-model-provider.js";
 import {
   DEFAULT_REMEDIATION_MODEL,
   OpenRouterModelProvider,
@@ -14,6 +15,7 @@ import { ensureStateRoot, resolveStateRoot, stateDbPath } from "./adapters/state
 import { parseScanArgs } from "./application/scan-args.js";
 import { runScan } from "./application/scan-service.js";
 import type { SourceInput } from "./domain/run.js";
+import type { ModelProvider } from "./ports/model-provider.js";
 import {
   renderError,
   renderHelp,
@@ -62,6 +64,10 @@ async function scan(args: string[]): Promise<void> {
   await ensureStateRoot(stateRoot);
   const toolchainImage = process.env.VIBESHIELD_TOOLCHAIN_TAG ?? DEFAULT_TOOLCHAIN_IMAGE;
   const remediationModel = process.env.VIBESHIELD_REMEDIATION_MODEL ?? DEFAULT_REMEDIATION_MODEL;
+  const model = modelProviderFor({
+    noModel: parsed.modelMode === "off" || envFlag(process.env.VIBESHIELD_NO_MODEL),
+    remediationModel,
+  });
 
   const db = new DatabaseSync(stateDbPath(stateRoot));
   try {
@@ -71,12 +77,7 @@ async function scan(args: string[]): Promise<void> {
         state: new SqliteStateStore(db),
         artifacts: new FilesystemBlobs(stateRoot),
         events: new TerminalEventSink(process.stderr, { color: supportsAnsiColor(process.stderr) }),
-        model: new OpenRouterModelProvider({
-          model: remediationModel,
-          ...(process.env.OPENROUTER_API_KEY !== undefined
-            ? { apiKey: process.env.OPENROUTER_API_KEY }
-            : {}),
-        }),
+        model,
       },
       {
         source,
@@ -89,6 +90,25 @@ async function scan(args: string[]): Promise<void> {
   } finally {
     db.close();
   }
+}
+
+function modelProviderFor(input: {
+  readonly noModel: boolean;
+  readonly remediationModel: string;
+}): ModelProvider {
+  if (input.noModel) {
+    return new NullModelProvider();
+  }
+  return new OpenRouterModelProvider({
+    model: input.remediationModel,
+    ...(process.env.OPENROUTER_API_KEY !== undefined
+      ? { apiKey: process.env.OPENROUTER_API_KEY }
+      : {}),
+  });
+}
+
+function envFlag(value: string | undefined): boolean {
+  return value !== undefined && /^(?:1|true|yes|on)$/i.test(value.trim());
 }
 
 async function parseSource(raw: string): Promise<SourceInput> {

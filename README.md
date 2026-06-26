@@ -124,6 +124,8 @@ pnpm toolchain:prepare
 pnpm scan https://github.com/owner/repo
 # or
 pnpm scan /path/to/local/git-worktree-root
+# use --no-model for deterministic catalog-only wording, even when .env has a key
+pnpm scan /path/to/local/git-worktree-root --deep --no-model
 ```
 
 That is the intended setup path. The toolchain command builds the local scanner

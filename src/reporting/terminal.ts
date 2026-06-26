@@ -265,12 +265,13 @@ export function renderHelp(opts: RenderOptions = {}): string {
     `  ${p.dim("why it matters, and a ready-to-paste prompt for your coding agent.")}`,
     "",
     heading("Usage"),
-    `    ${p.cyan("vibeshield scan")} <github-url-or-local-git-root> ${p.dim("[--deep]")}`,
+    `    ${p.cyan("vibeshield scan")} <github-url-or-local-git-root> ${p.dim("[--deep] [--no-model]")}`,
     "",
     heading("Examples"),
     `    ${p.dim("vibeshield scan https://github.com/owner/repo")}`,
     `    ${p.dim("vibeshield scan ./my-app")}`,
     `    ${p.dim("vibeshield scan ./my-app --deep")}`,
+    `    ${p.dim("vibeshield scan ./my-app --deep --no-model")}`,
     "",
     heading("Output"),
     `    ${p.dim("A short summary here, plus a full report you can open:")}`,
@@ -280,6 +281,7 @@ export function renderHelp(opts: RenderOptions = {}): string {
     `    ${p.dim("Needs Docker or Podman + Microsandbox. First run:")} ${p.cyan("pnpm toolchain:prepare")}`,
     `    ${p.dim("Set OPENROUTER_API_KEY (optional) to improve how fixes are explained.")}`,
     `    ${p.dim("Use VIBESHIELD_REMEDIATION_MODEL to try another OpenRouter model.")}`,
+    `    ${p.dim("Use --no-model or VIBESHIELD_NO_MODEL=1 for catalog-only wording.")}`,
     "",
   ];
   return `${lines.join("\n")}\n`;

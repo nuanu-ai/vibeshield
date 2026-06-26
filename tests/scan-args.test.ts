@@ -6,10 +6,12 @@ describe("scan argument parsing", () => {
     expect(parseScanArgs(["--deep", "./app"])).toEqual({
       sourceArg: "./app",
       deep: true,
+      modelMode: "auto",
     });
     expect(parseScanArgs(["https://github.com/owner/repo", "--deep"])).toEqual({
       sourceArg: "https://github.com/owner/repo",
       deep: true,
+      modelMode: "auto",
     });
   });
 
@@ -17,6 +19,15 @@ describe("scan argument parsing", () => {
     expect(parseScanArgs(["./app"])).toEqual({
       sourceArg: "./app",
       deep: false,
+      modelMode: "auto",
+    });
+  });
+
+  it("accepts catalog-only mode for deterministic benchmark runs", () => {
+    expect(parseScanArgs(["--no-model", "./app", "--deep"])).toEqual({
+      sourceArg: "./app",
+      deep: true,
+      modelMode: "off",
     });
   });
 
