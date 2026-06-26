@@ -266,6 +266,53 @@ describe("runScan quick scan vertical slice", () => {
     expect(markdown).toContain("1 likely attack path");
   });
 
+  it("uses the Deep Static deploy verdict without dropping critical Quick Scan evidence", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, deepManifestFiles()),
+        [
+          {
+            RuleID: "stripe-access-token",
+            Description: "Stripe Access Token",
+            File: "src/routes/upload.ts",
+            StartLine: 10,
+            EndLine: 10,
+            Secret: PLANTED_SECRET,
+            Match: `stripeSecret: "${PLANTED_SECRET}"`,
+            Fingerprint: "src/routes/upload.ts:stripe-access-token:10",
+          },
+        ],
+        { joern: { mode: "success" } },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+      deep: true,
+    });
+
+    expect(outcome.assessment.verdict).toBe("not-ready-to-deploy");
+    expect(outcome.assessment.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ruleId: "stripe-access-token",
+          severity: "critical",
+        }),
+      ]),
+    );
+    expect(
+      outcome.assessment.staticHypotheses?.some(
+        (hypothesis) => hypothesis.status === "statically_supported",
+      ),
+    ).toBe(true);
+    expect(outcome.assessment.rankedActions[0]?.remediation.title).toBe(
+      "Remove the committed secret",
+    );
+  });
+
   it("adds package dependency graph context without mutating Quick Scan findings", async () => {
     const source = await writeLocalFixture(dir);
     const blobs = new FilesystemBlobs(dir);
@@ -647,7 +694,7 @@ describe("runScan quick scan vertical slice", () => {
       deep: true,
     });
 
-    expect(outcome.assessment.verdict).toBe("critical-fix-needed");
+    expect(outcome.assessment.verdict).toBe("not-ready-to-deploy");
     expect(outcome.reportPaths.repositoryMap).toBeDefined();
     expect(
       sandbox.invocations.some(

@@ -1409,24 +1409,7 @@ function verdictWithDeepStatic(verdict: Verdict, deepData: DeepStaticData | unde
   const hasSupportedAttackPath =
     deepData?.staticHypotheses.some((hypothesis) => hypothesis.status === "statically_supported") ??
     false;
-  return hasSupportedAttackPath ? strongerVerdict(verdict, "not-ready-to-deploy") : verdict;
-}
-
-function strongerVerdict(left: Verdict, right: Verdict): Verdict {
-  return verdictRank(left) <= verdictRank(right) ? left : right;
-}
-
-function verdictRank(verdict: Verdict): number {
-  switch (verdict) {
-    case "critical-fix-needed":
-      return 0;
-    case "not-ready-to-deploy":
-      return 1;
-    case "scan-incomplete":
-      return 2;
-    case "looks-ok-for-now":
-      return 3;
-  }
+  return hasSupportedAttackPath ? "not-ready-to-deploy" : verdict;
 }
 
 async function readScannerBytes(
