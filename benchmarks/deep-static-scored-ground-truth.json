@@ -513,6 +513,15 @@
             "candidateReasonIncludes": "execute",
             "statusIn": ["statically_supported"]
           }
+        },
+        {
+          "id": "vuln-flask.extra-reflected-html-paths",
+          "reason": "Linux/Windows reflected welcome route variants are true supported HTML/XSS paths but are not separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Cross-site scripting",
+            "candidateReasonIncludes": "reflected raw response",
+            "statusIn": ["statically_supported"]
+          }
         }
       ],
       "staticHypotheses": [
