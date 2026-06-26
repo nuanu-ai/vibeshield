@@ -359,7 +359,196 @@
       },
       "notes": [
         "Direct finding review is complete for run 20260626112711-237f9ec7: the prior minified underscore code-pattern hit is suppressed, repeated JWT/API-key/private-key lesson materials are treated as true duplicates, and XStream CVE rows are grouped as duplicate dependency findings.",
-        "Scored static truth now includes the curated coverage-style expectations from WebGoat Java ground truth slice; support review is still incomplete until remaining supported hypotheses are bucketed as true-but-uncurated or false support."
+        "Scored static truth now includes the curated coverage-style expectations from WebGoat Java ground truth slice; support review is still incomplete until remaining supported hypotheses are bucketed as true-but-uncurated or false support.",
+        "Additional supported traces that match scored static truth items are reviewed as true-but-uncurated variants; remaining review queue entries require separate triage before static support review can be complete."
+      ],
+      "trueButUncuratedStatic": [
+        {
+          "id": "webgoat.sql-injection.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.sql-injection are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "candidateReasonIncludes": "/SqlInjection/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.ssrf.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.ssrf are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "candidateReasonIncludesAll": ["SSRFTask2.java", "readAllBytes"],
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.xss.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.xss are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Cross-site scripting",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.xxe.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.xxe are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "candidateReasonIncludes": "/xxe/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.insecure-deserialization.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.insecure-deserialization are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Code execution",
+            "candidateReasonIncludes": "InsecureDeserializationTask.java",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.path-traversal.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.path-traversal are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Path traversal or file access",
+            "candidateReasonIncludes": "deleteIfExists",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.open-redirect.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.open-redirect are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "candidateReasonIncludes": "RedirectView",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.idor.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.idor are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "IDOR",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.csrf.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.csrf are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "CSRF",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.missing-function-access-control.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.missing-function-access-control are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Access control",
+            "candidateReasonIncludes": "access-control/users",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.vulnerable-components.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.vulnerable-components are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "dependency_usage_path"
+          }
+        },
+        {
+          "id": "webgoat.crypto-weak-hashing.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.crypto-weak-hashing are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Cryptographic",
+            "candidateReasonIncludes": "/crypto/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.jwt-token-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.jwt-token-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "JWT",
+            "candidateReasonIncludes": "/JWT/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.auth-bypass-security-questions.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.auth-bypass-security-questions are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Authentication bypass",
+            "candidateReasonIncludes": "VerifyAccount.java",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.password-reset-account-recovery.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.password-reset-account-recovery are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Password reset",
+            "candidateReasonIncludes": "/PasswordReset/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.session-cookie-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.session-cookie-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Cookie trust",
+            "candidateReasonIncludes": "Cookie",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.insecure-credential-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.insecure-credential-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Credential trust",
+            "candidateReasonIncludes": "Login",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.client-side-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.client-side-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Client-side trust",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.security-misconfiguration.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.security-misconfiguration are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "/SecurityMisconfiguration/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.log-spoofing.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation webgoat.log-spoofing are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Log",
+            "candidateReasonIncludes": "/LogSpoofing/",
+            "statusIn": ["statically_supported"]
+          }
+        }
       ]
     },
     {
@@ -1004,7 +1193,349 @@
       },
       "notes": [
         "Direct finding review is complete for run 20260626112812-9d82f57e: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
-        "Scored static truth now includes the curated coverage-style expectations from Juice Shop JS/TS ground truth slice; support review is still incomplete until remaining supported hypotheses are bucketed as true-but-uncurated or false support."
+        "Scored static truth now includes the curated coverage-style expectations from Juice Shop JS/TS ground truth slice; support review is still incomplete until remaining supported hypotheses are bucketed as true-but-uncurated or false support.",
+        "Additional supported traces that match scored static truth items are reviewed as true-but-uncurated variants; remaining review queue entries require separate triage before static support review can be complete."
+      ],
+      "trueButUncuratedStatic": [
+        {
+          "id": "juice.sql-injection.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.sql-injection are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "SQL injection",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.xss.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.xss are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Cross-site scripting",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.ssrf.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.ssrf are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Server-side request forgery",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.file-read.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.file-read are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "candidateReasonIncludes": "readFile",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.ci-supply-chain.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.ci-supply-chain are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "ci_supply_chain_path"
+          }
+        },
+        {
+          "id": "juice.access-control.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.access-control are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Access control",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.bac-admin-section-route-discovery.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.bac-admin-section-route-discovery are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "administration",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.bac-web3-sandbox-route-discovery.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.bac-web3-sandbox-route-discovery are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "web3-sandbox",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.open-redirect.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.open-redirect are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Open redirect",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.insecure-deserialization-rce.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.insecure-deserialization-rce are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Insecure deserialization",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.nosql.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.nosql are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "NoSQL",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.xxe.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.xxe are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "XXE",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.security-misconfiguration-deprecated-interface.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.security-misconfiguration-deprecated-interface are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "routes/fileUpload.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.security-misconfiguration-error-handling.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.security-misconfiguration-error-handling are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "routes/verify.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.security-misconfiguration-login-support.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.security-misconfiguration-login-support are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "routes/login.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.security-misconfiguration-svg-imaging.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.security-misconfiguration-svg-imaging are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "registerWebsocketEvents.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.anti-automation-captcha-rate.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.anti-automation-captcha-rate are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Anti-automation",
+            "candidateReasonIncludes": "CAPTCHA rate bypass",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.anti-automation-extra-language.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.anti-automation-extra-language are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Anti-automation",
+            "candidateReasonIncludes": "hidden resource enumeration",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.anti-automation-multiple-likes.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.anti-automation-multiple-likes are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Anti-automation",
+            "candidateReasonIncludes": "routes/likeProductReviews.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.obscurity-token-sale-route.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.obscurity-token-sale-route are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "tokenMatcher",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.obscurity-privacy-policy-proof.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.obscurity-privacy-policy-proof are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "frontend/dist/frontend/assets/private/thank-you.jpg",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.obscurity-hidden-image.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.obscurity-hidden-image are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "pickle rick",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.jwt-token-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.jwt-token-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "JWT token trust",
+            "candidateReasonIncludes": "routes/verify.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.credential-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.credential-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Credential trust",
+            "candidateReasonIncludes": "routes/login.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.password-reset-security-questions.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.password-reset-security-questions are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Password reset",
+            "candidateReasonIncludes": "routes/resetPassword.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.two-factor-token-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.two-factor-token-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Two-factor",
+            "candidateReasonIncludes": "routes/2fa.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.llm-tool-prompt-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.llm-tool-prompt-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "LLM",
+            "candidateReasonIncludes": "routes/chat.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.coupon-encoding-trust.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.coupon-encoding-trust are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Coupon",
+            "candidateReasonIncludes": "coupon",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.crypto-premium-paywall-hidden-route.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.crypto-premium-paywall-hidden-route are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "/this/page/is/hidden/behind/an/incredibly/high/paywall",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.crypto-weird-crypto-indicator-verifier.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.crypto-weird-crypto-indicator-verifier are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Cryptographic weakness",
+            "candidateReasonIncludes": "weak crypto indicator verifier",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.file-exposure.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.file-exposure are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Path traversal or file access",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.observability-access-log-disclosure.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.observability-access-log-disclosure are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Log disclosure",
+            "candidateReasonIncludes": "routes/logfileServer.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.upload-validation.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.upload-validation are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "File upload",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.vulnerable-components.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.vulnerable-components are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "dependency_usage_path"
+          }
+        },
+        {
+          "id": "juice.ssti.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.ssti are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Server-side template injection",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.web3-wallet-withdrawal-reentrancy.additional-supported-traces",
+          "reason": "Additional supported traces matching the curated expectation juice.web3-wallet-withdrawal-reentrancy are true variants or duplicates, but are not separate static recall-denominator items.",
+          "matcher": {
+            "family": "smart_contract_risk_path",
+            "titleIncludes": "Smart contract risk",
+            "candidateReasonIncludes": "ETHWalletBank.withdraw",
+            "statusIn": ["statically_supported"]
+          }
+        }
       ]
     },
     {
