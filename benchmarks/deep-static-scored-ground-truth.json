@@ -191,7 +191,80 @@
       "directTruth": "incomplete",
       "directFpReview": "incomplete",
       "staticTruth": "complete",
-      "staticSupportReview": "incomplete",
+      "staticSupportReview": "complete",
+      "trueButUncuratedStatic": [
+        {
+          "id": "vuln-flask.extra-command-paths",
+          "reason": "Additional Linux/Windows command-execution route variants are true supported paths but are not separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Code execution",
+            "candidateReasonIncludes": "check_output",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.extra-auth-paths",
+          "reason": "Additional Linux/Windows authentication-bypass route variants are true supported paths but are not separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Authentication bypass",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.extra-file-upload-paths",
+          "reason": "Linux/Windows file-upload route variants are true supported paths but are not separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "File upload",
+            "candidateReasonIncludes": "file upload handling",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.extra-hidden-content-paths",
+          "reason": "Linux/Windows hidden-content route variants are true supported paths but are not separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Hidden content",
+            "candidateReasonIncludes": "hidden admin content exposure",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.extra-deserialization-paths",
+          "reason": "Linux/Windows deserialization route variants are true supported paths but are not separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Insecure deserialization",
+            "candidateReasonIncludes": "loads",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.path-traversal-variants",
+          "reason": "The file-open routes are true path traversal/file access paths, but the scored README slice does not count them as separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "Path traversal",
+            "candidateReasonIncludes": "open",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.extra-template-paths",
+          "reason": "Linux/Windows template-injection route variants are true supported paths but are not separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "template injection",
+            "candidateReasonIncludes": "render_template_string",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "vuln-flask.extra-sql-paths",
+          "reason": "Linux/Windows SQL injection route variants are true supported paths but are not separate recall-denominator items.",
+          "matcher": {
+            "titleIncludes": "SQL injection",
+            "candidateReasonIncludes": "execute",
+            "statusIn": ["statically_supported"]
+          }
+        }
+      ],
       "staticHypotheses": [
         {
           "id": "vuln-flask.html-injection",
@@ -348,7 +421,18 @@
       "directTruth": "incomplete",
       "directFpReview": "incomplete",
       "staticTruth": "complete",
-      "staticSupportReview": "incomplete",
+      "staticSupportReview": "complete",
+      "trueButUncuratedStatic": [
+        {
+          "id": "go-dvwa.protobuf-dependency",
+          "reason": "The vulnerable protobuf module is proven present through the Go dependency manifest, but dependency reachability is not part of the two README attack-path recall items.",
+          "matcher": {
+            "family": "dependency_usage_path",
+            "candidateReasonIncludes": "google.golang.org/protobuf",
+            "statusIn": ["statically_supported"]
+          }
+        }
+      ],
       "staticHypotheses": [
         {
           "id": "go-dvwa.sql-injection",
