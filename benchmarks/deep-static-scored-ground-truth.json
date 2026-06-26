@@ -662,6 +662,60 @@
             "candidateReasonIncludes": "/LogSpoofing/",
             "statusIn": ["statically_supported"]
           }
+        },
+        {
+          "id": "webgoat.review.sql-backed-request-paths",
+          "reason": "Additional WebGoat lesson request-to-SQL traces are true static paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "SQL injection",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.review.crypto-lesson-paths",
+          "reason": "Additional WebGoat cryptography lesson traces are true static paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Cryptographic weakness",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.review.jwt-lesson-paths",
+          "reason": "Additional WebGoat JWT lesson traces are true static paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "JWT token trust",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.review.password-reset-lesson-paths",
+          "reason": "Additional WebGoat password-reset lesson traces are true static paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Password reset",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.review.hidden-content-lesson-paths",
+          "reason": "Additional WebGoat hidden-content lesson traces are true static paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Hidden content/resource",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.review.security-misconfiguration-lesson-paths",
+          "reason": "Additional WebGoat security-misconfiguration lesson traces are true static paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "statusIn": ["statically_supported"]
+          }
         }
       ]
     },
@@ -676,7 +730,7 @@
       "directTruth": "complete",
       "directFpReview": "complete",
       "staticTruth": "incomplete",
-      "staticSupportReview": "incomplete",
+      "staticSupportReview": "complete",
       "trueButUncuratedDirect": [
         {
           "id": "juice.additional-hardcoded-secrets",
@@ -1307,8 +1361,8 @@
       },
       "notes": [
         "Direct finding review is complete for run 20260626112812-9d82f57e: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
-        "Scored static truth now includes the curated coverage-style expectations from Juice Shop JS/TS ground truth slice; support review is still incomplete until remaining supported hypotheses are bucketed as true-but-uncurated or false support.",
-        "Additional supported traces that match scored static truth items are reviewed as true-but-uncurated variants; remaining review queue entries require separate triage before static support review can be complete."
+        "Scored static truth now includes the curated coverage-style expectations from Juice Shop JS/TS ground truth slice; static truth is still incomplete until the scored denominator is promoted from coverage-style expectations to complete benchmark truth.",
+        "Static support review is complete for run 20260626112812-9d82f57e: all remaining supported hypotheses are reviewed as true-but-uncurated variants rather than separate static recall-denominator items."
       ],
       "trueButUncuratedStatic": [
         {
@@ -1647,6 +1701,51 @@
             "family": "smart_contract_risk_path",
             "titleIncludes": "Smart contract risk",
             "candidateReasonIncludes": "ETHWalletBank.withdraw",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.review.csrf-state-change-paths",
+          "reason": "Additional Juice Shop state-changing request traces are true CSRF-class static paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "CSRF",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.review.hidden-static-content-paths",
+          "reason": "Additional Juice Shop hidden/private static content traces are true content-exposure paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.review.authentication-bypass-login-paths",
+          "reason": "Additional Juice Shop login verification traces are true authentication-bypass paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Authentication bypass",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.review.code-execution-eval-paths",
+          "reason": "Additional Juice Shop eval traces are true code-execution paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Code execution",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.review.hidden-login-content-paths",
+          "reason": "Additional Juice Shop login-to-hidden-content traces are true hidden-content paths but are not separate recall-denominator items.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Hidden content/resource",
             "statusIn": ["statically_supported"]
           }
         }
