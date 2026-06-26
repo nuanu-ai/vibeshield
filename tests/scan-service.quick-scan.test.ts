@@ -996,18 +996,23 @@ describe("runScan quick scan vertical slice", () => {
   it("suppresses packaged SyntaxHighlighter eval noise without disabling app eval findings", async () => {
     const source = await writeLocalFixture(dir);
     const syntaxHighlighterPath = "template/Karma Shop-doc/syntax-highlighter/scripts/shCore.js";
+    const minifiedLibraryPath = "public/static/js/libs/underscore-min.js";
     const sandbox = new FakeSandboxRuntime({
       exec: fakeQuickScanExec(
         manifestFor(source.path, [
           { path: "README.md", size: 10, sha256: "readme-sha" },
           { path: "src/app.js", size: 40, sha256: "app-sha" },
+          { path: "src/factory.js", size: 40, sha256: "factory-sha" },
           { path: syntaxHighlighterPath, size: 120, sha256: "syntax-highlighter-sha" },
+          { path: minifiedLibraryPath, size: 120, sha256: "minified-library-sha" },
         ]),
         [],
         {
           opengrepSarif: sarifReport([
             sarifResult("vibeshield.javascript-eval", "src/app.js", 4),
+            sarifResult("vibeshield.javascript-function-constructor", "src/factory.js", 7),
             sarifResult("vibeshield.javascript-eval", syntaxHighlighterPath, 17),
+            sarifResult("vibeshield.javascript-function-constructor", minifiedLibraryPath, 6),
           ]),
         },
       ),
@@ -1020,9 +1025,14 @@ describe("runScan quick scan vertical slice", () => {
     });
 
     const evalFindings = outcome.assessment.findings.filter(
-      (finding) => finding.ruleId === "vibeshield.javascript-eval",
+      (finding) =>
+        finding.ruleId === "vibeshield.javascript-eval" ||
+        finding.ruleId === "vibeshield.javascript-function-constructor",
     );
-    expect(evalFindings.map((finding) => finding.locations[0]?.filePath)).toEqual(["src/app.js"]);
+    expect(evalFindings.map((finding) => finding.locations[0]?.filePath)).toEqual([
+      "src/app.js",
+      "src/factory.js",
+    ]);
     expect(coverageByCheck(outcome.assessment.coverage).get("code-patterns.opengrep")).toEqual({
       check: "code-patterns.opengrep",
       status: "checked",

@@ -797,10 +797,16 @@ function normalizeStage(): StageDefinition {
 }
 
 function shouldSuppressScannerCandidate(tool: string, ruleId: string, filePath: string): boolean {
+  if (tool !== "opengrep" || !isJavaScriptCodeExecutionRule(ruleId)) {
+    return false;
+  }
+  return isPackagedSyntaxHighlighterScript(filePath) || isPackagedMinifiedLibraryScript(filePath);
+}
+
+function isJavaScriptCodeExecutionRule(ruleId: string): boolean {
   return (
-    tool === "opengrep" &&
-    ruleId === "vibeshield.javascript-eval" &&
-    isPackagedSyntaxHighlighterScript(filePath)
+    ruleId === "vibeshield.javascript-eval" ||
+    ruleId === "vibeshield.javascript-function-constructor"
   );
 }
 
@@ -813,6 +819,20 @@ function isPackagedSyntaxHighlighterScript(filePath: string): boolean {
       normalized.includes("/syntaxhighlighter/scripts/") ||
       normalized.includes("syntaxhighlighter/scripts/")) &&
     /^sh[a-z0-9_-]*\.js$/.test(fileName)
+  );
+}
+
+function isPackagedMinifiedLibraryScript(filePath: string): boolean {
+  const normalized = filePath.toLowerCase().replaceAll("\\", "/");
+  const fileName = normalized.split("/").at(-1) ?? "";
+  return (
+    (fileName.endsWith(".min.js") || fileName.endsWith("-min.js")) &&
+    (normalized.includes("/libs/") ||
+      normalized.includes("/lib/") ||
+      normalized.includes("/vendor/") ||
+      normalized.includes("/vendors/") ||
+      normalized.includes("/third_party/") ||
+      normalized.includes("/bower_components/"))
   );
 }
 
