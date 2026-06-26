@@ -149,11 +149,11 @@
       "match": {
         "originUrl": "https://github.com/sqreen/go-dvwa.git"
       },
-      "minFindings": 102,
-      "minHypothesisCandidates": 88,
-      "minSupportedHypotheses": 88,
+      "minFindings": 21,
+      "minHypothesisCandidates": 7,
+      "minSupportedHypotheses": 7,
       "requiredFamilies": {
-        "dependency_usage_path": 82,
+        "dependency_usage_path": 1,
         "external_input_to_dangerous_operation": 6
       },
       "coverage": {

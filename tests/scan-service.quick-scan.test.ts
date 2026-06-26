@@ -551,6 +551,54 @@ describe("runScan quick scan vertical slice", () => {
     });
   });
 
+  it("uses Trivy package-list evidence when a Go SBOM omits dependency edges", async () => {
+    const source = await writeLocalFixture(dir);
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          ...deepManifestFiles(),
+          { path: "go.mod", size: 120, sha256: "gomod-sha" },
+          { path: "go.sum", size: 300, sha256: "gosum-sha" },
+        ]),
+        [],
+        { joern: { mode: "success" }, trivyVuln: trivyGoPackageListReport() },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+      deep: true,
+    });
+
+    const dependencyFinding = outcome.assessment.findings.find(
+      (finding) => finding.ruleId === "CVE-2024-24786",
+    );
+    const dependencyContext = outcome.assessment.findingContextAssessments?.find(
+      (context) => context.findingId === dependencyFinding?.id,
+    );
+
+    expect(dependencyFinding).toMatchObject({
+      metadata: {
+        packageName: "google.golang.org/protobuf",
+        installedVersion: "v1.24.0",
+      },
+      locations: [{ filePath: "go.sum", startLine: 1, endLine: 1 }],
+    });
+    expect(dependencyContext).toMatchObject({
+      status: "linked_to_hypothesis",
+      coverageState: "checked",
+    });
+    expect(
+      outcome.assessment.deepCoverage?.find((area) => area.area === "dependency_usage"),
+    ).toMatchObject({
+      state: "checked",
+      coveredCount: 1,
+      totalCount: 1,
+    });
+  });
+
   it("keeps deterministic Deep Static facts stable when model enrichment is enabled", async () => {
     const source = await writeLocalFixture(dir);
     const modelOff = await runGate4DeepScan(dir, source, new NullModelProvider());
@@ -1891,6 +1939,41 @@ function trivyMavenSbomReport() {
             FixedVersion: "1.4.7",
             Severity: "CRITICAL",
             Title: "XStream remote code execution",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function trivyGoPackageListReport() {
+  return {
+    Results: [
+      {
+        Target: "",
+        Class: "lang-pkgs",
+        Type: "gobinary",
+        Packages: [
+          {
+            ID: "google.golang.org/protobuf@v1.24.0",
+            Name: "google.golang.org/protobuf",
+            Identifier: {
+              PURL: "pkg:golang/google.golang.org/protobuf@v1.24.0",
+            },
+            Version: "v1.24.0",
+          },
+        ],
+        Vulnerabilities: [
+          {
+            VulnerabilityID: "CVE-2024-24786",
+            PkgName: "google.golang.org/protobuf",
+            PkgIdentifier: {
+              PURL: "pkg:golang/google.golang.org/protobuf@v1.24.0",
+            },
+            InstalledVersion: "v1.24.0",
+            FixedVersion: "1.33.0",
+            Severity: "HIGH",
+            Title: "protobuf protojson denial of service",
           },
         ],
       },

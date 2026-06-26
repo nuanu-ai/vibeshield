@@ -1292,6 +1292,7 @@ function componentDependencyObservationsFromTrivyRaw(input: {
     if (manifestPath === undefined || packages.length === 0) {
       continue;
     }
+    const resultObservationStart = observations.length;
     const packagesById = trivyPackagesById(packages);
     for (const pkg of packages) {
       const sourcePackageName =
@@ -1322,9 +1323,60 @@ function componentDependencyObservationsFromTrivyRaw(input: {
         });
       }
     }
+    if (observations.length === resultObservationStart) {
+      observations.push(
+        ...componentDependencyObservationsFromPackageList({
+          result,
+          packages,
+          manifestPath,
+          evidenceIdsByPackage: input.evidenceIdsByPackage,
+          fallbackEvidenceIds: input.fallbackEvidenceIds,
+        }),
+      );
+    }
   }
 
   return observations;
+}
+
+function componentDependencyObservationsFromPackageList(input: {
+  readonly result: Readonly<Record<string, unknown>>;
+  readonly packages: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  readonly manifestPath: string;
+  readonly evidenceIdsByPackage: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly fallbackEvidenceIds: ReadonlyArray<string>;
+}): ComponentDependencyObservation[] {
+  const sourcePackageName = trivyPackageListSourceName(input.result, input.manifestPath);
+  return input.packages.flatMap((pkg) => {
+    const packageName = stringValue(pkg.Name) ?? packageNameFromPackageId(stringValue(pkg.ID));
+    if (packageName === undefined) {
+      return [];
+    }
+    const version = stringValue(pkg.Version);
+    return [
+      {
+        sourcePackageName,
+        packageName,
+        manifestPath: input.manifestPath,
+        ...(version === undefined ? {} : { version }),
+        relationship: stringValue(pkg.Relationship) ?? "package_manifest",
+        evidenceIds: evidenceIdsForPackage(
+          packageName,
+          input.evidenceIdsByPackage,
+          input.fallbackEvidenceIds,
+        ),
+        lineRange: { startLine: 1, endLine: 1 },
+      },
+    ];
+  });
+}
+
+function trivyPackageListSourceName(
+  result: Readonly<Record<string, unknown>>,
+  manifestPath: string,
+): string {
+  const target = normalizeTrivyTarget(stringValue(result.Target));
+  return target === undefined || target === manifestPath ? manifestPath : target;
 }
 
 function packageManifestPaths(manifest: Manifest): string[] {

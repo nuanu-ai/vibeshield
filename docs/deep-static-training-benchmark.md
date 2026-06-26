@@ -42,7 +42,7 @@ pnpm benchmark:deep \
   /Users/dmitry/.vibeshield/runs/20260625215333-ffdb9e36 \
   /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a \
   /Users/dmitry/.vibeshield/runs/20260626074403-64fceadf \
-  /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7
+  /Users/dmitry/.vibeshield/runs/20260626080155-e66839ff
 ```
 
 Run the curated ground-truth slice separately. Normal mode allows tracked
@@ -102,7 +102,7 @@ pnpm benchmark:score \
   /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 \
   /Users/dmitry/.vibeshield/runs/20260625215333-ffdb9e36 \
   /Users/dmitry/.vibeshield/runs/20260626074403-64fceadf \
-  /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7
+  /Users/dmitry/.vibeshield/runs/20260626080155-e66839ff
 ```
 
 ## Current Baseline
@@ -113,7 +113,7 @@ pnpm benchmark:score \
 | JS/TS | Juice Shop | `20260625215333-ffdb9e36` | 1789 | `dependency_usage_path=31`, `external_input_to_dangerous_operation=1741`, `ci_supply_chain_path=3`, `content_resource_exposure_path=13`, `smart_contract_risk_path=1` | `data_flow` 728/728, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
 | JS/TS local | Freeland | `20260625164008-81d5eb5a` | 164 | `external_input_to_dangerous_operation=163`, `ci_supply_chain_path=1` | `data_flow` 62/380, `language_support` checked 635/635 |
 | Python | Vulnerable-Flask-App | `20260626074403-64fceadf` | 48 | `external_input_to_dangerous_operation=48` | `data_flow` 24/36, `language_support` checked 2/2 |
-| Go | go-dvwa | `20260625164651-d290e2b7` | 88 | `dependency_usage_path=82`, `external_input_to_dangerous_operation=6` | `data_flow` 3/3, `dependency_usage` 82/82, `language_support` partial 54/55 due to one PHP file |
+| Go | go-dvwa | `20260626080155-e66839ff` | 7 | `dependency_usage_path=1`, `external_input_to_dangerous_operation=6` | `data_flow` 3/3, `dependency_usage` 1/1, `language_support` partial 54/55 due to one PHP file |
 
 The current WebGoat and Juice Shop runs classify generic external-input paths
 into sink-specific titles, including `SQL injection path`, `XXE path`, `Path
