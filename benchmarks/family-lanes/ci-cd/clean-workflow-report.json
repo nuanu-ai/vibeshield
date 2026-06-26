@@ -1,0 +1,49 @@
+{
+  "runId": "fixture-ci-cd-clean-workflow-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded CI/CD clean workflow fixture",
+      "localPath": "benchmarks/family-lanes/ci-cd/clean-workflow-repo",
+      "commitSha": "fixture-ci-cd-clean-workflow-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 330,
+      "sourceHash": "sha256:fixture-ci-cd-clean-workflow-v1",
+      "commitSha": "fixture-ci-cd-clean-workflow-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": [
+        {
+          "tool": "actionlint",
+          "version": "1.7.12"
+        }
+      ]
+    },
+    "verdict": "looks-ok-for-now",
+    "coverage": [
+      {
+        "check": "github-actions.actionlint",
+        "status": "checked"
+      }
+    ],
+    "findingSummary": {
+      "total": 0,
+      "bySeverity": {},
+      "byCategory": {}
+    },
+    "evidence": [],
+    "findings": [],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; this clean control should produce no GitHub Actions finding."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}

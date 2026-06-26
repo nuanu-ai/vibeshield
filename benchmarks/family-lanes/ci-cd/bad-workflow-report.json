@@ -1,0 +1,83 @@
+{
+  "runId": "fixture-ci-cd-bad-workflow-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded CI/CD bad workflow fixture",
+      "localPath": "benchmarks/family-lanes/ci-cd/bad-workflow-repo",
+      "commitSha": "fixture-ci-cd-bad-workflow-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 420,
+      "sourceHash": "sha256:fixture-ci-cd-bad-workflow-v1",
+      "commitSha": "fixture-ci-cd-bad-workflow-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": [
+        {
+          "tool": "actionlint",
+          "version": "1.7.12"
+        }
+      ]
+    },
+    "verdict": "not-ready-to-deploy",
+    "coverage": [
+      {
+        "check": "github-actions.actionlint",
+        "status": "checked"
+      }
+    ],
+    "findingSummary": {
+      "total": 1,
+      "bySeverity": {
+        "high": 1
+      },
+      "byCategory": {
+        "github-action": 1
+      }
+    },
+    "evidence": [
+      {
+        "id": "evidence.seeded-workflow-syntax",
+        "rawArtifactBlobSha256": "sha256:actionlint-workflow-syntax-fixture",
+        "filePath": ".github/workflows/ci.yml",
+        "startLine": 7,
+        "endLine": 7,
+        "snippet": "branches: [main]",
+        "snippetHash": "sha256:seeded-workflow-syntax",
+        "tool": "actionlint"
+      }
+    ],
+    "findings": [
+      {
+        "id": "finding.seeded-workflow-syntax",
+        "sourceTool": "actionlint",
+        "ruleId": "workflow-syntax",
+        "category": "github-action",
+        "severity": "high",
+        "confidence": "high",
+        "locations": [
+          {
+            "filePath": ".github/workflows/ci.yml",
+            "startLine": 7,
+            "endLine": 7
+          }
+        ],
+        "evidenceIds": ["evidence.seeded-workflow-syntax"],
+        "fingerprint": ".github/workflows/ci.yml:workflow-syntax:7",
+        "remediationKey": "github-actions-hardening"
+      }
+    ],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; the workflow syntax issue is synthetic."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}

@@ -124,6 +124,61 @@
       ]
     },
     {
+      "name": "Seeded CI/CD bad workflow fixture",
+      "language": "Fixture",
+      "split": "tuning",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/ci-cd/bad-workflow-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "directFindings": [
+        {
+          "id": "seeded-ci-cd.workflow-syntax",
+          "title": "Seeded invalid GitHub Actions workflow is reported by actionlint",
+          "checkFamily": "ci-cd",
+          "class": "GitHub Actions hardening",
+          "coverageArea": "github-actions.actionlint",
+          "matcher": {
+            "sourceTool": "actionlint",
+            "ruleId": "workflow-syntax",
+            "category": "github-action",
+            "filePathIncludes": ".github/workflows/ci.yml"
+          }
+        }
+      ],
+      "coverage": {
+        "github-actions.actionlint": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: an invalid GitHub Actions workflow is planted by construction, so this is a direct CI/CD recall item with a clean truth oracle."
+      ]
+    },
+    {
+      "name": "Seeded CI/CD clean workflow fixture",
+      "language": "Fixture",
+      "split": "held-out",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/ci-cd/clean-workflow-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "coverage": {
+        "github-actions.actionlint": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: the clean control workflow contains no planted GitHub Actions issue, so any direct CI/CD finding would score as a false positive."
+      ]
+    },
+    {
       "name": "WebGoat Java scored seed",
       "language": "Java",
       "split": "tuning",
