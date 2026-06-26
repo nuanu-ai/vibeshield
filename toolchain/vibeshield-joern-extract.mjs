@@ -426,15 +426,20 @@ async function routeFromSource(sources, method) {
 }
 
 function routesRegisteredByCalls(methods, callsByParent) {
+  const methodsByFullName = new Map();
   const methodsByName = new Map();
   for (const method of methods) {
-    const name = string(method.name);
-    if (name === undefined) {
+    if (!isIndexableMethod(method)) {
       continue;
     }
-    const current = methodsByName.get(name) ?? [];
-    current.push(method);
-    methodsByName.set(name, current);
+    methodsByFullName.set(method.fullName, method);
+    for (const name of methodLookupNames(method)) {
+      const current = methodsByName.get(name) ?? [];
+      if (!current.some((candidate) => candidate.fullName === method.fullName)) {
+        current.push(method);
+      }
+      methodsByName.set(name, current);
+    }
   }
 
   const routesByMethod = new Map();
@@ -445,7 +450,13 @@ function routesRegisteredByCalls(methods, callsByParent) {
         continue;
       }
       for (const handlerName of registration.handlerNames) {
-        const targets = methodsByName.get(handlerName) ?? [];
+        const targets = routeHandlerTargets(
+          handlerName,
+          call,
+          calls,
+          methodsByFullName,
+          methodsByName,
+        );
         if (targets.length !== 1) {
           continue;
         }
@@ -465,6 +476,45 @@ function routesRegisteredByCalls(methods, callsByParent) {
   return routesByMethod;
 }
 
+function isIndexableMethod(method) {
+  return string(method.fullName) !== undefined && normalizeRepoPath(method.fileName) !== undefined;
+}
+
+function methodLookupNames(method) {
+  return unique([string(method.name), symbolFromFullName(method.fullName)].filter(Boolean));
+}
+
+function symbolFromFullName(value) {
+  const fullName = string(value);
+  if (fullName === undefined) {
+    return undefined;
+  }
+  return string(fullName.split(":").at(-1));
+}
+
+function routeHandlerTargets(
+  handlerName,
+  routeCall,
+  siblingCalls,
+  methodsByFullName,
+  methodsByName,
+) {
+  const exactTargets = uniqueMethods(
+    siblingCalls
+      .filter((call) => call.lineNumber === routeCall.lineNumber)
+      .filter((call) => callMatchesHandlerName(call, handlerName))
+      .map((call) => methodsByFullName.get(string(call.resolvedMethod)))
+      .filter(Boolean),
+  );
+  return exactTargets.length > 0 ? exactTargets : (methodsByName.get(handlerName) ?? []);
+}
+
+function callMatchesHandlerName(call, handlerName) {
+  return (
+    string(call.name) === handlerName || symbolFromFullName(call.resolvedMethod) === handlerName
+  );
+}
+
 function routeRegistrationFromCall(call) {
   const code = string(call.code);
   if (code === undefined) {
@@ -478,8 +528,12 @@ function routeRegistrationFromCall(call) {
   if (route === undefined) {
     return undefined;
   }
-  const handlerText = code.slice(route.endIndex);
-  const handlerNames = unique(handlerIdentifiers(handlerText));
+  const handlerNames = unique(
+    callArguments(code)
+      .slice(1)
+      .flatMap(handlerNamesFromRouteArgument)
+      .filter((name) => !isIgnoredRouteHandlerName(name)),
+  );
   if (handlerNames.length === 0) {
     return undefined;
   }
@@ -566,20 +620,74 @@ function isJavaScriptRouteMethod(value) {
   );
 }
 
-function handlerIdentifiers(value) {
-  const withoutStrings = stripStringLiterals(value);
-  const names = [];
-  for (const match of withoutStrings.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
-    const name = match[1];
-    if (name !== undefined && !isIgnoredRouteHandlerName(name)) {
-      names.push(name);
-    }
+function callArguments(code) {
+  const open = code.indexOf("(");
+  const close = code.lastIndexOf(")");
+  if (open < 0 || close <= open) {
+    return [];
   }
-  return names;
+  const args = [];
+  let current = "";
+  let depth = 0;
+  let quote;
+  let escaped = false;
+  for (const char of code.slice(open + 1, close)) {
+    if (quote !== undefined) {
+      current += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === "(" || char === "[" || char === "{") {
+      depth += 1;
+      current += char;
+      continue;
+    }
+    if (char === ")" || char === "]" || char === "}") {
+      depth = Math.max(0, depth - 1);
+      current += char;
+      continue;
+    }
+    if (char === "," && depth === 0) {
+      args.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim() !== "") {
+    args.push(current.trim());
+  }
+  return args;
 }
 
-function stripStringLiterals(value) {
-  return value.replace(/(["'`])(?:\\.|(?!\1)[\s\S])*\1/g, "");
+function handlerNamesFromRouteArgument(argument) {
+  const trimmed = argument.trim();
+  if (trimmed === "" || /^["'`]/.test(trimmed) || trimmed.startsWith("{")) {
+    return [];
+  }
+  const direct = trimmed.match(/^([A-Za-z_$][\w$]*)$/)?.[1];
+  if (direct !== undefined) {
+    return [direct];
+  }
+  const asyncWrapped = trimmed.match(
+    /\basyncHandler\s*\(\s*(?:[A-Za-z_$][\w$]*\.)*([A-Za-z_$][\w$]*)\s*\(/,
+  )?.[1];
+  if (asyncWrapped !== undefined) {
+    return [asyncWrapped];
+  }
+  const factoryCall = trimmed.match(/^(?:[A-Za-z_$][\w$]*\.)*([A-Za-z_$][\w$]*)\s*\(/)?.[1];
+  return factoryCall === undefined ? [] : [factoryCall];
 }
 
 async function routeFromPythonSource(sources, method) {
@@ -1202,6 +1310,16 @@ function compareComponentUsageObservations(a, b) {
 
 function unique(values) {
   return [...new Set(values)];
+}
+
+function uniqueMethods(values) {
+  const byFullName = new Map();
+  for (const value of values) {
+    if (value?.fullName !== undefined) {
+      byFullName.set(value.fullName, value);
+    }
+  }
+  return [...byFullName.values()];
 }
 
 function string(value) {
