@@ -162,6 +162,88 @@ describe("deep benchmark score", () => {
     expect(summary.targetErrors.some((error) => error.includes("not scoreable"))).toBe(true);
   });
 
+  it("does not fail per-language targets for complete empty denominators", () => {
+    const summary = scoreBenchmarkReports(
+      {
+        version: 1,
+        targets: { maxTuningHeldOutGap: 1 },
+        repositories: [
+          {
+            name: "Scored fixture",
+            language: "Go",
+            split: "held-out",
+            match: { originUrl: "https://example.test/scored" },
+            directTruth: "complete",
+            directFpReview: "complete",
+            staticTruth: "complete",
+            staticSupportReview: "complete",
+            directFindings: [
+              {
+                id: "direct.secret",
+                title: "Secret is found",
+                coverageArea: "language_support",
+                matcher: { ruleId: "generic-api-key", category: "secret" },
+              },
+            ],
+            staticHypotheses: [
+              {
+                id: "static.sqli",
+                title: "SQL injection path",
+                coverageArea: "data_flow",
+                candidateFamily: "external_input_to_dangerous_operation",
+                matcher: { titleIncludes: "SQL injection", statusIn: ["statically_supported"] },
+              },
+            ],
+          },
+          {
+            name: "Empty direct fixture",
+            language: "Python",
+            split: "held-out",
+            match: { originUrl: "https://example.test/empty" },
+            directTruth: "complete",
+            directFpReview: "complete",
+            staticTruth: "complete",
+            staticSupportReview: "complete",
+          },
+        ],
+      },
+      [
+        report({
+          originUrl: "https://example.test/scored",
+          findings: [
+            finding("finding.secret", {
+              ruleId: "generic-api-key",
+              category: "secret",
+              filePath: "config.go",
+            }),
+          ],
+          candidates: [
+            candidate("candidate.sqli", {
+              family: "external_input_to_dangerous_operation",
+              title: "SQL injection path",
+            }),
+          ],
+          hypotheses: [
+            hypothesis("hypothesis.sqli", "candidate.sqli", {
+              status: "statically_supported",
+              title: "SQL injection path",
+            }),
+          ],
+        }),
+        report({ originUrl: "https://example.test/empty" }),
+      ],
+    );
+
+    const pythonAggregate = summary.aggregates.find((item) => item.key === "language:Python");
+    expect(pythonAggregate?.directPrecision.blockedBy).toEqual(["metric denominator is zero"]);
+    expect(summary.targetErrors.some((error) => error.includes("language:Python direct"))).toBe(
+      false,
+    );
+    expect(summary.targetErrors.some((error) => error.includes("all direct precision"))).toBe(
+      false,
+    );
+  });
+
   it("gates recall denominators on coverage loss instead of counting false misses", () => {
     const summary = scoreBenchmarkReports(
       {

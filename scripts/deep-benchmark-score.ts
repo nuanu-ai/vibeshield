@@ -209,6 +209,7 @@ const DEFAULT_TARGETS: ScoreTargets = {
   staticCandidateRecall: 0.8,
   maxTuningHeldOutGap: 0.1,
 };
+const ZERO_DENOMINATOR_REASON = "metric denominator is zero";
 
 const mainModulePath = process.argv[1] === undefined ? undefined : path.resolve(process.argv[1]);
 if (mainModulePath !== undefined && fileURLToPath(import.meta.url) === mainModulePath) {
@@ -309,8 +310,12 @@ export function scoreRepository(
   const staticHypotheses = scoreStaticHypotheses(report.assessment, expectation, coverage);
   const coverageErrors = coverageGateErrors(coverage, expectation);
   const scoreabilityErrors = [
-    ...direct.precision.blockedBy.map((reason) => `direct precision not scoreable: ${reason}`),
-    ...direct.recall.blockedBy.map((reason) => `direct recall not scoreable: ${reason}`),
+    ...direct.precision.blockedBy
+      .filter((reason) => !isZeroDenominatorReason(reason))
+      .map((reason) => `direct precision not scoreable: ${reason}`),
+    ...direct.recall.blockedBy
+      .filter((reason) => !isZeroDenominatorReason(reason))
+      .map((reason) => `direct recall not scoreable: ${reason}`),
     ...staticHypotheses.supportPrecision.blockedBy.map(
       (reason) => `static support precision not scoreable: ${reason}`,
     ),
@@ -579,29 +584,21 @@ function aggregateScores(repositories: ReadonlyArray<RepositoryScore>): Aggregat
 }
 
 function aggregateGroup(key: string, repositories: ReadonlyArray<RepositoryScore>): AggregateScore {
-  const directPrecisionBlockers = uniqueStrings(
-    repositories.flatMap((repository) =>
-      repository.direct.precision.blockedBy.map((reason) => `${repository.name}: ${reason}`),
-    ),
+  const directPrecisionBlockers = aggregateBlockers(
+    repositories,
+    (repository) => repository.direct.precision,
   );
-  const directRecallBlockers = uniqueStrings(
-    repositories.flatMap((repository) =>
-      repository.direct.recall.blockedBy.map((reason) => `${repository.name}: ${reason}`),
-    ),
+  const directRecallBlockers = aggregateBlockers(
+    repositories,
+    (repository) => repository.direct.recall,
   );
-  const supportPrecisionBlockers = uniqueStrings(
-    repositories.flatMap((repository) =>
-      repository.staticHypotheses.supportPrecision.blockedBy.map(
-        (reason) => `${repository.name}: ${reason}`,
-      ),
-    ),
+  const supportPrecisionBlockers = aggregateBlockers(
+    repositories,
+    (repository) => repository.staticHypotheses.supportPrecision,
   );
-  const candidateRecallBlockers = uniqueStrings(
-    repositories.flatMap((repository) =>
-      repository.staticHypotheses.candidateRecall.blockedBy.map(
-        (reason) => `${repository.name}: ${reason}`,
-      ),
-    ),
+  const candidateRecallBlockers = aggregateBlockers(
+    repositories,
+    (repository) => repository.staticHypotheses.candidateRecall,
   );
   const directTp = sum(repositories.map((repository) => repository.direct.tp));
   const directFp = sum(repositories.map((repository) => repository.direct.fp));
@@ -632,6 +629,17 @@ function aggregateGroup(key: string, repositories: ReadonlyArray<RepositoryScore
     ),
     staticCandidateRecall: ratio(candidateTp, candidateTp + candidateFn, candidateRecallBlockers),
   };
+}
+
+function aggregateBlockers(
+  repositories: ReadonlyArray<RepositoryScore>,
+  metricFor: (repository: RepositoryScore) => RatioMetric,
+): string[] {
+  return uniqueStrings(
+    repositories.flatMap((repository) =>
+      metricFor(repository).blockedBy.map((reason) => `${repository.name}: ${reason}`),
+    ),
+  ).filter((reason) => !isZeroDenominatorReason(reason));
 }
 
 function targetGateErrors(
@@ -700,12 +708,23 @@ function pushMetricTargetError(
   [target]: readonly [number],
 ): void {
   if (!metric.scoreable) {
+    if (key.startsWith("language:") && isZeroDenominatorMetric(metric)) {
+      return;
+    }
     errors.push(`${key} ${label} is not scoreable: ${metric.blockedBy.join("; ")}`);
     return;
   }
   if (metric.value === null || metric.value < target) {
     errors.push(`${key} ${label} below target: ${formatRatio(metric)} < ${formatMetric(target)}`);
   }
+}
+
+function isZeroDenominatorMetric(metric: RatioMetric): boolean {
+  return metric.blockedBy.length > 0 && metric.blockedBy.every(isZeroDenominatorReason);
+}
+
+function isZeroDenominatorReason(reason: string): boolean {
+  return reason === ZERO_DENOMINATOR_REASON || reason.endsWith(`: ${ZERO_DENOMINATOR_REASON}`);
 }
 
 function aggregateBySplit(
@@ -958,7 +977,7 @@ function ratio(
       denominator,
       value: null,
       scoreable: false,
-      blockedBy: ["metric denominator is zero"],
+      blockedBy: [ZERO_DENOMINATOR_REASON],
     };
   }
   return { numerator, denominator, value: numerator / denominator, scoreable: true, blockedBy: [] };

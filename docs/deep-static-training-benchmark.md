@@ -170,7 +170,8 @@ now include pinned static-truth slices curated from their READMEs and source:
 Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
 go-dvwa also has a complete direct-finding review for the current scored run.
-Java/JS direct truth, Java/JS static-support review, and Python direct truth are
+Python direct truth is complete as an empty direct Quick Scan denominator for
+the current report. Java/JS direct truth and Java/JS static-support review are
 still incomplete, so `pnpm benchmark:score` reports scoreability failures
 instead of pretending precision/support-precision can already be claimed.
 

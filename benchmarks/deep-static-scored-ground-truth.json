@@ -188,8 +188,8 @@
         "originUrl": "https://github.com/videvelopers/Vulnerable-Flask-App.git"
       },
       "expectedVerdict": "not-ready-to-deploy",
-      "directTruth": "incomplete",
-      "directFpReview": "incomplete",
+      "directTruth": "complete",
+      "directFpReview": "complete",
       "staticTruth": "complete",
       "staticSupportReview": "complete",
       "trueButUncuratedStatic": [
@@ -407,7 +407,8 @@
         }
       },
       "notes": [
-        "Static slice curated from the pinned README vulnerability list and the two Flask app files. Brute force and DoS are kept out of the static graph denominator because they require runtime policy/resource behavior validation."
+        "Static slice curated from the pinned README vulnerability list and the two Flask app files. Brute force and DoS are kept out of the static graph denominator because they require runtime policy/resource behavior validation.",
+        "Direct finding review is complete for run 20260626082052-aa2c42be: the report emits no direct Quick Scan findings, so Python direct metrics are not applicable at the per-language target layer and do not contribute FP/FN denominator."
       ]
     },
     {
