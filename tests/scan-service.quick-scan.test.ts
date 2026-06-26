@@ -993,6 +993,42 @@ describe("runScan quick scan vertical slice", () => {
     );
   });
 
+  it("suppresses packaged SyntaxHighlighter eval noise without disabling app eval findings", async () => {
+    const source = await writeLocalFixture(dir);
+    const syntaxHighlighterPath = "template/Karma Shop-doc/syntax-highlighter/scripts/shCore.js";
+    const sandbox = new FakeSandboxRuntime({
+      exec: fakeQuickScanExec(
+        manifestFor(source.path, [
+          { path: "README.md", size: 10, sha256: "readme-sha" },
+          { path: "src/app.js", size: 40, sha256: "app-sha" },
+          { path: syntaxHighlighterPath, size: 120, sha256: "syntax-highlighter-sha" },
+        ]),
+        [],
+        {
+          opengrepSarif: sarifReport([
+            sarifResult("vibeshield.javascript-eval", "src/app.js", 4),
+            sarifResult("vibeshield.javascript-eval", syntaxHighlighterPath, 17),
+          ]),
+        },
+      ),
+    });
+
+    const outcome = await runScan(deps(sandbox, new FilesystemBlobs(dir)), {
+      source,
+      runRoot: path.join(dir, "runs"),
+      toolchainImage: "test-toolchain:latest",
+    });
+
+    const evalFindings = outcome.assessment.findings.filter(
+      (finding) => finding.ruleId === "vibeshield.javascript-eval",
+    );
+    expect(evalFindings.map((finding) => finding.locations[0]?.filePath)).toEqual(["src/app.js"]);
+    expect(coverageByCheck(outcome.assessment.coverage).get("code-patterns.opengrep")).toEqual({
+      check: "code-patterns.opengrep",
+      status: "checked",
+    });
+  });
+
   it("blocks a green verdict when the Trivy DB refresh cannot prove freshness", async () => {
     const source = await writeLocalFixture(dir);
     const sandbox = new FakeSandboxRuntime({
@@ -1582,6 +1618,7 @@ function deepDeterministicProjection(assessment: SecurityAssessment) {
 }
 
 interface FakeScannerOverrides {
+  readonly opengrepSarif?: unknown;
   readonly actionlint?: {
     readonly exitCode: number;
     readonly stdout: string;
@@ -1631,7 +1668,7 @@ function fakeQuickScanExec(
     if (bin === "opengrep") {
       session.files.set(
         OPENGREP_REPORT_PATH,
-        jsonBytes({ version: "2.1.0", runs: [{ results: [] }] }),
+        jsonBytes(overrides.opengrepSarif ?? { version: "2.1.0", runs: [{ results: [] }] }),
       );
       return { exitCode: 0, stdout: "", stderr: "" };
     }
@@ -1853,6 +1890,26 @@ function defaultManifestFiles(): Manifest["files"] {
     { path: "README.md", size: 10, sha256: "readme-sha" },
     { path: "src/config.ts", size: 80, sha256: "config-sha" },
   ];
+}
+
+function sarifReport(results: ReadonlyArray<unknown>): unknown {
+  return { version: "2.1.0", runs: [{ results }] };
+}
+
+function sarifResult(ruleId: string, filePath: string, startLine: number): unknown {
+  return {
+    ruleId,
+    level: "warning",
+    message: { text: "Avoid eval on application-controlled data." },
+    locations: [
+      {
+        physicalLocation: {
+          artifactLocation: { uri: filePath },
+          region: { startLine },
+        },
+      },
+    ],
+  };
 }
 
 function deepManifestFiles(): Manifest["files"] {

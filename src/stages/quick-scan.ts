@@ -741,6 +741,9 @@ function normalizeStage(): StageDefinition {
           const startLine = positiveInt(candidate.startLine, 1);
           const ruleId = candidate.ruleId ?? `${scanner.tool}-finding`;
           const message = candidate.message ?? `${scanner.tool} reported ${ruleId}`;
+          if (shouldSuppressScannerCandidate(scanner.tool, ruleId, filePath)) {
+            continue;
+          }
           const snippet = `${ruleId}: ${message}`;
           const snippetHash = sha256Text(snippet);
           const fingerprint = stableId("fp", [
@@ -791,6 +794,26 @@ function normalizeStage(): StageDefinition {
       return success({ evidence, findings } satisfies NormalizeData);
     },
   };
+}
+
+function shouldSuppressScannerCandidate(tool: string, ruleId: string, filePath: string): boolean {
+  return (
+    tool === "opengrep" &&
+    ruleId === "vibeshield.javascript-eval" &&
+    isPackagedSyntaxHighlighterScript(filePath)
+  );
+}
+
+function isPackagedSyntaxHighlighterScript(filePath: string): boolean {
+  const normalized = filePath.toLowerCase().replaceAll("\\", "/");
+  const fileName = normalized.split("/").at(-1) ?? "";
+  return (
+    (normalized.includes("/syntax-highlighter/scripts/") ||
+      normalized.includes("syntax-highlighter/scripts/") ||
+      normalized.includes("/syntaxhighlighter/scripts/") ||
+      normalized.includes("syntaxhighlighter/scripts/")) &&
+    /^sh[a-z0-9_-]*\.js$/.test(fileName)
+  );
 }
 
 function correlateStage(): StageDefinition {
