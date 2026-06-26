@@ -42,7 +42,7 @@ pnpm benchmark:deep \
   /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 \
   /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
-  /Users/dmitry/.vibeshield/runs/20260626082005-29aeb41b
+  /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
 ```
 
 Run the curated ground-truth slice separately. Normal mode allows tracked
@@ -102,7 +102,7 @@ pnpm benchmark:score \
   /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 \
   /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
-  /Users/dmitry/.vibeshield/runs/20260626082005-29aeb41b
+  /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
 ```
 
 ## Current Baseline
@@ -113,7 +113,7 @@ pnpm benchmark:score \
 | JS/TS | Juice Shop | `20260626082921-4b7e2b26` | 616 | `dependency_usage_path=31`, `external_input_to_dangerous_operation=568`, `ci_supply_chain_path=3`, `content_resource_exposure_path=13`, `smart_contract_risk_path=1` | `data_flow` 732/732, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
 | JS/TS local | Freeland | `20260625164008-81d5eb5a` | 164 | `external_input_to_dangerous_operation=163`, `ci_supply_chain_path=1` | `data_flow` 62/380, `language_support` checked 635/635 |
 | Python | Vulnerable-Flask-App | `20260626082052-aa2c42be` | 24 | `external_input_to_dangerous_operation=24` | `data_flow` 24/36, `language_support` checked 2/2 |
-| Go | go-dvwa | `20260626082005-29aeb41b` | 3 | `dependency_usage_path=1`, `external_input_to_dangerous_operation=2` | `data_flow` 3/3, `dependency_usage` 1/1, `language_support` partial 54/55 due to one PHP file |
+| Go | go-dvwa | `20260626084326-6cff1ffd` | 3 | `dependency_usage_path=1`, `external_input_to_dangerous_operation=2` | `data_flow` 3/3, `dependency_usage` 1/1, `language_support` partial 54/55 due to one PHP file |
 
 The current WebGoat and Juice Shop rows are post-semantic-dedup reports: they
 keep the curated ground-truth slice covered while reducing the supported
@@ -169,9 +169,10 @@ Juice Shop include a small seed from the current curated slice. Python and Go
 now include pinned static-truth slices curated from their READMEs and source:
 Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
-Direct-finding truth, FP review, and static-support review are still incomplete,
-so `pnpm benchmark:score` reports scoreability failures instead of pretending
-precision/support-precision can already be claimed.
+go-dvwa also has a complete direct-finding review for the current scored run.
+Java/JS direct truth, Java/JS static-support review, and Python direct truth are
+still incomplete, so `pnpm benchmark:score` reports scoreability failures
+instead of pretending precision/support-precision can already be claimed.
 
 Current Juice Shop inventory audit result:
 

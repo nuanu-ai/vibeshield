@@ -418,10 +418,21 @@
         "originUrl": "https://github.com/sqreen/go-dvwa.git"
       },
       "expectedVerdict": "not-ready-to-deploy",
-      "directTruth": "incomplete",
-      "directFpReview": "incomplete",
+      "directTruth": "complete",
+      "directFpReview": "complete",
       "staticTruth": "complete",
       "staticSupportReview": "complete",
+      "trueButUncuratedDirect": [
+        {
+          "id": "go-dvwa.google-maps-key-duplicates",
+          "reason": "The same browser Google Maps API key is repeated across static HTML templates; one occurrence is kept as the recall-denominator item and the rest are true duplicate direct findings.",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "ruleId": "gcp-api-key",
+            "category": "secret"
+          }
+        }
+      ],
       "trueButUncuratedStatic": [
         {
           "id": "go-dvwa.protobuf-dependency",
@@ -430,6 +441,83 @@
             "family": "dependency_usage_path",
             "candidateReasonIncludes": "google.golang.org/protobuf",
             "statusIn": ["statically_supported"]
+          }
+        }
+      ],
+      "directFindings": [
+        {
+          "id": "go-dvwa.google-maps-key",
+          "title": "Static HTML templates embed a Google Maps browser API key",
+          "class": "Secret",
+          "coverageArea": "content_assets",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "ruleId": "gcp-api-key",
+            "category": "secret",
+            "filePathIncludes": "template/index.html"
+          }
+        },
+        {
+          "id": "go-dvwa.protobuf-cve",
+          "title": "go.sum pins google.golang.org/protobuf below the CVE-2024-24786 fixed version",
+          "class": "Dependency vulnerability",
+          "coverageArea": "dependency_usage",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "CVE-2024-24786",
+            "category": "dependency",
+            "metadata": {
+              "packageName": "google.golang.org/protobuf",
+              "installedVersion": "v1.24.0"
+            }
+          }
+        },
+        {
+          "id": "go-dvwa.checkout-action-v2",
+          "title": "Release workflow uses outdated actions/checkout@v2",
+          "class": "GitHub Actions hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "actionlint",
+            "ruleId": "action",
+            "category": "github-action",
+            "filePathIncludes": ".github/workflows/release.yml"
+          }
+        },
+        {
+          "id": "go-dvwa.dockerfile-latest-tag",
+          "title": "Dockerfile uses an unpinned latest-style base image tag",
+          "class": "IaC hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "DS-0001",
+            "category": "iac",
+            "filePathIncludes": "Dockerfile"
+          }
+        },
+        {
+          "id": "go-dvwa.dockerfile-root-user",
+          "title": "Runtime image does not drop the default root user",
+          "class": "IaC hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "DS-0002",
+            "category": "iac",
+            "filePathIncludes": "Dockerfile"
+          }
+        },
+        {
+          "id": "go-dvwa.dockerfile-no-healthcheck",
+          "title": "Dockerfile does not define a container healthcheck",
+          "class": "IaC hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "DS-0026",
+            "category": "iac",
+            "filePathIncludes": "Dockerfile"
           }
         }
       ],
@@ -473,7 +561,8 @@
         }
       },
       "notes": [
-        "Static slice curated from the pinned README. SQL injection and shell injection are implemented; NoSQL injection and SSRF are documented as unchecked future items and are not included in the denominator."
+        "Static slice curated from the pinned README. SQL injection and shell injection are implemented; NoSQL injection and SSRF are documented as unchecked future items and are not included in the denominator.",
+        "Direct finding review is complete for run 20260626084326-6cff1ffd: packaged SyntaxHighlighter eval noise is suppressed, repeated Google Maps key hits are treated as true duplicates, and Trivy/actionlint direct findings are line-pinned to go.sum, Dockerfile, and release.yml."
       ]
     }
   ]

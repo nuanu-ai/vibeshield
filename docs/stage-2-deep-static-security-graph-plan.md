@@ -182,13 +182,13 @@ Status:
   checked 7/7), Vulnerable-Flask-App
   (Python, run `20260626082052-aa2c42be`, 24, `data_flow` checked 24/36,
   `component_usage` checked 28/28, `dependency_usage` checked 0/0, `ci_iac`
-  checked 0/0), and go-dvwa (Go, run `20260626082005-29aeb41b`, 3 supported
+  checked 0/0), and go-dvwa (Go, run `20260626084326-6cff1ffd`, 3 supported
   static hypotheses including 1 dependency hypothesis, `data_flow` checked 3/3,
   `component_usage` checked 44/44, `dependency_usage` checked 1/1, `ci_iac`
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be /Users/dmitry/.vibeshield/runs/20260626082005-29aeb41b`.
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd`.
   The curated ground-truth slice passes in normal and strict benchmark modes:
   WebGoat covers 21/21 expectations and Juice Shop covers 39/39 expectations
   with no known gaps. The post-semantic-dedup WebGoat and Juice Shop reports
