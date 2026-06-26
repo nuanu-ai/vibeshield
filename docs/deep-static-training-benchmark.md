@@ -227,13 +227,13 @@ Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
 WebGoat, Juice Shop, and go-dvwa have complete direct-finding review for the
 current scored runs. Python direct truth is complete as an empty direct Quick
-Scan denominator for the current report. Juice Shop static-support review is
-complete for the current pinned run, while Java static-support review still has
-ambiguous supported traces to triage. Java/JS static truth remains incomplete
-until the scored denominator is promoted from coverage-style expectations to
-complete benchmark truth, so
+Scan denominator for the current report. WebGoat and Juice Shop static-support
+reviews are complete for the current pinned runs, including explicit false-support
+review for fixed-target WebWolf mail-client traces. Java/JS static truth remains
+incomplete until the scored denominator is promoted from coverage-style
+expectations to complete benchmark truth, so
 `pnpm benchmark:score` reports scoreability failures instead of pretending
-support precision or full static recall can already be claimed.
+full static recall can already be claimed.
 
 Current Juice Shop inventory audit result:
 

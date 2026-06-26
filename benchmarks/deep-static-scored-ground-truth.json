@@ -134,7 +134,7 @@
       "directTruth": "complete",
       "directFpReview": "complete",
       "staticTruth": "incomplete",
-      "staticSupportReview": "incomplete",
+      "staticSupportReview": "complete",
       "trueButUncuratedDirect": [
         {
           "id": "webgoat.additional-jwt-material",
@@ -473,8 +473,8 @@
       },
       "notes": [
         "Direct finding review is complete for run 20260626112711-237f9ec7: the prior minified underscore code-pattern hit is suppressed, repeated JWT/API-key/private-key lesson materials are treated as true duplicates, and XStream CVE rows are grouped as duplicate dependency findings.",
-        "Scored static truth now includes the curated coverage-style expectations from WebGoat Java ground truth slice; support review is still incomplete until remaining supported hypotheses are bucketed as true-but-uncurated or false support.",
-        "Additional supported traces that match scored static truth items are reviewed as true-but-uncurated variants; remaining review queue entries require separate triage before static support review can be complete."
+        "Scored static truth now includes the curated coverage-style expectations from WebGoat Java ground truth slice; static truth is still incomplete until the scored denominator is promoted from coverage-style expectations to complete benchmark truth.",
+        "Static support review is complete for run 20260626112711-237f9ec7: remaining lesson/static paths are reviewed as true-but-uncurated variants, and fixed WebWolf mail-client SSRF traces are reviewed as false support."
       ],
       "trueButUncuratedStatic": [
         {
@@ -714,6 +714,48 @@
           "matcher": {
             "family": "external_input_to_dangerous_operation",
             "titleIncludes": "Security misconfiguration",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.review.user-hash-access-control-path",
+          "reason": "The Missing Function Access Control user-hash lesson path is a true access-control trace but is not a separate recall-denominator item.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Access control",
+            "candidateReasonIncludes": "MissingFunctionACYourHash.java",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.review.webwolf-file-delete-path",
+          "reason": "The WebWolf file server path from multipart filename handling to filesystem deletion is a true file-access trace but is not a separate recall-denominator item.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Path traversal or file access",
+            "candidateReasonIncludes": "FileServer.java",
+            "statusIn": ["statically_supported"]
+          }
+        }
+      ],
+      "falseSupportStatic": [
+        {
+          "id": "webgoat.false-support.webwolf-introduction-mail-client",
+          "reason": "The WebWolf introduction mail endpoint posts to the configured WebWolf mail URL, not to a request-controlled target, so the SSRF classification is false support.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Server-side request forgery",
+            "candidateReasonIncludes": "MailAssignment.java",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.false-support.challenge7-mail-client",
+          "reason": "Challenge 7 posts reset email to the configured WebWolf mail URL; request data controls message content but not the HTTP target, so the SSRF classification is false support.",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Server-side request forgery",
+            "candidateReasonIncludes": "Assignment7.java",
             "statusIn": ["statically_supported"]
           }
         }
