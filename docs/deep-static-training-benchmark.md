@@ -41,8 +41,8 @@ stay reproducible on hosts where IPv6 egress is unavailable.
 ```bash
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-baseline.json \
-  /Users/dmitry/.vibeshield/runs/20260626111717-f13d9207 \
-  /Users/dmitry/.vibeshield/runs/20260626112128-65de980f \
+  /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
+  /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
   /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
   /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
@@ -54,8 +54,8 @@ Run the curated ground-truth slice separately. Normal mode allows tracked
 ```bash
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-ground-truth.json \
-  /Users/dmitry/.vibeshield/runs/20260626111717-f13d9207 \
-  /Users/dmitry/.vibeshield/runs/20260626112128-65de980f
+  /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
+  /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e
 ```
 
 To keep every known gap as a hard failure when future gaps are added:
@@ -64,8 +64,8 @@ To keep every known gap as a hard failure when future gaps are added:
 pnpm benchmark:deep \
   --strict-ground-truth \
   --expect benchmarks/deep-static-training-ground-truth.json \
-  /Users/dmitry/.vibeshield/runs/20260626111717-f13d9207 \
-  /Users/dmitry/.vibeshield/runs/20260626112128-65de980f
+  /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
+  /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e
 ```
 
 Audit the Juice Shop challenge inventory separately. This checks that every
@@ -102,8 +102,8 @@ until the scored truth file is complete:
 
 ```bash
 pnpm benchmark:score \
-  /Users/dmitry/.vibeshield/runs/20260626111717-f13d9207 \
-  /Users/dmitry/.vibeshield/runs/20260626112128-65de980f \
+  /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
+  /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
   /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
 ```
@@ -112,15 +112,15 @@ pnpm benchmark:score \
 
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |
 | --- | --- | --- | ---: | --- | --- |
-| Java | WebGoat | `20260626111717-f13d9207` | 314 | `dependency_usage_path=1`, `external_input_to_dangerous_operation=313` | `data_flow` 356/356, `dependency_usage` 36/36, `language_support` checked 496/496 |
-| JS/TS | Juice Shop | `20260626112128-65de980f` | 470 | `dependency_usage_path=7`, `external_input_to_dangerous_operation=446`, `ci_supply_chain_path=3`, `content_resource_exposure_path=13`, `smart_contract_risk_path=1` | `data_flow` 583/583, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
+| Java | WebGoat | `20260626112711-237f9ec7` | 310 | `dependency_usage_path=1`, `external_input_to_dangerous_operation=309` | `data_flow` 352/352, `dependency_usage` 36/36, `language_support` checked 496/496 |
+| JS/TS | Juice Shop | `20260626112812-9d82f57e` | 432 | `dependency_usage_path=7`, `external_input_to_dangerous_operation=408`, `ci_supply_chain_path=3`, `content_resource_exposure_path=13`, `smart_contract_risk_path=1` | `data_flow` 527/527, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
 | JS/TS local | Freeland | `20260625164008-81d5eb5a` | 164 | `external_input_to_dangerous_operation=163`, `ci_supply_chain_path=1` | `data_flow` 62/380, `language_support` checked 635/635 |
 | Python | Vulnerable-Flask-App | `20260626082052-aa2c42be` | 24 | `external_input_to_dangerous_operation=24` | `data_flow` 24/36, `language_support` checked 2/2 |
 | Go | go-dvwa | `20260626084326-6cff1ffd` | 3 | `dependency_usage_path=1`, `external_input_to_dangerous_operation=2` | `data_flow` 3/3, `dependency_usage` 1/1, `language_support` partial 54/55 due to one PHP file |
 
 The current WebGoat and Juice Shop rows are post-semantic-dedup reports: they
 keep the curated ground-truth slice covered while reducing the supported
-hypothesis review queue from 674 to 314 for WebGoat and from 1797 to 470 for
+hypothesis review queue from 674 to 310 for WebGoat and from 1797 to 432 for
 Juice Shop. Dependency usage paths now merge duplicate advisory-specific
 component paths into one semantic component-use hypothesis while retaining the
 linked direct finding ids, and LLM trust classification ignores unrelated LLM
@@ -134,6 +134,10 @@ Generic JWT decode/verify/sign helpers no longer become `jwt_token_trust` sinks
 unless the surrounding context exposes explicit JWT challenge or weak-token
 semantics, and coupon encoding sinks require coupon/Z85/discount context rather
 than any generic decode in a shared security helper.
+CSRF state-change sinks require explicit CSRF context or browser
+cookie/session context, so ordinary JSON or bearer-token API mutations no longer
+become CSRF attack-path hypotheses only because they call `push`, `update`,
+`write`, `create`, or similar mutators.
 
 The current WebGoat and Juice Shop runs classify generic external-input paths
 into sink-specific titles, including `SQL injection path`, `XXE path`, `Path

@@ -469,6 +469,15 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(graph.flows).toHaveLength(1);
   });
 
+  it("does not mark non-cookie API mutations as CSRF sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", bearerApiMutationSlices())] }),
+    );
+
+    expect(graph.nodes.filter((node) => node.kind === "Sink")).toEqual([]);
+    expect(graph.flows).toHaveLength(0);
+  });
+
   it("marks Python web handler calls to dangerous sinks", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", pythonWebSinkSlices())] }),
@@ -2104,6 +2113,36 @@ function csrfStateChangeSlices() {
               code: "if (req.body.csrfToken === req.session.csrfToken) { profileStore.save(req.body) }",
               label: "CALL",
               lineNumber: 18,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function bearerApiMutationSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "routes/orders.ts::program:addItem",
+        fileName: "routes/orders.ts",
+        lineNumber: 19,
+        boundary: {
+          boundaryType: "express",
+          routeOrName: "/api/orders/items",
+          method: "POST",
+          sourceName: "req.body.item",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "push",
+              resolvedMethod: "Array.push",
+              code: "items.push(req.body.item)",
+              label: "CALL",
+              lineNumber: 25,
             },
           },
         ],

@@ -2100,10 +2100,17 @@ function isCsrfSensitiveStateChange(
   if (hint === undefined || !isStateChangingHttpMethod(hint.method)) {
     return false;
   }
-  if (hasStrongCsrfControl(entityContext(entity, candidate))) {
+  const context = entityContext(entity, candidate);
+  if (!hasCsrfRiskContext(context) || hasStrongCsrfControl(context)) {
     return false;
   }
   return CSRF_STATE_CHANGE_PATTERN.test(lower) || CSRF_STATE_CHANGE_PATTERN.test(methodName);
+}
+
+function hasCsrfRiskContext(context: string): boolean {
+  return /\bcsrf\b|(?:req|request)\s*\.\s*cookies?\b|res\s*\.\s*cookie\b|\b(?:cookie|session|jsessionid)\b/i.test(
+    context,
+  );
 }
 
 function accessControlLabel(
