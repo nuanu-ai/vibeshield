@@ -94,7 +94,7 @@ const SQL_METHOD_NAMES = new Set([
 const SQL_TEXT_PATTERN =
   /\b(?:select\s+.+\s+from|insert\s+into|update\s+[\w".`[\]]+\s+set|delete\s+from|drop\s+table|alter\s+table|create\s+table)\b/;
 const HTML_TEXT_PATTERN =
-  /(?:<\s*(?:script|iframe|img|svg|a|div|span|p|br|hr|input|textarea|template)\b|&lt;\s*(?:script|iframe|img|svg|a|div|span|p|br|hr|input|textarea|template)\b|\[(?:innerHTML|outerHTML)\])/i;
+  /(?:<\s*(?:script|iframe|img|svg|a|div|span|p|h[1-6]|br|hr|input|textarea|template)\b|&lt;\s*(?:script|iframe|img|svg|a|div|span|p|h[1-6]|br|hr|input|textarea|template)\b|\[(?:innerHTML|outerHTML)\])/i;
 const RESOURCE_IDENTIFIER_PATTERN =
   /\b(?:user|account|profile|basket|cart|order|customer|tenant|owner|role|admin|invoice|document|record|resource)[\w$-]*(?:id|name|email|hash)?\b|\b(?:id|uid|bid|cid|email|username|orderid|userid|basketid|user_id|basket_id|order_id)\b/i;
 const ACCESS_CONTROL_RESOURCE_PATTERN =
@@ -160,6 +160,11 @@ const NOSQL_METHOD_NAMES = new Set([
 interface SinkClassification {
   readonly label: string;
   readonly sinkType: string;
+}
+
+interface EntitySemanticSinkClassification extends SinkClassification {
+  readonly semantic: string;
+  readonly properties?: Readonly<Record<string, unknown>>;
 }
 
 export function composeProgramAnalysisGraph(
@@ -523,38 +528,35 @@ function addEntitySemanticSinks(
   entity: ObservedEntity,
   owner: SecurityGraphNode,
 ): void {
-  const indicators = weakCryptoVerifierIndicators(entity);
-  if (indicators.length === 0) {
-    return;
-  }
-  const label = "weak crypto indicator verifier";
-  const sink = addNode(builder, graphVersion, {
-    kind: "Sink",
-    stableKey: `Sink:crypto_weakness:${label}:${entity.fullName}:${entity.repoPath}:${entity.lineRange.startLine}`,
-    label,
-    repoPath: entity.repoPath,
-    lineRange: entity.lineRange,
-    symbol: label,
-    properties: {
-      sinkType: "crypto_weakness",
-      semantic: "weak_crypto_indicator_verifier",
-      indicators,
-    },
-    evidenceIds: [entity.evidenceId],
-    producerVersion: entity.producerVersion,
-  });
+  for (const classification of entitySemanticSinkClassifications(entity)) {
+    const sink = addNode(builder, graphVersion, {
+      kind: "Sink",
+      stableKey: `Sink:${classification.sinkType}:${classification.semantic}:${classification.label}:${entity.fullName}:${entity.repoPath}:${entity.lineRange.startLine}`,
+      label: classification.label,
+      repoPath: entity.repoPath,
+      lineRange: entity.lineRange,
+      symbol: classification.label,
+      properties: {
+        sinkType: classification.sinkType,
+        semantic: classification.semantic,
+        ...(classification.properties ?? {}),
+      },
+      evidenceIds: [entity.evidenceId],
+      producerVersion: entity.producerVersion,
+    });
 
-  addEdge(builder, graphVersion, {
-    kind: "flows_to",
-    stableKey: `flows_to:${owner.id}:${sink.id}:weak-crypto-indicator-verifier`,
-    fromNodeId: owner.id,
-    toNodeId: sink.id,
-    properties: {
-      reason: "weak_crypto_indicator_verifier",
-    },
-    evidenceIds: [entity.evidenceId],
-    producerVersion: entity.producerVersion,
-  });
+    addEdge(builder, graphVersion, {
+      kind: "flows_to",
+      stableKey: `flows_to:${owner.id}:${sink.id}:${classification.semantic}`,
+      fromNodeId: owner.id,
+      toNodeId: sink.id,
+      properties: {
+        reason: classification.semantic,
+      },
+      evidenceIds: [entity.evidenceId],
+      producerVersion: entity.producerVersion,
+    });
+  }
 }
 
 function addJavascriptSocketEventBoundary(
@@ -1089,6 +1091,66 @@ function isCryptographicOperation(
   );
 }
 
+function entitySemanticSinkClassifications(
+  entity: ObservedEntity,
+): EntitySemanticSinkClassification[] {
+  const classifications: EntitySemanticSinkClassification[] = [];
+  const indicators = weakCryptoVerifierIndicators(entity);
+  if (indicators.length > 0) {
+    classifications.push({
+      label: "weak crypto indicator verifier",
+      sinkType: "crypto_weakness",
+      semantic: "weak_crypto_indicator_verifier",
+      properties: { indicators },
+    });
+  }
+  if (isReflectedRawHtmlOutput(entity)) {
+    classifications.push({
+      label: "reflected HTML output",
+      sinkType: "cross_site_scripting",
+      semantic: "reflected_raw_html_output",
+    });
+  }
+  if (isSensitiveServerContentExposure(entity)) {
+    classifications.push({
+      label: "hidden admin content exposure",
+      sinkType: "hidden_content_exposure",
+      semantic: "sensitive_server_content_exposure",
+    });
+  }
+  if (isWeakAuthenticationDecision(entity)) {
+    classifications.push({
+      label: "authentication bypass",
+      sinkType: "authentication_bypass",
+      semantic: "weak_authentication_decision",
+    });
+  }
+  if (isFileUploadHandling(entity)) {
+    classifications.push({
+      label: "file upload handling",
+      sinkType: "file_upload_validation",
+      semantic: "file_upload_handling",
+    });
+  }
+  return uniqueEntitySemanticSinks(classifications);
+}
+
+function uniqueEntitySemanticSinks(
+  classifications: ReadonlyArray<EntitySemanticSinkClassification>,
+): EntitySemanticSinkClassification[] {
+  const seen = new Set<string>();
+  const uniqueClassifications: EntitySemanticSinkClassification[] = [];
+  for (const classification of classifications) {
+    const key = `${classification.sinkType}:${classification.semantic}:${classification.label}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    uniqueClassifications.push(classification);
+  }
+  return uniqueClassifications;
+}
+
 function weakCryptoVerifierIndicators(entity: ObservedEntity): string[] {
   const context = entitySemanticContext(entity);
   if (!hasWeakCryptoVerifierContext(context)) {
@@ -1102,6 +1164,94 @@ function weakCryptoVerifierIndicators(entity: ObservedEntity): string[] {
 
 function entitySemanticContext(entity: ObservedEntity): string {
   return [entity.fullName, entity.repoPath, JSON.stringify(entity.slice)].join("\n").toLowerCase();
+}
+
+function isReflectedRawHtmlOutput(entity: ObservedEntity): boolean {
+  if (!isHttpBoundary(entity)) {
+    return false;
+  }
+  const context = entitySemanticContext(entity);
+  return (
+    HTML_TEXT_PATTERN.test(context) &&
+    /\b(?:return|send|write|response|make_response)\b/i.test(context) &&
+    hasRawRequestControlledOutput(context, entity)
+  );
+}
+
+function hasRawRequestControlledOutput(context: string, entity: ObservedEntity): boolean {
+  const names = requestControlledNames(entity);
+  return names.some((name) => {
+    const escaped = escapeRegExp(name.toLowerCase());
+    return new RegExp(
+      String.raw`(?:\+|\$\{|%\s*|\{\s*)${escaped}\b|\b${escaped}\s*(?:\+|%|,|\})`,
+      "i",
+    ).test(context);
+  });
+}
+
+function isSensitiveServerContentExposure(entity: ObservedEntity): boolean {
+  if (!isHttpBoundary(entity)) {
+    return false;
+  }
+  const context = entitySemanticContext(entity);
+  return (
+    /\b(?:admin|private|secret|internal|support|debug)\b/.test(context) &&
+    /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(context) &&
+    (hasExternalRequestSource(entity) ||
+      requestControlledNames(entity).length > 0 ||
+      /\brequest\s*\./.test(context))
+  );
+}
+
+function isWeakAuthenticationDecision(entity: ObservedEntity): boolean {
+  if (!isHttpBoundary(entity)) {
+    return false;
+  }
+  const context = entitySemanticContext(entity);
+  if (!/\b(?:login|signin|authenticate|authentication|auth)\b/.test(context)) {
+    return false;
+  }
+  if (
+    !/\b(?:user|username|email|login)\b/.test(context) ||
+    !/\b(?:password|passwd|pwd)\b/.test(context)
+  ) {
+    return false;
+  }
+  return (
+    /\b(?:if|when|return)\b[\s\S]{0,200}(?:["'`][^"'`]{3,}["'`]\s+(?:in|==|===|equals)|(?:in|==|===|equals)\s*["'`][^"'`]{3,}["'`])/i.test(
+      context,
+    ) || /\b(?:default|hardcoded|test|admin123|password123|changeme)\b/.test(context)
+  );
+}
+
+function isFileUploadHandling(entity: ObservedEntity): boolean {
+  if (!isHttpBoundary(entity)) {
+    return false;
+  }
+  if (hasClassifiedCallSink(entity, "file_upload_validation")) {
+    return false;
+  }
+  const context = entitySemanticContext(entity);
+  return (
+    /\b(?:upload|multipart|request\.files|files\s*\[|file\.filename|secure_filename|originalname|mimetype)\b/i.test(
+      context,
+    ) &&
+    /\b(?:save|secure_filename|request\.files|file\.filename|originalname|mimetype)\b/i.test(
+      context,
+    )
+  );
+}
+
+function hasClassifiedCallSink(entity: ObservedEntity, sinkType: string): boolean {
+  return asObjectArray(entity.slice.usages).some((usage) => {
+    const target = asObject(usage.targetObj);
+    const name = stringValue(target.resolvedMethod) ?? stringValue(target.name);
+    return (
+      name !== undefined &&
+      stringValue(target.label) === "CALL" &&
+      classifySinkCall(target, name, entity)?.sinkType === sinkType
+    );
+  });
 }
 
 function hasWeakCryptoVerifierContext(context: string): boolean {
@@ -1937,9 +2087,7 @@ function hasRequestControlledResourceIdentifier(
   entity: ObservedEntity,
   candidate: string,
 ): boolean {
-  const parameterNames = asObjectArray(entity.slice.parameters)
-    .map((parameter) => stringValue(parameter.name))
-    .filter((name): name is string => name !== undefined);
+  const parameterNames = requestControlledNames(entity);
   return (
     parameterNames.some((name) => RESOURCE_IDENTIFIER_PATTERN.test(name)) ||
     /\b(?:req|request|ctx)\s*(?:\.\s*(?:params|body|query|headers))?\s*(?:\.\s*|\[\s*['"])(?:id|uid|bid|cid|userId|userid|user_id|basketId|basketid|basket_id|orderId|orderid|order_id|accountId|account_id|profileId|profile_id|ownerId|owner_id|email|username)\b/i.test(
@@ -1950,6 +2098,42 @@ function hasRequestControlledResourceIdentifier(
     ) ||
     (hasExternalRequestSource(entity) && hasHandlerLocalResourceIdentifier(candidate))
   );
+}
+
+function requestControlledNames(entity: ObservedEntity): string[] {
+  const hint = boundaryHint(entity.slice.boundary);
+  return unique(
+    [
+      ...asObjectArray(entity.slice.parameters)
+        .map((parameter) => stringValue(parameter.name))
+        .filter((name): name is string => name !== undefined)
+        .filter((name) => !isFrameworkParameterName(name)),
+      ...routeParameterNames(hint?.routeOrName),
+      ...sourceNameLeafs(hint?.sourceName),
+    ].map((name) => name.toLowerCase()),
+  );
+}
+
+function routeParameterNames(routeOrName: string | undefined): string[] {
+  if (routeOrName === undefined) {
+    return [];
+  }
+  const names = [
+    ...routeOrName.matchAll(/<(?:(?:string|int|float|path|uuid):)?([A-Za-z_][\w]*)>/g),
+    ...routeOrName.matchAll(/:([A-Za-z_][\w]*)/g),
+    ...routeOrName.matchAll(/\{([A-Za-z_][\w]*)\}/g),
+  ]
+    .map((match) => match[1])
+    .filter((name): name is string => name !== undefined);
+  return unique(names);
+}
+
+function sourceNameLeafs(sourceName: string | undefined): string[] {
+  if (sourceName === undefined) {
+    return [];
+  }
+  const leaf = sourceName.match(/[.[\]]([A-Za-z_][\w]*)['"]?\]?$/)?.[1];
+  return leaf === undefined || isFrameworkParameterName(leaf) ? [] : [leaf];
 }
 
 function hasExternalRequestSource(entity: ObservedEntity): boolean {

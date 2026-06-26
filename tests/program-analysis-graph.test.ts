@@ -449,6 +449,24 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(graph.flows).toHaveLength(5);
   });
 
+  it("marks Python web handler semantic sinks when the operation is visible in handler code", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", pythonWebSemanticSinkSlices())] }),
+    );
+    const sinks = graph.nodes
+      .filter((node) => node.kind === "Sink")
+      .map((node) => [node.label, node.properties.sinkType])
+      .sort();
+
+    expect(sinks).toEqual([
+      ["authentication bypass", "authentication_bypass"],
+      ["file upload handling", "file_upload_validation"],
+      ["hidden admin content exposure", "hidden_content_exposure"],
+      ["reflected HTML output", "cross_site_scripting"],
+    ]);
+    expect(graph.flows).toHaveLength(4);
+  });
+
   it("marks JavaScript web handler calls to NoSQL, XML, file, upload, and template sinks", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", javascriptSpecialSinkSlices())] }),
@@ -1968,6 +1986,84 @@ function pythonWebSinkSlices() {
             },
           },
         ],
+      },
+    ],
+  };
+}
+
+function pythonWebSemanticSinkSlices() {
+  return {
+    objectSlices: [
+      {
+        code: [
+          "def welcome2(name):",
+          "    data = '<h1>Welcome %s</h1>' % name",
+          "    return data",
+        ].join("\n"),
+        fullName: "app.py::program:welcome2",
+        fileName: "app.py",
+        lineNumber: 35,
+        boundary: {
+          boundaryType: "python-web",
+          routeOrName: "/welcome2/<string:name>",
+          method: "GET",
+          sourceName: "request",
+        },
+        usages: [],
+      },
+      {
+        code: [
+          "def get_admin_mail(control):",
+          "    if control == 'admin':",
+          "        return 'root.admin@example.test'",
+        ].join("\n"),
+        fullName: "app.py::program:get_admin_mail",
+        fileName: "app.py",
+        lineNumber: 104,
+        boundary: {
+          boundaryType: "python-web",
+          routeOrName: "/get_admin_mail/<string:control>",
+          method: "GET",
+          sourceName: "request",
+        },
+        usages: [],
+      },
+      {
+        code: [
+          "def login():",
+          "    username = request.form['username']",
+          "    passwd = request.form['passwd']",
+          "    if 'test' in username and 'test' in passwd:",
+          "        return 'success'",
+        ].join("\n"),
+        fullName: "app.py::program:login",
+        fileName: "app.py",
+        lineNumber: 164,
+        boundary: {
+          boundaryType: "python-web",
+          routeOrName: "/login",
+          method: "POST",
+          sourceName: "request",
+        },
+        usages: [],
+      },
+      {
+        code: [
+          "def uploadfile():",
+          "    file = request.files['file']",
+          "    filename = secure_filename(file.filename)",
+          "    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))",
+        ].join("\n"),
+        fullName: "app.py::program:uploadfile",
+        fileName: "app.py",
+        lineNumber: 204,
+        boundary: {
+          boundaryType: "python-web",
+          routeOrName: "/upload",
+          method: "POST",
+          sourceName: "request",
+        },
+        usages: [],
       },
     ],
   };

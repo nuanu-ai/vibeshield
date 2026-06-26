@@ -241,6 +241,8 @@ function candidateTitle(
       return "Server-side template injection path: external input reaches template rendering";
     case "code_execution":
       return "Code execution path: external input reaches command or code execution";
+    case "hidden_content_exposure":
+      return "Hidden content/resource exposure path: external input reaches hidden content";
     case "server_side_request":
       return "Server-side request forgery path: external input reaches a server-side HTTP client";
     case "outbound_http":

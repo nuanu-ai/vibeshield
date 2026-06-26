@@ -254,6 +254,11 @@ describe("correlateGraphRules candidates", () => {
         title:
           "Authentication bypass path: request-controlled verification data reaches account verification logic",
       },
+      {
+        boundaryLabel: "/admin/email/<token>",
+        sinkType: "hidden_content_exposure",
+        title: "Hidden content/resource exposure path: external input reaches hidden content",
+      },
     ]) {
       const candidates = correlateGraphRules({
         graph: graphFixture({ boundaryLabel, sinkType }),
