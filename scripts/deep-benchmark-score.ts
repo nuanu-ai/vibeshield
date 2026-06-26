@@ -55,6 +55,7 @@ type Completeness = "complete" | "incomplete";
 export interface DirectTruthItem {
   readonly id: string;
   readonly title: string;
+  readonly checkFamily?: string;
   readonly class?: string;
   readonly cwe?: string;
   readonly coverageArea: string;
@@ -65,6 +66,7 @@ export interface DirectTruthItem {
 export interface StaticTruthItem {
   readonly id: string;
   readonly title: string;
+  readonly checkFamily?: string;
   readonly class?: string;
   readonly cwe?: string;
   readonly coverageArea: string;
@@ -157,6 +159,7 @@ export interface DirectScore {
   readonly precision: RatioMetric;
   readonly recall: RatioMetric;
   readonly f05: RatioMetric;
+  readonly families: ReadonlyArray<DirectFamilyScore>;
 }
 
 export interface StaticScore {
@@ -176,6 +179,27 @@ export interface StaticScore {
   readonly unreviewedSupportedIds: ReadonlyArray<string>;
   readonly candidateRecall: RatioMetric;
   readonly supportPrecision: RatioMetric;
+  readonly families: ReadonlyArray<StaticFamilyScore>;
+}
+
+export interface DirectFamilyScore {
+  readonly family: string;
+  readonly tp: number;
+  readonly fp: number;
+  readonly fn: number;
+  readonly precision: RatioMetric;
+  readonly recall: RatioMetric;
+  readonly f05: RatioMetric;
+}
+
+export interface StaticFamilyScore {
+  readonly family: string;
+  readonly candidateTp: number;
+  readonly candidateFn: number;
+  readonly supportedTp: number;
+  readonly falseSupport: number;
+  readonly supportPrecision: RatioMetric;
+  readonly candidateRecall: RatioMetric;
 }
 
 export interface StaticSupportReviewSummary {
@@ -450,6 +474,21 @@ interface MutableStaticSupportReviewGroup {
   readonly sampleCandidateReasons: string[];
 }
 
+interface MutableDirectFamilyCounter {
+  readonly family: string;
+  tp: number;
+  fp: number;
+  fn: number;
+}
+
+interface MutableStaticFamilyCounter {
+  readonly family: string;
+  candidateTp: number;
+  candidateFn: number;
+  supportedTp: number;
+  falseSupport: number;
+}
+
 export function scoreRepository(
   report: DeepReportJson,
   expectation: ScoredRepositoryExpectation,
@@ -510,6 +549,7 @@ function scoreDirectFindings(
   const fnIds: string[] = [];
   const coverageLossIds: string[] = [];
   const outOfStaticScopeIds: string[] = [];
+  const familyCounters = new Map<string, MutableDirectFamilyCounter>();
 
   for (const item of expectation.directFindings ?? []) {
     if (item.inStaticScope === false) {
@@ -522,15 +562,19 @@ function scoreDirectFindings(
       coverageLossIds.push(item.id);
       continue;
     }
+    const family = directFamilyForTruth(item);
+    const familyCounter = directFamilyCounter(familyCounters, family);
     const matchIndex = [...unusedFindingIndexes].find((index) =>
       matchesFinding(findings[index], item.matcher),
     );
     if (matchIndex === undefined) {
       fn += 1;
       fnIds.push(item.id);
+      familyCounter.fn += 1;
       continue;
     }
     tp += 1;
+    familyCounter.tp += 1;
     unusedFindingIndexes.delete(matchIndex);
   }
 
@@ -560,18 +604,18 @@ function scoreDirectFindings(
     }
     if (directPrecisionBlockedBy.length === 0) {
       fp += 1;
+      directFamilyCounter(familyCounters, directFamilyForFinding(finding)).fp += 1;
     } else {
       unreviewedFindings += 1;
       unreviewedFindingIds.push(finding.id);
+      directFamilyCounter(familyCounters, directFamilyForFinding(finding));
     }
   }
 
+  const directRecallBlockedBy =
+    expectation.directTruth === "complete" ? [] : ["direct ground truth is incomplete"];
   const precision = ratio(tp, tp + fp, directPrecisionBlockedBy);
-  const recall = ratio(
-    tp,
-    tp + fn,
-    expectation.directTruth === "complete" ? [] : ["direct ground truth is incomplete"],
-  );
+  const recall = ratio(tp, tp + fn, directRecallBlockedBy);
   const f05 = fScore(precision, recall, 0.5);
 
   return {
@@ -589,6 +633,7 @@ function scoreDirectFindings(
     precision,
     recall,
     f05,
+    families: directFamilyScores(familyCounters, directPrecisionBlockedBy, directRecallBlockedBy),
   };
 }
 
@@ -612,6 +657,7 @@ function scoreStaticHypotheses(
   const coverageLossIds: string[] = [];
   const outOfGraphScopeIds: string[] = [];
   const falseContradictionIds: string[] = [];
+  const familyCounters = new Map<string, MutableStaticFamilyCounter>();
 
   for (const item of expectation.staticHypotheses ?? []) {
     if (item.inGraphScope === false) {
@@ -624,11 +670,15 @@ function scoreStaticHypotheses(
       coverageLossIds.push(item.id);
       continue;
     }
+    const family = staticFamilyForTruth(item);
+    const familyCounter = staticFamilyCounter(familyCounters, family);
     if (candidates.some((candidate) => matchesCandidate(candidate, item))) {
       candidateTp += 1;
+      familyCounter.candidateTp += 1;
     } else {
       candidateFn += 1;
       candidateFnIds.push(item.id);
+      familyCounter.candidateFn += 1;
     }
     const contradiction = hypotheses.find(
       (hypothesis) =>
@@ -662,6 +712,7 @@ function scoreStaticHypotheses(
     );
     if (hypothesis !== undefined) {
       supportedTp += 1;
+      staticFamilyCounter(familyCounters, staticFamilyForTruth(item)).supportedTp += 1;
       usedSupportedIds.add(hypothesis.id);
     }
   }
@@ -680,17 +731,23 @@ function scoreStaticHypotheses(
     }
     if (supportPrecisionBlockedBy.length === 0) {
       falseSupport += 1;
+      staticFamilyCounter(
+        familyCounters,
+        staticFamilyForSupportedHypothesis(hypothesis, candidatesById),
+      ).falseSupport += 1;
     } else {
       unreviewedSupported += 1;
       unreviewedSupportedIds.push(hypothesis.id);
+      staticFamilyCounter(
+        familyCounters,
+        staticFamilyForSupportedHypothesis(hypothesis, candidatesById),
+      );
     }
   }
 
-  const candidateRecall = ratio(
-    candidateTp,
-    candidateTp + candidateFn,
-    expectation.staticTruth === "complete" ? [] : ["static ground truth is incomplete"],
-  );
+  const candidateRecallBlockedBy =
+    expectation.staticTruth === "complete" ? [] : ["static ground truth is incomplete"];
+  const candidateRecall = ratio(candidateTp, candidateTp + candidateFn, candidateRecallBlockedBy);
   const supportPrecision = ratio(
     supportedTp,
     supportedTp + falseSupport,
@@ -714,7 +771,92 @@ function scoreStaticHypotheses(
     unreviewedSupportedIds,
     candidateRecall,
     supportPrecision,
+    families: staticFamilyScores(
+      familyCounters,
+      supportPrecisionBlockedBy,
+      candidateRecallBlockedBy,
+    ),
   };
+}
+
+function directFamilyCounter(
+  counters: Map<string, MutableDirectFamilyCounter>,
+  family: string,
+): MutableDirectFamilyCounter {
+  const existing = counters.get(family);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const created = { family, tp: 0, fp: 0, fn: 0 };
+  counters.set(family, created);
+  return created;
+}
+
+function staticFamilyCounter(
+  counters: Map<string, MutableStaticFamilyCounter>,
+  family: string,
+): MutableStaticFamilyCounter {
+  const existing = counters.get(family);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const created = {
+    family,
+    candidateTp: 0,
+    candidateFn: 0,
+    supportedTp: 0,
+    falseSupport: 0,
+  };
+  counters.set(family, created);
+  return created;
+}
+
+function directFamilyScores(
+  counters: ReadonlyMap<string, MutableDirectFamilyCounter>,
+  precisionBlockedBy: ReadonlyArray<string>,
+  recallBlockedBy: ReadonlyArray<string>,
+): DirectFamilyScore[] {
+  return [...counters.values()]
+    .sort((a, b) => a.family.localeCompare(b.family))
+    .map((counter) => {
+      const precision = ratio(counter.tp, counter.tp + counter.fp, precisionBlockedBy);
+      const recall = ratio(counter.tp, counter.tp + counter.fn, recallBlockedBy);
+      return {
+        family: counter.family,
+        tp: counter.tp,
+        fp: counter.fp,
+        fn: counter.fn,
+        precision,
+        recall,
+        f05: fScore(precision, recall, 0.5),
+      };
+    });
+}
+
+function staticFamilyScores(
+  counters: ReadonlyMap<string, MutableStaticFamilyCounter>,
+  supportPrecisionBlockedBy: ReadonlyArray<string>,
+  candidateRecallBlockedBy: ReadonlyArray<string>,
+): StaticFamilyScore[] {
+  return [...counters.values()]
+    .sort((a, b) => a.family.localeCompare(b.family))
+    .map((counter) => ({
+      family: counter.family,
+      candidateTp: counter.candidateTp,
+      candidateFn: counter.candidateFn,
+      supportedTp: counter.supportedTp,
+      falseSupport: counter.falseSupport,
+      supportPrecision: ratio(
+        counter.supportedTp,
+        counter.supportedTp + counter.falseSupport,
+        supportPrecisionBlockedBy,
+      ),
+      candidateRecall: ratio(
+        counter.candidateTp,
+        counter.candidateTp + counter.candidateFn,
+        candidateRecallBlockedBy,
+      ),
+    }));
 }
 
 function aggregateScores(repositories: ReadonlyArray<RepositoryScore>): AggregateScore[] {
@@ -726,9 +868,10 @@ function aggregateScores(repositories: ReadonlyArray<RepositoryScore>): Aggregat
     groups.set(key, [...(groups.get(key) ?? []), repository]);
   }
 
-  return [...groups.entries()]
+  const repositoryAggregates = [...groups.entries()]
     .filter(([, entries]) => entries.length > 0)
     .map(([key, entries]) => aggregateGroup(key, entries));
+  return [...repositoryAggregates, ...aggregateFamilyScores(scored)];
 }
 
 function aggregateGroup(key: string, repositories: ReadonlyArray<RepositoryScore>): AggregateScore {
@@ -777,6 +920,117 @@ function aggregateGroup(key: string, repositories: ReadonlyArray<RepositoryScore
     ),
     staticCandidateRecall: ratio(candidateTp, candidateTp + candidateFn, candidateRecallBlockers),
   };
+}
+
+interface MutableFamilyAggregate {
+  directTp: number;
+  directFp: number;
+  directFn: number;
+  readonly directPrecisionBlockers: string[];
+  readonly directRecallBlockers: string[];
+  staticCandidateTp: number;
+  staticCandidateFn: number;
+  staticSupportedTp: number;
+  staticFalseSupport: number;
+  readonly staticSupportPrecisionBlockers: string[];
+  readonly staticCandidateRecallBlockers: string[];
+}
+
+function aggregateFamilyScores(
+  repositories: ReadonlyArray<RepositoryScore>,
+): ReadonlyArray<AggregateScore> {
+  const groups = new Map<string, MutableFamilyAggregate>();
+  for (const repository of repositories) {
+    for (const familyScore of repository.direct.families) {
+      const group = familyAggregate(groups, familyScore.family);
+      group.directTp += familyScore.tp;
+      group.directFp += familyScore.fp;
+      group.directFn += familyScore.fn;
+      group.directPrecisionBlockers.push(
+        ...familyScore.precision.blockedBy.map((reason) => `${repository.name}: ${reason}`),
+      );
+      group.directRecallBlockers.push(
+        ...familyScore.recall.blockedBy.map((reason) => `${repository.name}: ${reason}`),
+      );
+    }
+    for (const familyScore of repository.staticHypotheses.families) {
+      const group = familyAggregate(groups, familyScore.family);
+      group.staticCandidateTp += familyScore.candidateTp;
+      group.staticCandidateFn += familyScore.candidateFn;
+      group.staticSupportedTp += familyScore.supportedTp;
+      group.staticFalseSupport += familyScore.falseSupport;
+      group.staticSupportPrecisionBlockers.push(
+        ...familyScore.supportPrecision.blockedBy.map((reason) => `${repository.name}: ${reason}`),
+      );
+      group.staticCandidateRecallBlockers.push(
+        ...familyScore.candidateRecall.blockedBy.map((reason) => `${repository.name}: ${reason}`),
+      );
+    }
+  }
+
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([family, group]) => {
+      const directPrecision = ratio(
+        group.directTp,
+        group.directTp + group.directFp,
+        uniqueStrings(group.directPrecisionBlockers).filter(
+          (reason) => !isZeroDenominatorReason(reason),
+        ),
+      );
+      const directRecall = ratio(
+        group.directTp,
+        group.directTp + group.directFn,
+        uniqueStrings(group.directRecallBlockers).filter(
+          (reason) => !isZeroDenominatorReason(reason),
+        ),
+      );
+      return {
+        key: `family:${family}`,
+        directPrecision,
+        directRecall,
+        directF05: fScore(directPrecision, directRecall, 0.5),
+        staticSupportPrecision: ratio(
+          group.staticSupportedTp,
+          group.staticSupportedTp + group.staticFalseSupport,
+          uniqueStrings(group.staticSupportPrecisionBlockers).filter(
+            (reason) => !isZeroDenominatorReason(reason),
+          ),
+        ),
+        staticCandidateRecall: ratio(
+          group.staticCandidateTp,
+          group.staticCandidateTp + group.staticCandidateFn,
+          uniqueStrings(group.staticCandidateRecallBlockers).filter(
+            (reason) => !isZeroDenominatorReason(reason),
+          ),
+        ),
+      };
+    });
+}
+
+function familyAggregate(
+  groups: Map<string, MutableFamilyAggregate>,
+  family: string,
+): MutableFamilyAggregate {
+  const existing = groups.get(family);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const created: MutableFamilyAggregate = {
+    directTp: 0,
+    directFp: 0,
+    directFn: 0,
+    directPrecisionBlockers: [],
+    directRecallBlockers: [],
+    staticCandidateTp: 0,
+    staticCandidateFn: 0,
+    staticSupportedTp: 0,
+    staticFalseSupport: 0,
+    staticSupportPrecisionBlockers: [],
+    staticCandidateRecallBlockers: [],
+  };
+  groups.set(family, created);
+  return created;
 }
 
 function aggregateBlockers(
@@ -856,7 +1110,7 @@ function pushMetricTargetError(
   [target]: readonly [number],
 ): void {
   if (!metric.scoreable) {
-    if (key.startsWith("language:") && isZeroDenominatorMetric(metric)) {
+    if (key !== "all" && isZeroDenominatorMetric(metric)) {
       return;
     }
     errors.push(`${key} ${label} is not scoreable: ${metric.blockedBy.join("; ")}`);
@@ -1085,6 +1339,83 @@ function matchesStaticHypothesis(
     return false;
   }
   return true;
+}
+
+function directFamilyForTruth(item: DirectTruthItem): string {
+  return item.checkFamily ?? directFamilyForMatcher(item.matcher);
+}
+
+function directFamilyForMatcher(matcher: DirectFindingMatcher): string {
+  if (matcher.category !== undefined) {
+    return directFamilyForCategory(matcher.category);
+  }
+  switch (matcher.sourceTool) {
+    case "gitleaks":
+      return "secrets";
+    case "trivy":
+    case "osv":
+    case "syft":
+      return "dependencies";
+    case "actionlint":
+    case "zizmor":
+      return "ci-cd";
+    case "trivy-config":
+      return "iac-config";
+    default:
+      return "direct-findings";
+  }
+}
+
+function directFamilyForFinding(finding: Finding): string {
+  return directFamilyForCategory(finding.category);
+}
+
+function directFamilyForCategory(category: string): string {
+  switch (category) {
+    case "secret":
+      return "secrets";
+    case "dependency":
+    case "sbom":
+      return "dependencies";
+    case "github-action":
+      return "ci-cd";
+    case "iac":
+      return "iac-config";
+    case "code-pattern":
+      return "deterministic-code-patterns";
+    default:
+      return "direct-findings";
+  }
+}
+
+function staticFamilyForTruth(item: StaticTruthItem): string {
+  return (
+    item.checkFamily ?? staticFamilyForCandidateFamily(item.matcher.family ?? item.candidateFamily)
+  );
+}
+
+function staticFamilyForSupportedHypothesis(
+  hypothesis: StaticHypothesis,
+  candidatesById: ReadonlyMap<string, HypothesisCandidate>,
+): string {
+  return staticFamilyForCandidateFamily(candidatesById.get(hypothesis.candidateId)?.family);
+}
+
+function staticFamilyForCandidateFamily(candidateFamily: string | undefined): string {
+  switch (candidateFamily) {
+    case "dependency_usage_path":
+      return "dependencies";
+    case "ci_supply_chain_path":
+      return "ci-cd";
+    case "content_resource_exposure_path":
+      return "content-assets";
+    case "smart_contract_risk_path":
+      return "smart-contracts";
+    case "external_input_to_dangerous_operation":
+      return "deep-static-taint";
+    default:
+      return "static-hypotheses";
+  }
 }
 
 function includesAll(value: string, expected: ReadonlyArray<string> | undefined): boolean {

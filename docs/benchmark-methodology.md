@@ -259,6 +259,17 @@ Metrics must be reported per language and per CWE or vulnerability class before
 any aggregate is accepted. An aggregate that hides one weak language or class is
 not a success signal.
 
+`pnpm benchmark:score` reports three aggregate layers:
+
+- `all`: the overall scored matrix;
+- `language:*`: language-specific gates for code-analysis quality;
+- `family:*`: check-family gates for secrets, dependencies, CI/CD, IaC/config,
+  deterministic patterns, Deep Static taint, and adjacent static lanes.
+
+Zero-denominator metrics are allowed on non-`all` aggregates when that surface
+does not apply to the family or language. A non-zero but unscoreable family
+aggregate is still a real blocker.
+
 ## Benchmark Matrix
 
 The benchmark matrix is organized around product check families. Training apps

@@ -111,6 +111,19 @@ describe("deep benchmark score", () => {
       falseSupport: 1,
     });
     expect(repository?.staticHypotheses.supportPrecision.value).toBe(0.5);
+
+    const aggregatesByKey = new Map(
+      summary.aggregates.map((aggregate) => [aggregate.key, aggregate]),
+    );
+    expect(aggregatesByKey.get("family:secrets")?.directPrecision.value).toBe(0.5);
+    expect(aggregatesByKey.get("family:secrets")?.directRecall.value).toBe(1);
+    expect(aggregatesByKey.get("family:deep-static-taint")?.staticSupportPrecision.value).toBe(0.5);
+    expect(aggregatesByKey.get("family:deep-static-taint")?.staticCandidateRecall.value).toBe(1);
+    expect(
+      summary.targetErrors.some((error) =>
+        error.includes("family:secrets static support precision is not scoreable"),
+      ),
+    ).toBe(false);
   });
 
   it("blocks target scoring when curated truth or FP review is incomplete", () => {
