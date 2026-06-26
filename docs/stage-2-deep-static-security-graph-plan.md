@@ -170,7 +170,7 @@ Status:
   Joern CPG artifact is stored as a blob; no path step is created without a
   `SecurityGraphEdge` and evidence.
   Evidence: current live `--deep` runs produced supported attack paths on
-  WebGoat (Java, run `20260626082814-6ba9ebc8`, 316 supported static
+  WebGoat (Java, run `20260626085453-d38d52b5`, 316 supported static
   hypotheses, `data_flow` checked 319/319, `component_usage` checked 3086/3086,
   `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
   `20260626082921-4b7e2b26`, 616, `data_flow` checked 732/732,
@@ -188,7 +188,7 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd`.
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260626085453-d38d52b5 /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd`.
   The curated ground-truth slice passes in normal and strict benchmark modes:
   WebGoat covers 21/21 expectations and Juice Shop covers 39/39 expectations
   with no known gaps. The post-semantic-dedup WebGoat and Juice Shop reports

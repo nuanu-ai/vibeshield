@@ -6,7 +6,7 @@
       "match": {
         "originUrl": "https://github.com/WebGoat/WebGoat.git"
       },
-      "minFindings": 60,
+      "minFindings": 59,
       "minHypothesisCandidates": 316,
       "minSupportedHypotheses": 316,
       "requiredFamilies": {

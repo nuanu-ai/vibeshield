@@ -38,7 +38,7 @@ pnpm scan /tmp/vibeshield-score-src/Vulnerable-Flask-App --deep --no-model
 ```bash
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-baseline.json \
-  /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 \
+  /Users/dmitry/.vibeshield/runs/20260626085453-d38d52b5 \
   /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 \
   /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
@@ -51,7 +51,7 @@ Run the curated ground-truth slice separately. Normal mode allows tracked
 ```bash
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-ground-truth.json \
-  /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 \
+  /Users/dmitry/.vibeshield/runs/20260626085453-d38d52b5 \
   /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26
 ```
 
@@ -61,7 +61,7 @@ To keep every known gap as a hard failure when future gaps are added:
 pnpm benchmark:deep \
   --strict-ground-truth \
   --expect benchmarks/deep-static-training-ground-truth.json \
-  /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 \
+  /Users/dmitry/.vibeshield/runs/20260626085453-d38d52b5 \
   /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26
 ```
 
@@ -99,7 +99,7 @@ until the scored truth file is complete:
 
 ```bash
 pnpm benchmark:score \
-  /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 \
+  /Users/dmitry/.vibeshield/runs/20260626085453-d38d52b5 \
   /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
   /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
@@ -109,7 +109,7 @@ pnpm benchmark:score \
 
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |
 | --- | --- | --- | ---: | --- | --- |
-| Java | WebGoat | `20260626082814-6ba9ebc8` | 316 | `dependency_usage_path=36`, `external_input_to_dangerous_operation=280` | `data_flow` 319/319, `dependency_usage` 36/36, `language_support` checked 496/496 |
+| Java | WebGoat | `20260626085453-d38d52b5` | 316 | `dependency_usage_path=36`, `external_input_to_dangerous_operation=280` | `data_flow` 319/319, `dependency_usage` 36/36, `language_support` checked 496/496 |
 | JS/TS | Juice Shop | `20260626082921-4b7e2b26` | 616 | `dependency_usage_path=31`, `external_input_to_dangerous_operation=568`, `ci_supply_chain_path=3`, `content_resource_exposure_path=13`, `smart_contract_risk_path=1` | `data_flow` 732/732, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
 | JS/TS local | Freeland | `20260625164008-81d5eb5a` | 164 | `external_input_to_dangerous_operation=163`, `ci_supply_chain_path=1` | `data_flow` 62/380, `language_support` checked 635/635 |
 | Python | Vulnerable-Flask-App | `20260626082052-aa2c42be` | 24 | `external_input_to_dangerous_operation=24` | `data_flow` 24/36, `language_support` checked 2/2 |
