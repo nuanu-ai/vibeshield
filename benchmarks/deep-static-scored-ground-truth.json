@@ -146,6 +146,202 @@
             "titleIncludes": "Cross-site scripting",
             "statusIn": ["statically_supported"]
           }
+        },
+        {
+          "id": "webgoat.xxe",
+          "title": "XXE lessons have static input-to-XML parser traces",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "candidateReasonIncludes": "/xxe/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.insecure-deserialization",
+          "title": "Insecure deserialization reaches command execution",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Code execution",
+            "candidateReasonIncludes": "InsecureDeserializationTask.java",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.path-traversal",
+          "title": "Path traversal or upload flow reaches a filesystem sink",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Path traversal or file access",
+            "candidateReasonIncludes": "deleteIfExists",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.open-redirect",
+          "title": "Open redirect flow reaches a redirect sink",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "candidateReasonIncludes": "RedirectView",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.idor",
+          "title": "IDOR lessons should model principal/resource authorization semantics",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "IDOR",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.csrf",
+          "title": "CSRF lessons should be classified as missing anti-CSRF protection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "CSRF",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.missing-function-access-control",
+          "title": "Missing function-level access-control lessons should be classified as access control",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Access control",
+            "candidateReasonIncludes": "access-control/users",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.vulnerable-components",
+          "title": "Vulnerable Components lesson should produce dependency reachability",
+          "coverageArea": "dependency_usage",
+          "candidateFamily": "dependency_usage_path",
+          "matcher": {
+            "family": "dependency_usage_path"
+          }
+        },
+        {
+          "id": "webgoat.crypto-weak-hashing",
+          "title": "Cryptography lessons should classify weak digest and encoding misuse",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Cryptographic",
+            "candidateReasonIncludes": "/crypto/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.jwt-token-trust",
+          "title": "JWT lessons should classify token signing, claim, and header trust bypasses",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "JWT",
+            "candidateReasonIncludes": "/JWT/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.auth-bypass-security-questions",
+          "title": "Authentication bypass lesson should classify incomplete security-question verification",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Authentication bypass",
+            "candidateReasonIncludes": "VerifyAccount.java",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.password-reset-account-recovery",
+          "title": "Password reset lessons should classify weak account-recovery flows",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Password reset",
+            "candidateReasonIncludes": "/PasswordReset/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.session-cookie-trust",
+          "title": "Hijack Session and Spoof Cookie lessons should classify forgeable cookie/session trust",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Cookie trust",
+            "candidateReasonIncludes": "Cookie",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.insecure-credential-trust",
+          "title": "Insecure Login and default-credential lessons should classify hardcoded credential trust",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Credential trust",
+            "candidateReasonIncludes": "Login",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.client-side-trust",
+          "title": "Client-side filtering, HTML tampering, and bypass restriction lessons should classify client-side trust bypasses",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Client-side trust",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.security-misconfiguration",
+          "title": "Security misconfiguration lessons should classify default credentials, verbose errors, actuator exposure, and config hardening",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "/SecurityMisconfiguration/",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "webgoat.log-spoofing",
+          "title": "Logging lessons should classify log injection and leaked log-secret flows",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Log",
+            "candidateReasonIncludes": "/LogSpoofing/",
+            "statusIn": ["statically_supported"]
+          }
         }
       ],
       "coverage": {
@@ -163,7 +359,7 @@
       },
       "notes": [
         "Direct finding review is complete for run 20260626112711-237f9ec7: the prior minified underscore code-pattern hit is suppressed, repeated JWT/API-key/private-key lesson materials are treated as true duplicates, and XStream CVE rows are grouped as duplicate dependency findings.",
-        "Seeded from the current coverage-style WebGoat expectations. Full static lesson/CWE truth and static support review are still required before static precision or recall can be claimed."
+        "Scored static truth now includes the curated coverage-style expectations from WebGoat Java ground truth slice; support review is still incomplete until remaining supported hypotheses are bucketed as true-but-uncurated or false support."
       ]
     },
     {
@@ -402,6 +598,387 @@
             "titleIncludes": "Server-side request forgery",
             "statusIn": ["statically_supported"]
           }
+        },
+        {
+          "id": "juice.file-read",
+          "title": "External input reaches a filesystem read sink",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "candidateReasonIncludes": "readFile",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.ci-supply-chain",
+          "title": "CI workflow artifact paths are modeled as supply-chain hypotheses",
+          "coverageArea": "ci_iac",
+          "candidateFamily": "ci_supply_chain_path",
+          "matcher": {
+            "family": "ci_supply_chain_path"
+          }
+        },
+        {
+          "id": "juice.access-control",
+          "title": "Basket/order authorization challenges should model principal/resource ownership",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Access control",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.bac-admin-section-route-discovery",
+          "title": "Admin Section challenge should classify sensitive frontend route discovery",
+          "coverageArea": "content_assets",
+          "candidateFamily": "content_resource_exposure_path",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "administration",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.bac-web3-sandbox-route-discovery",
+          "title": "Web3 Sandbox challenge should classify sensitive frontend route discovery",
+          "coverageArea": "content_assets",
+          "candidateFamily": "content_resource_exposure_path",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "web3-sandbox",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.open-redirect",
+          "title": "Open redirect challenges should be classified as open redirect",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Open redirect",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.insecure-deserialization-rce",
+          "title": "Insecure deserialization RCE challenges should be classified as deserialization/code execution",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Insecure deserialization",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.nosql",
+          "title": "NoSQL injection challenges should be classified as NoSQL injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "NoSQL",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.xxe",
+          "title": "XXE Data Access and XXE DoS challenges should be classified as XXE",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "XXE",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.security-misconfiguration-deprecated-interface",
+          "title": "Deprecated Interface challenge should classify deprecated upload interface behavior as security misconfiguration",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "routes/fileUpload.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.security-misconfiguration-error-handling",
+          "title": "Error Handling challenge should classify verbose or permissive error behavior as security misconfiguration",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "routes/verify.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.security-misconfiguration-login-support",
+          "title": "Login Support Team challenge should classify support default credentials as security misconfiguration",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "routes/login.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.security-misconfiguration-svg-imaging",
+          "title": "Cross-Site Imaging challenge should classify permissive redirect/image policy as security misconfiguration",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Security misconfiguration",
+            "candidateReasonIncludes": "registerWebsocketEvents.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.anti-automation-captcha-rate",
+          "title": "CAPTCHA bypass challenge should classify weak rate or automation controls",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Anti-automation",
+            "candidateReasonIncludes": "CAPTCHA rate bypass",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.anti-automation-extra-language",
+          "title": "Extra Language challenge should classify hidden resource enumeration as anti-automation bypass",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Anti-automation",
+            "candidateReasonIncludes": "hidden resource enumeration",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.anti-automation-multiple-likes",
+          "title": "Multiple Likes challenge should classify duplicate-action race behavior",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Anti-automation",
+            "candidateReasonIncludes": "routes/likeProductReviews.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.obscurity-token-sale-route",
+          "title": "Token Sale challenge should classify obfuscated frontend route discovery as hidden content exposure",
+          "coverageArea": "content_assets",
+          "candidateFamily": "content_resource_exposure_path",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "tokenMatcher",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.obscurity-privacy-policy-proof",
+          "title": "Privacy Policy Inspection challenge should classify hidden private asset proof route",
+          "coverageArea": "content_assets",
+          "candidateFamily": "content_resource_exposure_path",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "frontend/dist/frontend/assets/private/thank-you.jpg",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.obscurity-hidden-image",
+          "title": "Steganography challenge should classify static image and verifier clue exposure",
+          "coverageArea": "content_assets",
+          "candidateFamily": "content_resource_exposure_path",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "pickle rick",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.jwt-token-trust",
+          "title": "Unsigned and forged JWT challenges should classify token trust",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "JWT token trust",
+            "candidateReasonIncludes": "routes/verify.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.credential-trust",
+          "title": "Weak, default, and exposed login credential challenges should classify credential trust",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Credential trust",
+            "candidateReasonIncludes": "routes/login.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.password-reset-security-questions",
+          "title": "Password reset challenges should classify security-question account recovery trust",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Password reset",
+            "candidateReasonIncludes": "routes/resetPassword.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.two-factor-token-trust",
+          "title": "Two-factor authentication challenge should classify TOTP secret and setup-token trust",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Two-factor",
+            "candidateReasonIncludes": "routes/2fa.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.llm-tool-prompt-trust",
+          "title": "Chatbot prompt-injection challenges should classify LLM prompt and tool trust",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "LLM",
+            "candidateReasonIncludes": "routes/chat.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.coupon-encoding-trust",
+          "title": "Coupon forgery and discount challenges should classify reversible coupon encoding trust",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Coupon",
+            "candidateReasonIncludes": "coupon",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.crypto-premium-paywall-hidden-route",
+          "title": "Premium Paywall challenge should classify the hidden paywall route as exposed static content",
+          "coverageArea": "content_assets",
+          "candidateFamily": "content_resource_exposure_path",
+          "matcher": {
+            "family": "content_resource_exposure_path",
+            "titleIncludes": "Hidden content/resource",
+            "candidateReasonIncludes": "/this/page/is/hidden/behind/an/incredibly/high/paywall",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.crypto-weird-crypto-indicator-verifier",
+          "title": "Weird Crypto challenge should classify weak cryptographic and encoding indicator verifier logic",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Cryptographic weakness",
+            "candidateReasonIncludes": "weak crypto indicator verifier",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.file-exposure",
+          "title": "Confidential Document and Local File Read challenges should be classified as file exposure",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Path traversal or file access",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.observability-access-log-disclosure",
+          "title": "Leaked Access Logs challenge should classify exposed server log access",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Log disclosure",
+            "candidateReasonIncludes": "routes/logfileServer.ts",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.upload-validation",
+          "title": "Upload Size, Upload Type, and Poison Null Byte challenges should model upload validation bypasses",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "File upload",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.vulnerable-components",
+          "title": "Vulnerable component challenges should produce dependency reachability",
+          "coverageArea": "dependency_usage",
+          "candidateFamily": "dependency_usage_path",
+          "matcher": {
+            "family": "dependency_usage_path"
+          }
+        },
+        {
+          "id": "juice.ssti",
+          "title": "SSTi challenge should be classified as server-side template injection",
+          "coverageArea": "data_flow",
+          "candidateFamily": "external_input_to_dangerous_operation",
+          "matcher": {
+            "family": "external_input_to_dangerous_operation",
+            "titleIncludes": "Server-side template injection",
+            "statusIn": ["statically_supported"]
+          }
+        },
+        {
+          "id": "juice.web3-wallet-withdrawal-reentrancy",
+          "title": "Wallet Depletion challenge should classify value transfer before state update in Solidity withdrawal logic",
+          "coverageArea": "smart_contracts",
+          "candidateFamily": "smart_contract_risk_path",
+          "matcher": {
+            "family": "smart_contract_risk_path",
+            "titleIncludes": "Smart contract risk",
+            "candidateReasonIncludes": "ETHWalletBank.withdraw",
+            "statusIn": ["statically_supported"]
+          }
         }
       ],
       "coverage": {
@@ -427,7 +1004,7 @@
       },
       "notes": [
         "Direct finding review is complete for run 20260626112812-9d82f57e: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
-        "Seeded from the current coverage-style Juice Shop expectations. Challenge-level static truth and static support review are still required before static precision or recall can be claimed."
+        "Scored static truth now includes the curated coverage-style expectations from Juice Shop JS/TS ground truth slice; support review is still incomplete until remaining supported hypotheses are bucketed as true-but-uncurated or false support."
       ]
     },
     {

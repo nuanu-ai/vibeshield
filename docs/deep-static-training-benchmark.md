@@ -197,16 +197,19 @@ support precision, false contradiction, or true-but-uncurated buckets.
 
 The scored seed lives at `benchmarks/deep-static-scored-ground-truth.json`. It
 contains the four scored repositories and the Phase 1 target values. WebGoat and
-Juice Shop include a small seed from the current curated slice. Python and Go
-now include pinned static-truth slices curated from their READMEs and source:
+Juice Shop now carry the current curated coverage-style static expectations in
+the scored truth file: WebGoat scores the current slice at 20/20 candidate
+matches and Juice Shop scores 36/36 candidate matches on the pinned runs. Python
+and Go include pinned static-truth slices curated from their READMEs and source:
 Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
 WebGoat, Juice Shop, and go-dvwa have complete direct-finding review for the
 current scored runs. Python direct truth is complete as an empty direct Quick
 Scan denominator for the current report. Java/JS static truth and Java/JS
-static-support review are still incomplete, so `pnpm benchmark:score` reports
-scoreability failures instead of pretending support precision or static recall
-can already be claimed.
+static-support review are still incomplete until the remaining supported
+hypotheses are reviewed as true-but-uncurated or false support, so
+`pnpm benchmark:score` reports scoreability failures instead of pretending
+support precision or full static recall can already be claimed.
 
 Current Juice Shop inventory audit result:
 
