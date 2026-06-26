@@ -463,8 +463,9 @@ describe("composeProgramAnalysisGraph path", () => {
       ["file upload handling", "file_upload_validation"],
       ["hidden admin content exposure", "hidden_content_exposure"],
       ["reflected HTML output", "cross_site_scripting"],
+      ["reflected raw response", "cross_site_scripting"],
     ]);
-    expect(graph.flows).toHaveLength(4);
+    expect(graph.flows).toHaveLength(5);
   });
 
   it("marks JavaScript web handler calls to NoSQL, XML, file, upload, and template sinks", () => {
@@ -1994,6 +1995,19 @@ function pythonWebSinkSlices() {
 function pythonWebSemanticSinkSlices() {
   return {
     objectSlices: [
+      {
+        code: ["def welcome(name):", "    data = 'Welcome ' + name", "    return data"].join("\n"),
+        fullName: "app.py::program:welcome",
+        fileName: "app.py",
+        lineNumber: 29,
+        boundary: {
+          boundaryType: "python-web",
+          routeOrName: "/welcome/<string:name>",
+          method: "GET",
+          sourceName: "request",
+        },
+        usages: [],
+      },
       {
         code: [
           "def welcome2(name):",

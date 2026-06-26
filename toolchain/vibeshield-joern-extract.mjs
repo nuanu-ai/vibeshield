@@ -133,10 +133,11 @@ async function normalizeUsages(raw, sourceRoot) {
   const objectSlices = [];
   for (const method of raw.methods) {
     const calls = raw.callsByParent.get(method.fullName) ?? [];
+    const sourceCode = await methodSourceBlock(sources, method);
     objectSlices.push({
-      code: method.code,
+      code: sourceCode ?? method.code,
       fullName: method.fullName,
-      fileName: normalizeRepoPath(method.fileName),
+      fileName: sources.normalizeRepoPath(method.fileName),
       lineNumber: method.lineNumber,
       columnNumber: method.columnNumber,
       usages: calls.map((call) => ({
@@ -278,6 +279,55 @@ async function javaComponentUsages(sources) {
   return observations;
 }
 
+async function methodSourceBlock(sources, method) {
+  const repoPath = sources.normalizeRepoPath(method.fileName);
+  const lineNumber = optionalPositiveInteger(method.lineNumber);
+  if (repoPath === undefined || lineNumber === undefined) {
+    return undefined;
+  }
+  const text = await sources.readRepoFile(repoPath);
+  if (text === undefined) {
+    return undefined;
+  }
+  const lines = text.split(/\r?\n/);
+  const startIndex = lineNumber - 1;
+  if (startIndex < 0 || startIndex >= lines.length) {
+    return undefined;
+  }
+  const block = repoPath.endsWith(".py")
+    ? pythonMethodSourceBlock(lines, startIndex)
+    : boundedSourceBlock(lines, startIndex, 24);
+  const source = block.join("\n").trimEnd();
+  return source === "" ? undefined : source;
+}
+
+function pythonMethodSourceBlock(lines, startIndex) {
+  const first = lines[startIndex] ?? "";
+  const baseIndent = indentation(first);
+  const block = [];
+  for (let index = startIndex; index < Math.min(lines.length, startIndex + 80); index += 1) {
+    const line = lines[index] ?? "";
+    if (
+      index > startIndex &&
+      line.trim() !== "" &&
+      indentation(line) <= baseIndent &&
+      /^(?:@|async\s+def\b|def\b|class\b)/.test(line.trim())
+    ) {
+      break;
+    }
+    block.push(line);
+  }
+  return block;
+}
+
+function boundedSourceBlock(lines, startIndex, limit) {
+  return lines.slice(startIndex, Math.min(lines.length, startIndex + limit));
+}
+
+function indentation(line) {
+  return line.match(/^\s*/)?.[0]?.length ?? 0;
+}
+
 function componentUsage(packageName, repoPath, text, index) {
   return componentUsageAtLine(packageName, repoPath, lineNumberAt(text, index));
 }
@@ -371,7 +421,7 @@ async function routeFromSource(sources, method) {
 }
 
 async function routeFromPythonSource(sources, method) {
-  const repoPath = normalizeRepoPath(method.fileName);
+  const repoPath = sources.normalizeRepoPath(method.fileName);
   if (repoPath === undefined || !repoPath.endsWith(".py")) {
     return undefined;
   }
@@ -403,7 +453,7 @@ async function routeFromPythonSource(sources, method) {
 }
 
 async function routeFromGoSource(sources, method) {
-  const repoPath = normalizeRepoPath(method.fileName);
+  const repoPath = sources.normalizeRepoPath(method.fileName);
   const methodName = string(method.name);
   if (repoPath === undefined || !repoPath.endsWith(".go") || methodName === undefined) {
     return undefined;
@@ -658,6 +708,9 @@ function sourceLookup(sourceRoot) {
   const fileCache = new Map();
   const filesByExtension = new Map();
   return {
+    normalizeRepoPath(value) {
+      return normalizeRepoPathForRoot(root, value);
+    },
     async readRepoFile(repoPath) {
       const normalized = normalizeRepoPath(repoPath);
       if (normalized === undefined) {
@@ -695,6 +748,20 @@ function sourceLookup(sourceRoot) {
       return files;
     },
   };
+}
+
+function normalizeRepoPathForRoot(root, value) {
+  const normalized = normalizeRepoPath(value);
+  if (normalized === undefined) {
+    return undefined;
+  }
+  if (value !== undefined && path.isAbsolute(value)) {
+    const resolved = path.resolve(value);
+    if (resolved === root || resolved.startsWith(`${root}${path.sep}`)) {
+      return path.relative(root, resolved).split(path.sep).join("/");
+    }
+  }
+  return normalized;
 }
 
 async function listRepoFiles(root, dir, extension) {

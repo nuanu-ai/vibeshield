@@ -123,10 +123,10 @@
       "match": {
         "originUrl": "https://github.com/videvelopers/Vulnerable-Flask-App.git"
       },
-      "minHypothesisCandidates": 32,
-      "minSupportedHypotheses": 32,
+      "minHypothesisCandidates": 48,
+      "minSupportedHypotheses": 48,
       "requiredFamilies": {
-        "external_input_to_dangerous_operation": 32
+        "external_input_to_dangerous_operation": 48
       },
       "coverage": {
         "language_support": {
@@ -136,7 +136,7 @@
         },
         "data_flow": {
           "stateIn": ["checked"],
-          "minCoveredCount": 16
+          "minCoveredCount": 24
         },
         "component_usage": {
           "stateIn": ["checked"],

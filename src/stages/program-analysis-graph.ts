@@ -1104,12 +1104,9 @@ function entitySemanticSinkClassifications(
       properties: { indicators },
     });
   }
-  if (isReflectedRawHtmlOutput(entity)) {
-    classifications.push({
-      label: "reflected HTML output",
-      sinkType: "cross_site_scripting",
-      semantic: "reflected_raw_html_output",
-    });
+  const reflectedOutput = reflectedRawResponseClassification(entity);
+  if (reflectedOutput !== null) {
+    classifications.push(reflectedOutput);
   }
   if (isSensitiveServerContentExposure(entity)) {
     classifications.push({
@@ -1166,16 +1163,35 @@ function entitySemanticContext(entity: ObservedEntity): string {
   return [entity.fullName, entity.repoPath, JSON.stringify(entity.slice)].join("\n").toLowerCase();
 }
 
-function isReflectedRawHtmlOutput(entity: ObservedEntity): boolean {
+function reflectedRawResponseClassification(
+  entity: ObservedEntity,
+): EntitySemanticSinkClassification | null {
   if (!isHttpBoundary(entity)) {
-    return false;
+    return null;
   }
   const context = entitySemanticContext(entity);
-  return (
-    HTML_TEXT_PATTERN.test(context) &&
-    /\b(?:return|send|write|response|make_response)\b/i.test(context) &&
-    hasRawRequestControlledOutput(context, entity)
-  );
+  if (
+    !/\b(?:return|send|write|response|make_response)\b/i.test(context) ||
+    !hasRawRequestControlledOutput(context, entity) ||
+    hasResponseEncodingOrStructuredOutput(context)
+  ) {
+    return null;
+  }
+  if (HTML_TEXT_PATTERN.test(context)) {
+    return {
+      label: "reflected HTML output",
+      sinkType: "cross_site_scripting",
+      semantic: "reflected_raw_html_output",
+    };
+  }
+  if (hasPlainReflectedResponseReturn(context)) {
+    return {
+      label: "reflected raw response",
+      sinkType: "cross_site_scripting",
+      semantic: "reflected_raw_response_output",
+    };
+  }
+  return null;
 }
 
 function hasRawRequestControlledOutput(context: string, entity: ObservedEntity): boolean {
@@ -1183,10 +1199,22 @@ function hasRawRequestControlledOutput(context: string, entity: ObservedEntity):
   return names.some((name) => {
     const escaped = escapeRegExp(name.toLowerCase());
     return new RegExp(
-      String.raw`(?:\+|\$\{|%\s*|\{\s*)${escaped}\b|\b${escaped}\s*(?:\+|%|,|\})`,
+      String.raw`(?:\+\s*|\$\{\s*|%\s*|\{\s*)${escaped}\b|\b${escaped}\s*(?:\+|%|,|\})`,
       "i",
     ).test(context);
   });
+}
+
+function hasResponseEncodingOrStructuredOutput(context: string): boolean {
+  return /\b(?:escape|html\.escape|markupsafe|sanitize|bleach|jsonify|jsonresponse|response\.json|res\.json|redirect|render_template|render_template_string|content-type['"]?\s*[:=]\s*['"]application\/json)\b/i.test(
+    context,
+  );
+}
+
+function hasPlainReflectedResponseReturn(context: string): boolean {
+  return /\b(?:return|send|write|make_response)\b[\s\S]{0,160}\b(?:data|body|response|content|message|html|text|output|result)\b/i.test(
+    context,
+  );
 }
 
 function isSensitiveServerContentExposure(entity: ObservedEntity): boolean {

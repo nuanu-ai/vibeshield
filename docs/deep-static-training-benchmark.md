@@ -25,6 +25,14 @@ requires pinned curated truth, static-detectability markings, complete
 FP/support review, coverage-aware denominators, and matchers from expected
 vulnerability classes to VibeShield findings or static hypotheses.
 
+When generating fresh benchmark reports, use `--no-model` or
+`VIBESHIELD_NO_MODEL=1` so optional OpenRouter wording cannot slow or perturb the
+measurement run:
+
+```bash
+pnpm scan /tmp/vibeshield-score-src/Vulnerable-Flask-App --deep --no-model
+```
+
 ## Command
 
 ```bash
@@ -33,7 +41,7 @@ pnpm benchmark:deep \
   /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 \
   /Users/dmitry/.vibeshield/runs/20260625215333-ffdb9e36 \
   /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a \
-  /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e \
+  /Users/dmitry/.vibeshield/runs/20260626074403-64fceadf \
   /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7
 ```
 
@@ -93,7 +101,7 @@ until the scored truth file is complete:
 pnpm benchmark:score \
   /Users/dmitry/.vibeshield/runs/20260625194251-245a4c68 \
   /Users/dmitry/.vibeshield/runs/20260625215333-ffdb9e36 \
-  /Users/dmitry/.vibeshield/runs/20260625164510-1cef7e1e \
+  /Users/dmitry/.vibeshield/runs/20260626074403-64fceadf \
   /Users/dmitry/.vibeshield/runs/20260625164651-d290e2b7
 ```
 
@@ -104,7 +112,7 @@ pnpm benchmark:score \
 | Java | WebGoat | `20260625194251-245a4c68` | 616 | `dependency_usage_path=36`, `external_input_to_dangerous_operation=580` | `data_flow` 290/290, `dependency_usage` 36/36, `language_support` checked 496/496 |
 | JS/TS | Juice Shop | `20260625215333-ffdb9e36` | 1789 | `dependency_usage_path=31`, `external_input_to_dangerous_operation=1741`, `ci_supply_chain_path=3`, `content_resource_exposure_path=13`, `smart_contract_risk_path=1` | `data_flow` 728/728, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
 | JS/TS local | Freeland | `20260625164008-81d5eb5a` | 164 | `external_input_to_dangerous_operation=163`, `ci_supply_chain_path=1` | `data_flow` 62/380, `language_support` checked 635/635 |
-| Python | Vulnerable-Flask-App | `20260625164510-1cef7e1e` | 32 | `external_input_to_dangerous_operation=32` | `data_flow` 16/36, `language_support` checked 2/2 |
+| Python | Vulnerable-Flask-App | `20260626074403-64fceadf` | 48 | `external_input_to_dangerous_operation=48` | `data_flow` 24/36, `language_support` checked 2/2 |
 | Go | go-dvwa | `20260625164651-d290e2b7` | 88 | `dependency_usage_path=82`, `external_input_to_dangerous_operation=6` | `data_flow` 3/3, `dependency_usage` 82/82, `language_support` partial 54/55 due to one PHP file |
 
 The current WebGoat and Juice Shop runs classify generic external-input paths
@@ -154,7 +162,7 @@ The scored seed lives at `benchmarks/deep-static-scored-ground-truth.json`. It
 contains the four scored repositories and the Phase 1 target values. WebGoat and
 Juice Shop include a small seed from the current curated slice. Python and Go
 now include pinned static-truth slices curated from their READMEs and source:
-Vulnerable-Flask-App currently scores static candidate recall at 4/9, and
+Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
 Direct-finding truth, FP review, and static-support review are still incomplete,
 so `pnpm benchmark:score` reports scoreability failures instead of pretending

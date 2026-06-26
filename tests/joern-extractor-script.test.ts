@@ -82,6 +82,82 @@ EOF`,
 });
 
 describe("vibeshield-joern-extract component usage", () => {
+  it("enriches entity methods with bounded source blocks", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "vibeshield-extractor-test-"));
+    const binDir = path.join(dir, "bin");
+    const sourceRoot = path.join(dir, "source");
+    const outPath = path.join(dir, "entities.json");
+    const appPath = path.join(sourceRoot, "app.py");
+    await mkdir(binDir, { recursive: true });
+    await mkdir(sourceRoot, { recursive: true });
+    await writeFile(
+      appPath,
+      [
+        "from flask import Flask",
+        "app = Flask(__name__)",
+        "@app.route('/welcome2/<string:name>')",
+        "def welcome2(name):",
+        "    data = 'Welcome ' + name",
+        "    return data",
+        "",
+        "def unrelated():",
+        "    return 'ok'",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(binDir, "joern"),
+      [
+        "#!/bin/sh",
+        "out=''",
+        "prev=''",
+        'for arg in "$@"; do',
+        "  if [ \"$prev\" = '--param' ]; then",
+        '    case "$arg" in outFile=*) out="$(printf %s "$arg" | sed s/^outFile=//)" ;; esac',
+        "  fi",
+        '  prev="$arg"',
+        "done",
+        'if [ -z "$out" ]; then echo missing outFile >&2; exit 2; fi',
+        `cat > "$out" <<'EOF'
+METHOD	${enc("app.py:<module>.welcome2")}	${enc("py")}	${enc(appPath)}	4	1	${enc("py")}	${enc("name,,4,14")}	${enc(" ")}
+EOF`,
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    await execFileAsync(
+      process.execPath,
+      [
+        extractorPath,
+        "--kind",
+        "entities",
+        "--cpg",
+        "/work/vibeshield/app.cpg.bin",
+        "--source-root",
+        sourceRoot,
+        "-o",
+        outPath,
+      ],
+      {
+        env: {
+          ...process.env,
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          TMPDIR: dir,
+        },
+      },
+    );
+
+    const parsed = JSON.parse(await readFile(outPath, "utf8")) as {
+      readonly objectSlices: ReadonlyArray<{
+        readonly code: string;
+        readonly boundary?: { readonly routeOrName?: string };
+      }>;
+    };
+    expect(parsed.objectSlices[0]?.code).toContain("data = 'Welcome ' + name");
+    expect(parsed.objectSlices[0]?.code).toContain("return data");
+    expect(parsed.objectSlices[0]?.code).not.toContain("def unrelated");
+    expect(parsed.objectSlices[0]?.boundary?.routeOrName).toBe("/welcome2/<string:name>");
+  });
+
   it("extracts deterministic package import observations from source files", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "vibeshield-extractor-test-"));
     const binDir = path.join(dir, "bin");
