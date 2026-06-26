@@ -29,6 +29,7 @@ export type FakeExecHandler = (
 export interface FakeInvocation {
   readonly name: string;
   readonly command: string[];
+  readonly env?: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
 }
 
@@ -45,6 +46,7 @@ export class FakeSandboxSession implements SandboxSession {
     this.invocations.push({
       name: this.id,
       command,
+      ...(options.env === undefined ? {} : { env: options.env }),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     });
     return await this.execHandler(command, this, options);
@@ -105,6 +107,7 @@ export class FakeSandboxRuntime implements SandboxRuntime {
       this.invocations.push({
         name: options.name,
         command: cmd,
+        ...(execOptions.env === undefined ? {} : { env: execOptions.env }),
         ...(execOptions.timeoutMs === undefined ? {} : { timeoutMs: execOptions.timeoutMs }),
       });
       return this.execHandler(cmd, currentSession, execOptions);

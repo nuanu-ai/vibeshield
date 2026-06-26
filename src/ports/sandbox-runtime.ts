@@ -36,6 +36,8 @@ export type SandboxExecEvent =
   | { readonly type: "exited"; readonly exitCode: number };
 
 export interface SandboxExecOptions {
+  /** Environment overrides for this command only. */
+  readonly env?: Readonly<Record<string, string>>;
   readonly onEvent?: (event: SandboxExecEvent) => void;
   /** Best-effort command wall-clock limit inside the sandbox. */
   readonly timeoutMs?: number;

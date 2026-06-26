@@ -27,7 +27,7 @@ export class MicrosandboxSession implements SandboxSession {
   ) {}
 
   async exec(command: string[], options: SandboxExecOptions = {}): Promise<ExecResult> {
-    const joined = command.map(shellQuote).join(" ");
+    const joined = withEnvPrefix(command.map(shellQuote).join(" "), options.env);
     const shellCommand = withTimeout(joined, options.timeoutMs);
     const onEvent = options.onEvent;
     if (onEvent === undefined) {
@@ -111,6 +111,24 @@ export class MicrosandboxSession implements SandboxSession {
       }
     }
   }
+}
+
+function withEnvPrefix(command: string, env: Readonly<Record<string, string>> | undefined): string {
+  if (env === undefined || Object.keys(env).length === 0) {
+    return command;
+  }
+  const prefix = Object.entries(env)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${shellEnvKey(key)}=${shellQuote(value)}`)
+    .join(" ");
+  return `${prefix} ${command}`;
+}
+
+function shellEnvKey(key: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    return key;
+  }
+  throw new Error(`Invalid sandbox environment variable name: ${key}`);
 }
 
 function toSandboxExecEvent(event: ExecEvent): SandboxExecEvent {

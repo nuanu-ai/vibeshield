@@ -19,7 +19,7 @@ import type {
   ModelEnhanceBatchInput,
   ModelEnhanceCount,
 } from "../ports/model-provider.js";
-import type { ExecResult } from "../ports/sandbox-runtime.js";
+import type { ExecResult, SandboxExecOptions } from "../ports/sandbox-runtime.js";
 import {
   renderDeepHtmlReport,
   renderDeepMarkdownReport,
@@ -80,6 +80,9 @@ const MODEL_SUMMARY_BUCKET_LIMIT = 12;
 const TOOLCHAIN_REFRESH_TIMEOUT_MS = 5 * 60 * 1000;
 const SCANNER_TIMEOUT_MS = 2 * 60 * 1000;
 const MODEL_REMEDIATION_CONCURRENCY = 2;
+const OSV_EXEC_OPTIONS: SandboxExecOptions = {
+  env: { NODE_OPTIONS: "--dns-result-order=ipv4first" },
+};
 
 const SCANNER_STAGE_IDS = [
   "scan.secrets.gitleaks",
@@ -562,6 +565,7 @@ function osvDependencyStage(): StageDefinition {
         check: "dependencies.osv",
         tool: "osv",
         command: ["vibeshield-osv-scan", "--source", SOURCE_DIR, "--output", OSV_VULN_REPORT_PATH],
+        execOptions: OSV_EXEC_OPTIONS,
         outputPath: OSV_VULN_REPORT_PATH,
         format: "osv-json",
         successfulExitCodes: [0],
@@ -1189,6 +1193,7 @@ interface JsonScannerOptions {
   readonly successfulExitCodes: ReadonlyArray<number>;
   readonly defaultOutput: string;
   readonly outputPath?: string;
+  readonly execOptions?: SandboxExecOptions;
   readonly candidatesFromRecords: (
     records: ReadonlyArray<unknown>,
     check: string,
@@ -1216,7 +1221,7 @@ async function runJsonScanner(ctx: StageContext, opts: JsonScannerOptions): Prom
 
   let result: ExecResult;
   try {
-    result = await ctx.session.exec(opts.command);
+    result = await ctx.session.exec(opts.command, opts.execOptions);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const redactedBytes = redactScannerBytes(jsonBytes({ error: message }));

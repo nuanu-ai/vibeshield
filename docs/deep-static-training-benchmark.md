@@ -33,10 +33,8 @@ measurement run:
 pnpm scan /tmp/vibeshield-score-src/Vulnerable-Flask-App --deep --no-model
 ```
 
-If OSV dependency scanning resolves Google APIs to unreachable IPv6 addresses,
-run the scan command with `NODE_OPTIONS=--dns-result-order=ipv4first`; otherwise
-the Juice Shop dependency reachability row will legitimately fail because the
-dependency findings never entered the run.
+The OSV dependency scanner runs with IPv4-first DNS ordering so benchmark runs
+stay reproducible on hosts where IPv6 egress is unavailable.
 
 ## Command
 
@@ -44,7 +42,7 @@ dependency findings never entered the run.
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-baseline.json \
   /Users/dmitry/.vibeshield/runs/20260626105132-3321b76c \
-  /Users/dmitry/.vibeshield/runs/20260626105706-0e7aa804 \
+  /Users/dmitry/.vibeshield/runs/20260626110829-b6b39b2e \
   /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
   /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
@@ -57,7 +55,7 @@ Run the curated ground-truth slice separately. Normal mode allows tracked
 pnpm benchmark:deep \
   --expect benchmarks/deep-static-training-ground-truth.json \
   /Users/dmitry/.vibeshield/runs/20260626105132-3321b76c \
-  /Users/dmitry/.vibeshield/runs/20260626105706-0e7aa804
+  /Users/dmitry/.vibeshield/runs/20260626110829-b6b39b2e
 ```
 
 To keep every known gap as a hard failure when future gaps are added:
@@ -67,7 +65,7 @@ pnpm benchmark:deep \
   --strict-ground-truth \
   --expect benchmarks/deep-static-training-ground-truth.json \
   /Users/dmitry/.vibeshield/runs/20260626105132-3321b76c \
-  /Users/dmitry/.vibeshield/runs/20260626105706-0e7aa804
+  /Users/dmitry/.vibeshield/runs/20260626110829-b6b39b2e
 ```
 
 Audit the Juice Shop challenge inventory separately. This checks that every
@@ -105,7 +103,7 @@ until the scored truth file is complete:
 ```bash
 pnpm benchmark:score \
   /Users/dmitry/.vibeshield/runs/20260626105132-3321b76c \
-  /Users/dmitry/.vibeshield/runs/20260626105706-0e7aa804 \
+  /Users/dmitry/.vibeshield/runs/20260626110829-b6b39b2e \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
   /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
 ```
@@ -115,7 +113,7 @@ pnpm benchmark:score \
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |
 | --- | --- | --- | ---: | --- | --- |
 | Java | WebGoat | `20260626105132-3321b76c` | 314 | `dependency_usage_path=1`, `external_input_to_dangerous_operation=313` | `data_flow` 356/356, `dependency_usage` 36/36, `language_support` checked 496/496 |
-| JS/TS | Juice Shop | `20260626105706-0e7aa804` | 549 | `dependency_usage_path=7`, `external_input_to_dangerous_operation=525`, `ci_supply_chain_path=3`, `content_resource_exposure_path=13`, `smart_contract_risk_path=1` | `data_flow` 695/695, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
+| JS/TS | Juice Shop | `20260626110829-b6b39b2e` | 549 | `dependency_usage_path=7`, `external_input_to_dangerous_operation=525`, `ci_supply_chain_path=3`, `content_resource_exposure_path=13`, `smart_contract_risk_path=1` | `data_flow` 695/695, `dependency_usage` 12/12, `content_assets` 1067/1067, `smart_contracts` 17/17, `language_support` checked 652/652 |
 | JS/TS local | Freeland | `20260625164008-81d5eb5a` | 164 | `external_input_to_dangerous_operation=163`, `ci_supply_chain_path=1` | `data_flow` 62/380, `language_support` checked 635/635 |
 | Python | Vulnerable-Flask-App | `20260626082052-aa2c42be` | 24 | `external_input_to_dangerous_operation=24` | `data_flow` 24/36, `language_support` checked 2/2 |
 | Go | go-dvwa | `20260626084326-6cff1ffd` | 3 | `dependency_usage_path=1`, `external_input_to_dangerous_operation=2` | `data_flow` 3/3, `dependency_usage` 1/1, `language_support` partial 54/55 due to one PHP file |

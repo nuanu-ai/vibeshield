@@ -991,6 +991,11 @@ describe("runScan quick scan vertical slice", () => {
     ).toBeLessThan(
       sandbox.invocations.findIndex((i) => i.command[0] === "trivy" && i.command[1] === "sbom"),
     );
+    expect(
+      sandbox.invocations.find(
+        (i) => i.command[0] === "vibeshield-osv-scan" && i.command.includes("--source"),
+      )?.env,
+    ).toEqual({ NODE_OPTIONS: "--dns-result-order=ipv4first" });
   });
 
   it("suppresses packaged SyntaxHighlighter eval noise without disabling app eval findings", async () => {
@@ -1780,9 +1785,10 @@ function positiveJoernSlices() {
         usages: [
           {
             targetObj: {
-              name: "fetch",
-              resolvedMethod: "fetch",
+              name: "readFile",
+              resolvedMethod: "fs.readFile",
               isExternal: true,
+              code: "fs.readFile(filePath)",
               label: "CALL",
               lineNumber: 4,
             },
