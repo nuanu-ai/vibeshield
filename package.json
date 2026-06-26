@@ -17,6 +17,7 @@
     "resume": "tsx src/cli.ts resume",
     "benchmark:deep": "tsx scripts/deep-benchmark.ts",
     "benchmark:score": "tsx scripts/deep-benchmark-score.ts",
+    "benchmark:score-review": "tsx scripts/deep-benchmark-score.ts --review-static-support",
     "benchmark:inventory": "tsx scripts/deep-benchmark-inventory.ts",
     "toolchain:prepare": "tsx scripts/prepare-toolchain.ts",
     "lint": "biome check .",

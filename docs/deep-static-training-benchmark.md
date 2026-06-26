@@ -108,6 +108,19 @@ pnpm benchmark:score \
   /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
 ```
 
+Use the static support review helper before changing `staticTruth` or
+`staticSupportReview` completeness. It shows which supported hypotheses are
+already consumed by scored truth or true-but-uncurated buckets and groups the
+remaining review queue by family/title with sample evidence:
+
+```bash
+pnpm benchmark:score-review \
+  /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
+  /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
+  /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
+  /Users/dmitry/.vibeshield/runs/20260626084326-6cff1ffd
+```
+
 ## Current Baseline
 
 | Stack | Repository | Run | Supported hypotheses | Candidate families | Key coverage |

@@ -9,7 +9,7 @@ import type { HypothesisCandidate } from "../src/domain/hypothesis-candidate.js"
 import type { SecurityAssessment } from "../src/domain/security-assessment.js";
 import type { StaticHypothesis } from "../src/domain/static-hypothesis.js";
 
-interface DeepReportJson {
+export interface DeepReportJson {
   readonly runId: string;
   readonly assessment: SecurityAssessment;
 }
@@ -178,6 +178,27 @@ export interface StaticScore {
   readonly supportPrecision: RatioMetric;
 }
 
+export interface StaticSupportReviewSummary {
+  readonly name: string;
+  readonly runId: string;
+  readonly repository: string;
+  readonly language: string;
+  readonly split: "canary" | "held-out" | "tuning";
+  readonly supported: number;
+  readonly expectedTruth: number;
+  readonly trueButUncurated: number;
+  readonly unreviewed: number;
+  readonly unreviewedGroups: ReadonlyArray<StaticSupportReviewGroup>;
+}
+
+export interface StaticSupportReviewGroup {
+  readonly family: string;
+  readonly title: string;
+  readonly count: number;
+  readonly sampleHypothesisIds: ReadonlyArray<string>;
+  readonly sampleCandidateReasons: ReadonlyArray<string>;
+}
+
 export interface RatioMetric {
   readonly numerator: number;
   readonly denominator: number;
@@ -198,6 +219,7 @@ export interface AggregateScore {
 interface CliOptions {
   readonly expectPath: string;
   readonly jsonOutput: boolean;
+  readonly reviewStaticSupport: boolean;
   readonly inputs: ReadonlyArray<string>;
 }
 
@@ -216,7 +238,7 @@ if (mainModulePath !== undefined && fileURLToPath(import.meta.url) === mainModul
   const options = parseArgs(process.argv.slice(2));
   if (options.inputs.length === 0) {
     process.stderr.write(
-      "Usage: pnpm benchmark:score [--json] [--expect benchmarks/deep-static-scored-ground-truth.json] <run-dir-or-report.json>...\n",
+      "Usage: pnpm benchmark:score [--json] [--review-static-support] [--expect benchmarks/deep-static-scored-ground-truth.json] <run-dir-or-report.json>...\n",
     );
     process.exit(2);
   }
@@ -225,6 +247,16 @@ if (mainModulePath !== undefined && fileURLToPath(import.meta.url) === mainModul
   const reports = await Promise.all(
     options.inputs.map(async (input) => loadReport(await reportPath(input))),
   );
+  if (options.reviewStaticSupport) {
+    const summaries = staticSupportReviewSummaries(expectationFile, reports);
+    if (options.jsonOutput) {
+      process.stdout.write(`${JSON.stringify(summaries, null, 2)}\n`);
+    } else {
+      printStaticSupportReviewSummaries(summaries);
+    }
+    process.exit(0);
+  }
+
   const summary = scoreBenchmarkReports(expectationFile, reports);
   const failed =
     summary.missingRepositories.length > 0 ||
@@ -299,6 +331,123 @@ export function scoreBenchmarkReports(
   }
 
   return { repositories, missingRepositories, aggregates, targetErrors };
+}
+
+export function staticSupportReviewSummaries(
+  expectationFile: DeepScoreExpectationFile,
+  reports: ReadonlyArray<DeepReportJson>,
+): StaticSupportReviewSummary[] {
+  const summaries: StaticSupportReviewSummary[] = [];
+  for (const expectation of expectationFile.repositories) {
+    const report = reports.find((candidate) =>
+      matchesRepository(candidate.assessment, expectation),
+    );
+    if (report === undefined) {
+      continue;
+    }
+    summaries.push(staticSupportReviewSummary(report, expectation));
+  }
+  return summaries;
+}
+
+function staticSupportReviewSummary(
+  report: DeepReportJson,
+  expectation: ScoredRepositoryExpectation,
+): StaticSupportReviewSummary {
+  const candidates = report.assessment.hypothesisCandidates ?? [];
+  const hypotheses = report.assessment.staticHypotheses ?? [];
+  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const supportedHypotheses = hypotheses.filter(
+    (hypothesis) => hypothesis.status === "statically_supported",
+  );
+  const expectedTruthIds = new Set<string>();
+
+  for (const item of expectation.staticHypotheses ?? []) {
+    if (item.inGraphScope === false) {
+      continue;
+    }
+    const hypothesis = supportedHypotheses.find(
+      (supported) =>
+        !expectedTruthIds.has(supported.id) &&
+        matchesStaticHypothesis(supported, candidatesById, item.matcher, item.candidateFamily),
+    );
+    if (hypothesis !== undefined) {
+      expectedTruthIds.add(hypothesis.id);
+    }
+  }
+
+  const trueButUncuratedIds = new Set<string>();
+  for (const hypothesis of supportedHypotheses) {
+    if (expectedTruthIds.has(hypothesis.id)) {
+      continue;
+    }
+    if (
+      (expectation.trueButUncuratedStatic ?? []).some((item) =>
+        matchesStaticHypothesis(hypothesis, candidatesById, item.matcher),
+      )
+    ) {
+      trueButUncuratedIds.add(hypothesis.id);
+    }
+  }
+
+  const groups = new Map<string, MutableStaticSupportReviewGroup>();
+  for (const hypothesis of supportedHypotheses) {
+    if (expectedTruthIds.has(hypothesis.id) || trueButUncuratedIds.has(hypothesis.id)) {
+      continue;
+    }
+    const candidate = candidatesById.get(hypothesis.candidateId);
+    const family = candidate?.family ?? "unknown";
+    const key = `${family}\0${hypothesis.title}`;
+    const existing = groups.get(key) ?? {
+      family,
+      title: hypothesis.title,
+      count: 0,
+      sampleHypothesisIds: [],
+      sampleCandidateReasons: [],
+    };
+    existing.count += 1;
+    if (existing.sampleHypothesisIds.length < 5) {
+      existing.sampleHypothesisIds.push(hypothesis.id);
+    }
+    if (candidate !== undefined && existing.sampleCandidateReasons.length < 3) {
+      existing.sampleCandidateReasons.push(candidate.candidateReason);
+    }
+    groups.set(key, existing);
+  }
+
+  const unreviewedGroups = [...groups.values()]
+    .map((group) => ({
+      family: group.family,
+      title: group.title,
+      count: group.count,
+      sampleHypothesisIds: group.sampleHypothesisIds,
+      sampleCandidateReasons: group.sampleCandidateReasons,
+    }))
+    .sort(
+      (a, b) =>
+        b.count - a.count || a.family.localeCompare(b.family) || a.title.localeCompare(b.title),
+    );
+
+  return {
+    name: expectation.name,
+    runId: report.runId,
+    repository: repositoryName(report.assessment),
+    language: expectation.language,
+    split: expectation.split,
+    supported: supportedHypotheses.length,
+    expectedTruth: expectedTruthIds.size,
+    trueButUncurated: trueButUncuratedIds.size,
+    unreviewed: supportedHypotheses.length - expectedTruthIds.size - trueButUncuratedIds.size,
+    unreviewedGroups,
+  };
+}
+
+interface MutableStaticSupportReviewGroup {
+  readonly family: string;
+  readonly title: string;
+  count: number;
+  readonly sampleHypothesisIds: string[];
+  readonly sampleCandidateReasons: string[];
 }
 
 export function scoreRepository(
@@ -1041,11 +1190,16 @@ async function reportPath(input: string): Promise<string> {
 function parseArgs(args: ReadonlyArray<string>): CliOptions {
   const inputs: string[] = [];
   let jsonOutput = false;
+  let reviewStaticSupport = false;
   let expectPath = "benchmarks/deep-static-scored-ground-truth.json";
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") {
       jsonOutput = true;
+      continue;
+    }
+    if (arg === "--review-static-support") {
+      reviewStaticSupport = true;
       continue;
     }
     if (arg === "--expect") {
@@ -1068,7 +1222,23 @@ function parseArgs(args: ReadonlyArray<string>): CliOptions {
       inputs.push(arg);
     }
   }
-  return { expectPath, jsonOutput, inputs };
+  return { expectPath, jsonOutput, reviewStaticSupport, inputs };
+}
+
+function printStaticSupportReviewSummaries(
+  summaries: ReadonlyArray<StaticSupportReviewSummary>,
+): void {
+  for (const summary of summaries) {
+    process.stdout.write(
+      `REVIEW ${summary.name} ${summary.runId} supported=${summary.supported} expectedTruth=${summary.expectedTruth} trueButUncurated=${summary.trueButUncurated} unreviewed=${summary.unreviewed}\n`,
+    );
+    for (const group of summary.unreviewedGroups) {
+      process.stdout.write(`  ${group.count} ${group.family} | ${group.title}\n`);
+      for (const reason of group.sampleCandidateReasons) {
+        process.stdout.write(`    e.g. ${reason}\n`);
+      }
+    }
+  }
 }
 
 function printSummary(summary: BenchmarkScoreSummary): void {

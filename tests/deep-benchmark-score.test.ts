@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { scoreBenchmarkReports } from "../scripts/deep-benchmark-score.js";
+import {
+  scoreBenchmarkReports,
+  staticSupportReviewSummaries,
+} from "../scripts/deep-benchmark-score.js";
 import type { Finding } from "../src/domain/finding.js";
 import type { HypothesisCandidate } from "../src/domain/hypothesis-candidate.js";
 import type { SecurityAssessment } from "../src/domain/security-assessment.js";
@@ -160,6 +163,95 @@ describe("deep benchmark score", () => {
       "static support precision not scoreable: static ground truth is incomplete",
     );
     expect(summary.targetErrors.some((error) => error.includes("not scoreable"))).toBe(true);
+  });
+
+  it("summarizes static support review queues without changing scoreability", () => {
+    const summaries = staticSupportReviewSummaries(
+      {
+        version: 1,
+        repositories: [
+          {
+            name: "Review fixture",
+            language: "JS/TS",
+            split: "tuning",
+            match: { originUrl: "https://example.test/review" },
+            directTruth: "complete",
+            directFpReview: "complete",
+            staticTruth: "incomplete",
+            staticSupportReview: "incomplete",
+            staticHypotheses: [
+              {
+                id: "static.sql",
+                title: "SQL injection path",
+                coverageArea: "data_flow",
+                candidateFamily: "external_input_to_dangerous_operation",
+                matcher: { titleIncludes: "SQL injection", statusIn: ["statically_supported"] },
+              },
+            ],
+            trueButUncuratedStatic: [
+              {
+                id: "extra.xss",
+                reason: "Additional reflected response variants are true duplicates.",
+                matcher: { titleIncludes: "Cross-site scripting" },
+              },
+            ],
+          },
+        ],
+      },
+      [
+        report({
+          originUrl: "https://example.test/review",
+          candidates: [
+            candidate("candidate.sql", {
+              family: "external_input_to_dangerous_operation",
+              title: "SQL injection path",
+              candidateReason: "SQL injection path: /users reaches query",
+            }),
+            candidate("candidate.xss", {
+              family: "external_input_to_dangerous_operation",
+              title: "Cross-site scripting path",
+              candidateReason: "Cross-site scripting path: /search reaches response",
+            }),
+            candidate("candidate.open-redirect", {
+              family: "external_input_to_dangerous_operation",
+              title: "Open redirect path",
+              candidateReason: "Open redirect path: /go reaches redirect",
+            }),
+          ],
+          hypotheses: [
+            hypothesis("hypothesis.sql", "candidate.sql", {
+              status: "statically_supported",
+              title: "SQL injection path",
+            }),
+            hypothesis("hypothesis.xss", "candidate.xss", {
+              status: "statically_supported",
+              title: "Cross-site scripting path",
+            }),
+            hypothesis("hypothesis.open-redirect", "candidate.open-redirect", {
+              status: "statically_supported",
+              title: "Open redirect path",
+            }),
+          ],
+        }),
+      ],
+    );
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({
+      supported: 3,
+      expectedTruth: 1,
+      trueButUncurated: 1,
+      unreviewed: 1,
+      unreviewedGroups: [
+        {
+          family: "external_input_to_dangerous_operation",
+          title: "Open redirect path",
+          count: 1,
+          sampleHypothesisIds: ["hypothesis.open-redirect"],
+          sampleCandidateReasons: ["Open redirect path: /go reaches redirect"],
+        },
+      ],
+    });
   });
 
   it("does not fail per-language targets for complete empty denominators", () => {
