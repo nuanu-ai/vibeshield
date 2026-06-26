@@ -148,9 +148,10 @@ export function correlateStage2Hypotheses(
     ),
   };
 
-  const filtered = correlateGraphRules(engineInput).filter((candidate) =>
-    hasRequiredContext(candidate),
-  );
+  const filtered = correlateGraphRules({
+    ...engineInput,
+    deduplicateSemanticCandidates: true,
+  }).filter((candidate) => hasRequiredContext(candidate));
   return input.maxCandidatesPerRule === undefined
     ? filtered
     : limitCandidatesPerRule(filtered, input.maxCandidatesPerRule);

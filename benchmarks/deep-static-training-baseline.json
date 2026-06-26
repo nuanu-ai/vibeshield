@@ -123,10 +123,10 @@
       "match": {
         "originUrl": "https://github.com/videvelopers/Vulnerable-Flask-App.git"
       },
-      "minHypothesisCandidates": 48,
-      "minSupportedHypotheses": 48,
+      "minHypothesisCandidates": 24,
+      "minSupportedHypotheses": 24,
       "requiredFamilies": {
-        "external_input_to_dangerous_operation": 48
+        "external_input_to_dangerous_operation": 24
       },
       "coverage": {
         "language_support": {
@@ -150,11 +150,11 @@
         "originUrl": "https://github.com/sqreen/go-dvwa.git"
       },
       "minFindings": 21,
-      "minHypothesisCandidates": 7,
-      "minSupportedHypotheses": 7,
+      "minHypothesisCandidates": 3,
+      "minSupportedHypotheses": 3,
       "requiredFamilies": {
         "dependency_usage_path": 1,
-        "external_input_to_dangerous_operation": 6
+        "external_input_to_dangerous_operation": 2
       },
       "coverage": {
         "language_support": {

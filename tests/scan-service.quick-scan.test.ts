@@ -609,7 +609,7 @@ describe("runScan quick scan vertical slice", () => {
     );
     const modelOn = await runGate4DeepScan(dir, source, model);
 
-    expect(model.hypothesisInputs.map((input) => input.hypotheses.length)).toEqual([2]);
+    expect(model.hypothesisInputs.map((input) => input.hypotheses.length)).toEqual([1]);
     expect(deepDeterministicProjection(modelOn.assessment)).toEqual(
       deepDeterministicProjection(modelOff.assessment),
     );
@@ -660,7 +660,7 @@ describe("runScan quick scan vertical slice", () => {
 
     const outcome = await runGate4DeepScan(dir, source, model);
 
-    expect(model.hypothesisInputs.map((input) => input.hypotheses.length)).toEqual([2, 1, 1]);
+    expect(model.hypothesisInputs.map((input) => input.hypotheses.length)).toEqual([1]);
     expect(outcome.assessment.staticHypotheses?.length).toBeGreaterThan(0);
     expect(
       outcome.assessment.hypothesisEnrichments?.every((item) => item.source === "catalog"),

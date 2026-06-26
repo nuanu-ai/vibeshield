@@ -96,6 +96,35 @@ describe("correlateStage2Hypotheses context and determinism", () => {
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
   });
 
+  it("deduplicates semantically equivalent source-to-sink paths", () => {
+    const request = node("Source", "Source:request", "r", {
+      sourceType: "request",
+    });
+    const lambda = node("Source", "Source:lambda", "<lambda>1", {
+      sourceType: "request",
+    });
+    const boundary = node("Boundary", "Boundary:lambda", "<lambda>1", {
+      boundaryType: "framework-input",
+    });
+    const sink = node("Sink", "Sink:command", "CommandContext", {
+      sinkType: "code_execution",
+    });
+    const firstPath = edge("flows_to", request, sink, "flows_to:request:command");
+    const aliasPath = edge("flows_to", lambda, sink, "flows_to:lambda:command");
+    const boundaryPath = edge("flows_to", boundary, sink, "flows_to:boundary:command");
+    const sourceGraph = graph(
+      [request, lambda, boundary, sink],
+      [firstPath, aliasPath, boundaryPath],
+    );
+
+    const candidates = familyCandidates("external_input_to_dangerous_operation", sourceGraph, []);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.title).toBe(
+      "Code execution path: external input reaches command or code execution",
+    );
+  });
+
   it("applies maxCandidatesPerRule after context-required filtering", () => {
     const fixture = dependencyFixture({ alternatePath: true });
     const candidates = correlateStage2Hypotheses({

@@ -45,6 +45,7 @@ export interface CorrelateGraphRulesInput {
   readonly findingContexts?: ReadonlyArray<FindingContextAssessment>;
   readonly rules: ReadonlyArray<CorrelationRuleDefinition>;
   readonly maxCandidatesPerRule?: number;
+  readonly deduplicateSemanticCandidates?: boolean;
 }
 
 interface SearchPath {
@@ -75,8 +76,18 @@ export function correlateGraphRules(input: CorrelateGraphRulesInput): Hypothesis
 
   for (const rule of rules) {
     const ruleCandidates: HypothesisCandidate[] = [];
+    const seenCandidateKeys =
+      input.deduplicateSemanticCandidates === true ? new Set<string>() : undefined;
     for (const path of pathsForRule(input.graph, rule)) {
-      ruleCandidates.push(candidateForPath(input.graph, findingContexts, rule, path));
+      const candidate = candidateForPath(input.graph, findingContexts, rule, path);
+      if (seenCandidateKeys !== undefined) {
+        const candidateKey = semanticCandidateKey(input.graph, candidate, path);
+        if (seenCandidateKeys.has(candidateKey)) {
+          continue;
+        }
+        seenCandidateKeys.add(candidateKey);
+      }
+      ruleCandidates.push(candidate);
       if (
         input.maxCandidatesPerRule !== undefined &&
         ruleCandidates.length >= input.maxCandidatesPerRule
@@ -88,6 +99,59 @@ export function correlateGraphRules(input: CorrelateGraphRulesInput): Hypothesis
   }
 
   return validateHypothesisCandidates(candidates, { findingIds, graphNodeIds, graphEdgeIds });
+}
+
+function semanticCandidateKey(
+  graph: SecurityGraph,
+  candidate: HypothesisCandidate,
+  path: SearchPath,
+): string {
+  const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
+  return [
+    candidate.ruleId,
+    candidate.family,
+    candidate.title,
+    semanticNodeKey(nodesById.get(path.startNodeId)),
+    semanticNodeKey(nodesById.get(path.endNodeId)),
+    candidate.findingIds.join(","),
+  ].join("\0");
+}
+
+function semanticNodeKey(node: SecurityGraphNode | undefined): string {
+  if (node === undefined) {
+    return "missing";
+  }
+  const location =
+    node.repoPath === undefined || node.lineRange === undefined
+      ? undefined
+      : `${node.repoPath}:${node.lineRange.startLine}`;
+  const semanticKind =
+    location !== undefined && (node.kind === "Boundary" || node.kind === "Source")
+      ? "Entry"
+      : node.kind;
+  const typedDescriptor =
+    semanticKind === "Entry" ? undefined : semanticNodeDescriptor(node, location !== undefined);
+  if (location !== undefined) {
+    return [semanticKind, typedDescriptor ?? "", location].join(":");
+  }
+  return [semanticKind, typedDescriptor ?? node.stableKey].join(":");
+}
+
+function semanticNodeDescriptor(node: SecurityGraphNode, hasLocation: boolean): string | undefined {
+  switch (node.kind) {
+    case "Boundary":
+      return stringProperty(node.properties.routeOrName);
+    case "Sink":
+      return stringProperty(node.properties.sinkType);
+    case "Component":
+      return stringProperty(node.properties.packageName);
+    case "Resource":
+      return stringProperty(node.properties.resourceType);
+    case "ExternalService":
+      return stringProperty(node.properties.serviceType);
+    default:
+      return hasLocation ? undefined : stringProperty(node.properties.fullName);
+  }
 }
 
 function validateRule(rule: CorrelationRuleDefinition): CorrelationRuleDefinition {

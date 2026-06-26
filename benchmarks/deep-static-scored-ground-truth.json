@@ -249,7 +249,7 @@
           "candidateFamily": "external_input_to_dangerous_operation",
           "matcher": {
             "titleIncludes": "Hidden content",
-            "candidateReasonIncludes": "/get_admin_mail",
+            "candidateReasonIncludes": "hidden admin content exposure",
             "statusIn": ["statically_supported"]
           }
         },
@@ -319,7 +319,7 @@
           "candidateFamily": "external_input_to_dangerous_operation",
           "matcher": {
             "titleIncludes": "File upload",
-            "candidateReasonIncludes": "/upload",
+            "candidateReasonIncludes": "file upload handling",
             "statusIn": ["statically_supported"]
           }
         }
@@ -370,7 +370,7 @@
           "candidateFamily": "external_input_to_dangerous_operation",
           "matcher": {
             "titleIncludes": "Code execution",
-            "candidateReasonIncludes": "reaches CommandContext",
+            "candidateReasonIncludesAll": ["server/router.go:45", "vulnerable/system.go:9"],
             "statusIn": ["statically_supported"]
           }
         }
