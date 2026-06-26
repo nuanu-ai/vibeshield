@@ -297,6 +297,24 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(authGraph.flows).toHaveLength(1);
   });
 
+  it("does not mark ordinary JWT auth helper calls as token-trust sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", genericJwtAuthHelperSlices())] }),
+    );
+
+    expect(graph.nodes.filter((node) => node.kind === "Sink")).toEqual([]);
+    expect(graph.flows).toHaveLength(0);
+  });
+
+  it("does not reclassify generic JWT decode helpers as coupon trust", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", genericInsecurityJwtDecodeSlices())] }),
+    );
+
+    expect(graph.nodes.filter((node) => node.kind === "Sink")).toEqual([]);
+    expect(graph.flows).toHaveLength(0);
+  });
+
   it("marks WebGoat trust, misconfiguration, and logging lesson semantics as sinks", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", webGoatTrustSemanticsSlices())] }),
@@ -984,6 +1002,99 @@ function jwtTokenTrustSlices() {
               code: "Jwts.builder().signWith(SignatureAlgorithm.HS512, JWT_PASSWORD)",
               label: "CALL",
               lineNumber: 12,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function genericJwtAuthHelperSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "src/routes/orders.ts::program:listOrders",
+        fileName: "src/routes/orders.ts",
+        lineNumber: 10,
+        boundary: {
+          boundaryType: "express",
+          routeOrName: "GET /api/orders",
+          method: "GET",
+          sourceName: "req",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "authenticate",
+              resolvedMethod: "src/lib/auth.ts::program:authenticate",
+              code: "const user = authenticate(req)",
+              label: "CALL",
+              lineNumber: 11,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "src/lib/auth.ts::program:authenticate",
+        fileName: "src/lib/auth.ts",
+        lineNumber: 5,
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "decode",
+              resolvedMethod: "jsonwebtoken.decode",
+              code: "const decoded = jwt.decode(token)",
+              label: "CALL",
+              lineNumber: 7,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function genericInsecurityJwtDecodeSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "routes/chat.ts::program:chat",
+        fileName: "routes/chat.ts",
+        lineNumber: 115,
+        boundary: {
+          boundaryType: "framework-input",
+          routeOrName: "/rest/chat",
+          sourceName: "request",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "from",
+              resolvedMethod: "lib/insecurity.authenticatedUsers.from",
+              code: "const user = security.authenticatedUsers.from(req)",
+              label: "CALL",
+              lineNumber: 116,
+            },
+          },
+        ],
+      },
+      {
+        fullName: "lib/insecurity.ts::program:authenticatedUsers.from",
+        fileName: "lib/insecurity.ts",
+        lineNumber: 54,
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "decode",
+              resolvedMethod: "jsonwebtoken.decode",
+              code: "const decoded = jwt.decode(token)",
+              label: "CALL",
+              lineNumber: 56,
             },
           },
         ],

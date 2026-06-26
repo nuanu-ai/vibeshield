@@ -1322,18 +1322,7 @@ function isJwtTokenTrustOperation(
   entity: ObservedEntity,
 ): boolean {
   const context = entityDescriptorContext(entity, candidate).toLowerCase();
-  const jwtContext =
-    context.includes("/jwt/") ||
-    context.includes("lessons.jwt") ||
-    context.includes("routes/verify.ts") ||
-    context.includes("lib/insecurity.ts") ||
-    lower.includes("jsonwebtoken") ||
-    lower.includes("io.jsonwebtoken") ||
-    lower.includes("jwts.") ||
-    lower.includes("com.auth0.jwt") ||
-    lower.includes("signwith") ||
-    lower.includes("setsigningkey");
-  if (!jwtContext) {
+  if (!hasJwtTrustContext(context, lower, methodName)) {
     return false;
   }
   return (
@@ -1361,6 +1350,21 @@ function isJwtTokenTrustOperation(
       "signwith",
       "setsigningkey",
     ].includes(methodName)
+  );
+}
+
+function hasJwtTrustContext(context: string, lower: string, methodName: string): boolean {
+  return (
+    context.includes("/jwt/") ||
+    context.includes("lessons.jwt") ||
+    lower.includes("hasalgorithm") ||
+    lower.includes("hasemail") ||
+    lower.includes("setsigningkey") ||
+    lower.includes("signwith") ||
+    lower.includes("jwts.") ||
+    lower.includes("io.jsonwebtoken") ||
+    methodName === "setsigningkey" ||
+    methodName === "signwith"
   );
 }
 
@@ -1509,7 +1513,16 @@ function isCouponEncodingTrustOperation(
   entity: ObservedEntity,
 ): boolean {
   const context = entityDescriptorContext(entity, candidate).toLowerCase();
-  if (!(context.includes("routes/coupon.ts") || context.includes("lib/insecurity.ts"))) {
+  const couponContext =
+    context.includes("coupon") ||
+    lower.includes("z85") ||
+    lower.includes("discountfromcoupon") ||
+    lower.includes("generatecoupon") ||
+    lower.includes("hasvalidformat");
+  if (
+    !couponContext ||
+    !(context.includes("routes/coupon.ts") || context.includes("lib/insecurity.ts"))
+  ) {
     return false;
   }
   return (
