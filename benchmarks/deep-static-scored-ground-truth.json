@@ -17,10 +17,51 @@
         "originUrl": "https://github.com/WebGoat/WebGoat.git"
       },
       "expectedVerdict": "not-ready-to-deploy",
-      "directTruth": "incomplete",
-      "directFpReview": "incomplete",
+      "directTruth": "complete",
+      "directFpReview": "complete",
       "staticTruth": "incomplete",
       "staticSupportReview": "incomplete",
+      "trueButUncuratedDirect": [
+        {
+          "id": "webgoat.additional-jwt-material",
+          "reason": "Additional JWT tokens in lesson docs, tests, and WebWolf examples are repeated true lesson materials but are not separate direct recall-denominator items.",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "ruleId": "jwt",
+            "category": "secret"
+          }
+        },
+        {
+          "id": "webgoat.additional-generic-api-keys",
+          "reason": "Additional generic API-key shaped lesson constants are repeated true teaching fixtures but are not separate direct recall-denominator items.",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "ruleId": "generic-api-key",
+            "category": "secret"
+          }
+        },
+        {
+          "id": "webgoat.additional-private-keys",
+          "reason": "The cryptography lesson contains multiple hardcoded private-key blocks; one is kept as the recall-denominator item and the rest are true duplicates.",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "ruleId": "private-key",
+            "category": "secret"
+          }
+        },
+        {
+          "id": "webgoat.additional-xstream-cves",
+          "reason": "The same vulnerable XStream dependency produces many CVE rows; one dependency finding is kept as the recall-denominator item and the rest are true duplicate dependency findings.",
+          "matcher": {
+            "sourceTool": "trivy",
+            "category": "dependency",
+            "metadata": {
+              "packageName": "com.thoughtworks.xstream:xstream",
+              "installedVersion": "1.4.5"
+            }
+          }
+        }
+      ],
       "directFindings": [
         {
           "id": "webgoat.jwt-secret",
@@ -31,6 +72,44 @@
             "ruleId": "jwt",
             "category": "secret",
             "filePathIncludes": "lessons/jwt"
+          }
+        },
+        {
+          "id": "webgoat.generic-api-key",
+          "title": "Lessons contain API-key shaped secret constants",
+          "class": "secret",
+          "coverageArea": "language_support",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "ruleId": "generic-api-key",
+            "category": "secret",
+            "filePathIncludes": "src/main/java/org/owasp/webgoat/lessons"
+          }
+        },
+        {
+          "id": "webgoat.private-key",
+          "title": "Cryptography lesson contains hardcoded private-key material",
+          "class": "secret",
+          "coverageArea": "language_support",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "ruleId": "private-key",
+            "category": "secret",
+            "filePathIncludes": "src/main/java/org/owasp/webgoat/lessons/cryptography/CryptoUtil.java"
+          }
+        },
+        {
+          "id": "webgoat.xstream-cve",
+          "title": "WebGoat pins a vulnerable XStream dependency",
+          "class": "Dependency vulnerability",
+          "coverageArea": "dependency_usage",
+          "matcher": {
+            "sourceTool": "trivy",
+            "category": "dependency",
+            "metadata": {
+              "packageName": "com.thoughtworks.xstream:xstream",
+              "installedVersion": "1.4.5"
+            }
           }
         }
       ],
@@ -83,7 +162,8 @@
         }
       },
       "notes": [
-        "Seeded from the current coverage-style WebGoat expectations. Full lesson/CWE truth and FP/support review are still required before precision or recall can be claimed."
+        "Direct finding review is complete for run 20260626085453-d38d52b5: the prior minified underscore code-pattern hit is suppressed, repeated JWT/API-key/private-key lesson materials are treated as true duplicates, and XStream CVE rows are grouped as duplicate dependency findings.",
+        "Seeded from the current coverage-style WebGoat expectations. Full static lesson/CWE truth and static support review are still required before static precision or recall can be claimed."
       ]
     },
     {
