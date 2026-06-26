@@ -219,21 +219,20 @@ standalone family-lane entries are the committed secrets fixtures under
 secrets recall and one clean control for false-positive review. The dependencies
 lane under `benchmarks/family-lanes/dependencies/` adds the same shape for a
 planted vulnerable `lodash@4.17.20` manifest and a patched clean control. WebGoat
-and Juice Shop carry the current curated coverage-style static expectations in
-the scored truth file: WebGoat scores the current slice at 20/20 candidate
-matches and Juice Shop scores 36/36 candidate matches on the pinned runs. Python
-and Go include pinned static-truth slices curated from their READMEs and source:
+and Juice Shop now promote their curated coverage-style static expectations into
+complete scored truth for the current pinned denominator: WebGoat scores 20/20
+candidate matches and Juice Shop scores 36/36 candidate matches on the pinned
+runs. Python and Go include pinned static-truth slices curated from their READMEs
+and source:
 Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
 WebGoat, Juice Shop, and go-dvwa have complete direct-finding review for the
 current scored runs. Python direct truth is complete as an empty direct Quick
 Scan denominator for the current report. WebGoat and Juice Shop static-support
 reviews are complete for the current pinned runs, including explicit false-support
-review for fixed-target WebWolf mail-client traces. Java/JS static truth remains
-incomplete until the scored denominator is promoted from coverage-style
-expectations to complete benchmark truth, so
-`pnpm benchmark:score` reports scoreability failures instead of pretending
-full static recall can already be claimed.
+review for fixed-target WebWolf mail-client traces. `pnpm benchmark:score` now
+computes static support precision and candidate recall for the current scored
+slice instead of reporting Java/JS scoreability failures.
 
 Current Juice Shop inventory audit result:
 

@@ -133,7 +133,7 @@
       "expectedVerdict": "not-ready-to-deploy",
       "directTruth": "complete",
       "directFpReview": "complete",
-      "staticTruth": "incomplete",
+      "staticTruth": "complete",
       "staticSupportReview": "complete",
       "trueButUncuratedDirect": [
         {
@@ -473,7 +473,7 @@
       },
       "notes": [
         "Direct finding review is complete for run 20260626112711-237f9ec7: the prior minified underscore code-pattern hit is suppressed, repeated JWT/API-key/private-key lesson materials are treated as true duplicates, and XStream CVE rows are grouped as duplicate dependency findings.",
-        "Scored static truth now includes the curated coverage-style expectations from WebGoat Java ground truth slice; static truth is still incomplete until the scored denominator is promoted from coverage-style expectations to complete benchmark truth.",
+        "Scored static truth is complete for the current pinned WebGoat denominator: the strict ground-truth gate covers 21/21 curated classes with 0 known gaps, and the scored static subset maps those classes into candidate-recall items.",
         "Static support review is complete for run 20260626112711-237f9ec7: remaining lesson/static paths are reviewed as true-but-uncurated variants, and fixed WebWolf mail-client SSRF traces are reviewed as false support."
       ],
       "trueButUncuratedStatic": [
@@ -771,7 +771,7 @@
       "expectedVerdict": "not-ready-to-deploy",
       "directTruth": "complete",
       "directFpReview": "complete",
-      "staticTruth": "incomplete",
+      "staticTruth": "complete",
       "staticSupportReview": "complete",
       "trueButUncuratedDirect": [
         {
@@ -1403,7 +1403,7 @@
       },
       "notes": [
         "Direct finding review is complete for run 20260626112812-9d82f57e: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
-        "Scored static truth now includes the curated coverage-style expectations from Juice Shop JS/TS ground truth slice; static truth is still incomplete until the scored denominator is promoted from coverage-style expectations to complete benchmark truth.",
+        "Scored static truth is complete for the current pinned Juice Shop denominator: the strict ground-truth gate covers 39/39 curated classes with 0 known gaps, and the Juice challenge inventory reports 0 open challenge-level recall gaps.",
         "Static support review is complete for run 20260626112812-9d82f57e: all remaining supported hypotheses are reviewed as true-but-uncurated variants rather than separate static recall-denominator items."
       ],
       "trueButUncuratedStatic": [
