@@ -7,11 +7,11 @@
         "originUrl": "https://github.com/WebGoat/WebGoat.git"
       },
       "minFindings": 60,
-      "minHypothesisCandidates": 674,
-      "minSupportedHypotheses": 674,
+      "minHypothesisCandidates": 316,
+      "minSupportedHypotheses": 316,
       "requiredFamilies": {
         "dependency_usage_path": 36,
-        "external_input_to_dangerous_operation": 638
+        "external_input_to_dangerous_operation": 280
       },
       "coverage": {
         "language_support": {
@@ -43,11 +43,11 @@
         "originUrl": "https://github.com/juice-shop/juice-shop.git"
       },
       "minFindings": 88,
-      "minHypothesisCandidates": 1797,
-      "minSupportedHypotheses": 1797,
+      "minHypothesisCandidates": 616,
+      "minSupportedHypotheses": 616,
       "requiredFamilies": {
         "dependency_usage_path": 31,
-        "external_input_to_dangerous_operation": 1749,
+        "external_input_to_dangerous_operation": 568,
         "ci_supply_chain_path": 3,
         "content_resource_exposure_path": 13,
         "smart_contract_risk_path": 1

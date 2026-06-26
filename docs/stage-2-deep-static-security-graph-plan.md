@@ -170,10 +170,10 @@ Status:
   Joern CPG artifact is stored as a blob; no path step is created without a
   `SecurityGraphEdge` and evidence.
   Evidence: current live `--deep` runs produced supported attack paths on
-  WebGoat (Java, run `20260626080553-bf18a6d9`, 674 supported static
+  WebGoat (Java, run `20260626082814-6ba9ebc8`, 316 supported static
   hypotheses, `data_flow` checked 319/319, `component_usage` checked 3086/3086,
   `dependency_usage` checked 36/36, `ci_iac` checked 3/3), Juice Shop (JS/TS, run
-  `20260626080710-f515f6db`, 1797, `data_flow` checked 732/732,
+  `20260626082921-4b7e2b26`, 616, `data_flow` checked 732/732,
   `component_usage` checked 2194/2194, `dependency_usage` checked 12/12,
   `ci_iac` checked 18/18, `content_assets` checked 1067/1067,
   `smart_contracts` checked 17/17), Freeland (JS/TS,
@@ -188,10 +188,12 @@ Status:
   checked 2/2, language support partial because one PHP file is outside the
   supported set).
   The fresh matrix passes
-  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260626080553-bf18a6d9 /Users/dmitry/.vibeshield/runs/20260626080710-f515f6db /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be /Users/dmitry/.vibeshield/runs/20260626082005-29aeb41b`.
+  `pnpm benchmark:deep --expect benchmarks/deep-static-training-baseline.json /Users/dmitry/.vibeshield/runs/20260626082814-6ba9ebc8 /Users/dmitry/.vibeshield/runs/20260626082921-4b7e2b26 /Users/dmitry/.vibeshield/runs/20260625164008-81d5eb5a /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be /Users/dmitry/.vibeshield/runs/20260626082005-29aeb41b`.
   The curated ground-truth slice passes in normal and strict benchmark modes:
   WebGoat covers 21/21 expectations and Juice Shop covers 39/39 expectations
-  with no known gaps.
+  with no known gaps. The post-semantic-dedup WebGoat and Juice Shop reports
+  keep that curated coverage while reducing the static support review queue from
+  674 to 316 and from 1797 to 616, respectively.
   The Juice Shop inventory audit
   `pnpm benchmark:inventory --source juice-shop=/tmp/vibeshield-juice-shop-probe`
   maps 113 challenges across 16 categories to curated ground truth with 0
