@@ -1,0 +1,49 @@
+{
+  "runId": "fixture-dependencies-clean-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded dependencies clean fixture",
+      "localPath": "benchmarks/family-lanes/dependencies/clean-npm-repo",
+      "commitSha": "fixture-dependencies-clean-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 310,
+      "sourceHash": "sha256:fixture-dependencies-clean-v1",
+      "commitSha": "fixture-dependencies-clean-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": [
+        {
+          "tool": "trivy",
+          "version": "0.71.2"
+        }
+      ]
+    },
+    "verdict": "looks-ok-for-now",
+    "coverage": [
+      {
+        "check": "dependencies.trivy",
+        "status": "checked"
+      }
+    ],
+    "findingSummary": {
+      "total": 0,
+      "bySeverity": {},
+      "byCategory": {}
+    },
+    "evidence": [],
+    "findings": [],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; this clean control should produce no dependency finding."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}

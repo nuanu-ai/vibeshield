@@ -1,0 +1,88 @@
+{
+  "runId": "fixture-dependencies-vulnerable-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded dependencies vulnerable fixture",
+      "localPath": "benchmarks/family-lanes/dependencies/vulnerable-npm-repo",
+      "commitSha": "fixture-dependencies-vulnerable-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 360,
+      "sourceHash": "sha256:fixture-dependencies-vulnerable-v1",
+      "commitSha": "fixture-dependencies-vulnerable-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": [
+        {
+          "tool": "trivy",
+          "version": "0.71.2"
+        }
+      ]
+    },
+    "verdict": "critical-fix-needed",
+    "coverage": [
+      {
+        "check": "dependencies.trivy",
+        "status": "checked"
+      }
+    ],
+    "findingSummary": {
+      "total": 1,
+      "bySeverity": {
+        "high": 1
+      },
+      "byCategory": {
+        "dependency": 1
+      }
+    },
+    "evidence": [
+      {
+        "id": "evidence.seeded-lodash-cve",
+        "rawArtifactBlobSha256": "sha256:trivy-lodash-cve-fixture",
+        "filePath": "package-lock.json",
+        "startLine": 14,
+        "endLine": 14,
+        "snippet": "\"lodash\": \"4.17.20\"",
+        "snippetHash": "sha256:seeded-lodash-4.17.20",
+        "tool": "trivy"
+      }
+    ],
+    "findings": [
+      {
+        "id": "finding.seeded-lodash-cve",
+        "sourceTool": "trivy",
+        "ruleId": "CVE-2021-23337",
+        "category": "dependency",
+        "severity": "high",
+        "confidence": "high",
+        "locations": [
+          {
+            "filePath": "package-lock.json",
+            "startLine": 14,
+            "endLine": 14
+          }
+        ],
+        "evidenceIds": ["evidence.seeded-lodash-cve"],
+        "fingerprint": "package-lock.json:lodash:CVE-2021-23337",
+        "remediationKey": "dependency-vulnerability",
+        "metadata": {
+          "packageName": "lodash",
+          "installedVersion": "4.17.20",
+          "fixedVersion": "4.17.21"
+        }
+      }
+    ],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; the vulnerable package manifest is synthetic."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}

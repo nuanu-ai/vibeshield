@@ -65,6 +65,65 @@
       ]
     },
     {
+      "name": "Seeded dependencies vulnerable fixture",
+      "language": "Fixture",
+      "split": "tuning",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/dependencies/vulnerable-npm-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "directFindings": [
+        {
+          "id": "seeded-dependencies.lodash-cve",
+          "title": "Seeded vulnerable lodash manifest is reported by Trivy",
+          "checkFamily": "dependencies",
+          "class": "Dependency vulnerability",
+          "coverageArea": "dependencies.trivy",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "CVE-2021-23337",
+            "category": "dependency",
+            "filePathIncludes": "package-lock.json",
+            "metadata": {
+              "packageName": "lodash",
+              "installedVersion": "4.17.20"
+            }
+          }
+        }
+      ],
+      "coverage": {
+        "dependencies.trivy": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: lodash@4.17.20 is planted by construction as a vulnerable manifest/CVE pair, so this is a direct dependency recall item with a clean truth oracle."
+      ]
+    },
+    {
+      "name": "Seeded dependencies clean fixture",
+      "language": "Fixture",
+      "split": "held-out",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/dependencies/clean-npm-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "coverage": {
+        "dependencies.trivy": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: the patched control manifest contains no vulnerable dependency, so any direct dependency finding would score as a false positive."
+      ]
+    },
+    {
       "name": "WebGoat Java scored seed",
       "language": "Java",
       "split": "tuning",
