@@ -179,6 +179,61 @@
       ]
     },
     {
+      "name": "Seeded IaC/config bad Dockerfile fixture",
+      "language": "Fixture",
+      "split": "tuning",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/iac-config/bad-dockerfile-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "directFindings": [
+        {
+          "id": "seeded-iac-config.dockerfile-root-user",
+          "title": "Seeded Dockerfile without non-root user is reported by Trivy config",
+          "checkFamily": "iac-config",
+          "class": "IaC hardening",
+          "coverageArea": "iac.trivy-config",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "DS-0002",
+            "category": "iac",
+            "filePathIncludes": "Dockerfile"
+          }
+        }
+      ],
+      "coverage": {
+        "iac.trivy-config": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: the Dockerfile runs as the default root user by construction, so this is a direct IaC/config recall item with a clean truth oracle."
+      ]
+    },
+    {
+      "name": "Seeded IaC/config clean Dockerfile fixture",
+      "language": "Fixture",
+      "split": "held-out",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/iac-config/clean-dockerfile-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "coverage": {
+        "iac.trivy-config": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: the clean control Dockerfile contains no planted IaC/config issue, so any direct IaC/config finding would score as a false positive."
+      ]
+    },
+    {
       "name": "WebGoat Java scored seed",
       "language": "Java",
       "split": "tuning",

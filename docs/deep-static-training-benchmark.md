@@ -111,6 +111,8 @@ pnpm benchmark:score \
   benchmarks/family-lanes/dependencies/clean-npm-report.json \
   benchmarks/family-lanes/ci-cd/bad-workflow-report.json \
   benchmarks/family-lanes/ci-cd/clean-workflow-report.json \
+  benchmarks/family-lanes/iac-config/bad-dockerfile-report.json \
+  benchmarks/family-lanes/iac-config/clean-dockerfile-report.json \
   /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
   /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
@@ -130,6 +132,8 @@ pnpm benchmark:score-review \
   benchmarks/family-lanes/dependencies/clean-npm-report.json \
   benchmarks/family-lanes/ci-cd/bad-workflow-report.json \
   benchmarks/family-lanes/ci-cd/clean-workflow-report.json \
+  benchmarks/family-lanes/iac-config/bad-dockerfile-report.json \
+  benchmarks/family-lanes/iac-config/clean-dockerfile-report.json \
   /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
   /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
@@ -223,11 +227,13 @@ secrets recall and one clean control for false-positive review. The dependencies
 lane under `benchmarks/family-lanes/dependencies/` adds the same shape for a
 planted vulnerable `lodash@4.17.20` manifest and a patched clean control. The
 CI/CD lane under `benchmarks/family-lanes/ci-cd/` adds an invalid GitHub Actions
-workflow and a clean workflow control. WebGoat and Juice Shop now promote their
-curated coverage-style static expectations into complete scored truth for the
-current pinned denominator: WebGoat scores 20/20 candidate matches and Juice
-Shop scores 36/36 candidate matches on the pinned runs. Python and Go include
-pinned static-truth slices curated from their READMEs and source:
+workflow and a clean workflow control. The IaC/config lane under
+`benchmarks/family-lanes/iac-config/` adds a weak Dockerfile and a clean
+Dockerfile control. WebGoat and Juice Shop now promote their curated
+coverage-style static expectations into complete scored truth for the current
+pinned denominator: WebGoat scores 20/20 candidate matches and Juice Shop scores
+36/36 candidate matches on the pinned runs. Python and Go include pinned
+static-truth slices curated from their READMEs and source:
 Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
 WebGoat, Juice Shop, and go-dvwa have complete direct-finding review for the

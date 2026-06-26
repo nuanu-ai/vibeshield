@@ -1,0 +1,49 @@
+{
+  "runId": "fixture-iac-config-clean-dockerfile-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded IaC/config clean Dockerfile fixture",
+      "localPath": "benchmarks/family-lanes/iac-config/clean-dockerfile-repo",
+      "commitSha": "fixture-iac-config-clean-dockerfile-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 330,
+      "sourceHash": "sha256:fixture-iac-config-clean-dockerfile-v1",
+      "commitSha": "fixture-iac-config-clean-dockerfile-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": [
+        {
+          "tool": "trivy",
+          "version": "0.71.2"
+        }
+      ]
+    },
+    "verdict": "looks-ok-for-now",
+    "coverage": [
+      {
+        "check": "iac.trivy-config",
+        "status": "checked"
+      }
+    ],
+    "findingSummary": {
+      "total": 0,
+      "bySeverity": {},
+      "byCategory": {}
+    },
+    "evidence": [],
+    "findings": [],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; this clean control should produce no IaC/config finding."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}

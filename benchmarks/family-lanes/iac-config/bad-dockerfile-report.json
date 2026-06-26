@@ -1,0 +1,83 @@
+{
+  "runId": "fixture-iac-config-bad-dockerfile-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded IaC/config bad Dockerfile fixture",
+      "localPath": "benchmarks/family-lanes/iac-config/bad-dockerfile-repo",
+      "commitSha": "fixture-iac-config-bad-dockerfile-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 300,
+      "sourceHash": "sha256:fixture-iac-config-bad-dockerfile-v1",
+      "commitSha": "fixture-iac-config-bad-dockerfile-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": [
+        {
+          "tool": "trivy",
+          "version": "0.71.2"
+        }
+      ]
+    },
+    "verdict": "not-ready-to-deploy",
+    "coverage": [
+      {
+        "check": "iac.trivy-config",
+        "status": "checked"
+      }
+    ],
+    "findingSummary": {
+      "total": 1,
+      "bySeverity": {
+        "medium": 1
+      },
+      "byCategory": {
+        "iac": 1
+      }
+    },
+    "evidence": [
+      {
+        "id": "evidence.seeded-dockerfile-root-user",
+        "rawArtifactBlobSha256": "sha256:trivy-dockerfile-root-user-fixture",
+        "filePath": "Dockerfile",
+        "startLine": 1,
+        "endLine": 5,
+        "snippet": "FROM node:22-alpine",
+        "snippetHash": "sha256:seeded-dockerfile-root-user",
+        "tool": "trivy"
+      }
+    ],
+    "findings": [
+      {
+        "id": "finding.seeded-dockerfile-root-user",
+        "sourceTool": "trivy",
+        "ruleId": "DS-0002",
+        "category": "iac",
+        "severity": "medium",
+        "confidence": "high",
+        "locations": [
+          {
+            "filePath": "Dockerfile",
+            "startLine": 1,
+            "endLine": 5
+          }
+        ],
+        "evidenceIds": ["evidence.seeded-dockerfile-root-user"],
+        "fingerprint": "Dockerfile:DS-0002:1",
+        "remediationKey": "iac-hardening"
+      }
+    ],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; the Dockerfile hardening issue is synthetic."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}
