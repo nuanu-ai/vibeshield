@@ -349,6 +349,19 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(new Set(graph.flows.map((flow) => flow.sinkNodeId)).size).toBeGreaterThanOrEqual(13);
   });
 
+  it("does not mark unrelated LLM config or error assignments as LLM tool sinks", () => {
+    const graph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", llmTrustNoiseSlices())] }),
+    );
+    const llmSinks = graph.nodes.filter(
+      (node) => node.kind === "Sink" && node.properties.sinkType === "llm_tool_trust",
+    );
+
+    expect(llmSinks.map((node) => [node.label, node.lineRange?.startLine])).toEqual([
+      ["streamText", 20],
+    ]);
+  });
+
   it("connects route handlers to sinks inside nested Joern lambda entities", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", nestedLambdaSqlSlices())] }),
@@ -2140,6 +2153,54 @@ function javascriptSpecialSinkSlices() {
               code: "pug.compile(req.body.template)",
               label: "CALL",
               lineNumber: 30,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function llmTrustNoiseSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "routes/chat.ts::program:chat",
+        fileName: "routes/chat.ts",
+        lineNumber: 10,
+        boundary: {
+          boundaryType: "javascript-web",
+          routeOrName: "/rest/chat",
+          method: "POST",
+          sourceName: "req",
+        },
+        parameters: [{ name: "req", typeFullName: "express.Request" }],
+        usages: [
+          {
+            targetObj: {
+              name: "<operator>.assignment",
+              resolvedMethod: "<operator>.assignment",
+              code: "const llmMaxRetries = config.get('llmMaxRetries')",
+              label: "CALL",
+              lineNumber: 12,
+            },
+          },
+          {
+            targetObj: {
+              name: "<operator>.assignment",
+              resolvedMethod: "<operator>.assignment",
+              code: "const LLM_API_KEY = process.env.LLM_API_KEY ?? ''",
+              label: "CALL",
+              lineNumber: 13,
+            },
+          },
+          {
+            targetObj: {
+              name: "streamText",
+              resolvedMethod: "ai:streamText",
+              code: "streamText({ model, messages, tools })",
+              label: "CALL",
+              lineNumber: 20,
             },
           },
         ],

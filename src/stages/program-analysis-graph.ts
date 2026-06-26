@@ -1464,7 +1464,9 @@ function isLlmToolTrustOperation(
     lower.includes("generatecoupon") ||
     lower.includes("system prompt") ||
     lower.includes("coupon policy") ||
-    lower.includes("llm") ||
+    /\bllm[a-z0-9_.$-]*(?:prompt|tool|model|stream)|(?:prompt|tool|model|stream)[a-z0-9_.$-]*llm\b/i.test(
+      lower,
+    ) ||
     lower.includes("tool(")
   );
 }
