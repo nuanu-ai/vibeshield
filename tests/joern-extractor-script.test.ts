@@ -172,13 +172,21 @@ EOF`,
       [
         "export function configureApp(app, seq) {",
         "  app.use('/api', handler)",
+        "  app.post('/reset', utils.asyncHandler(resetPassword()))",
+        "  server.post('/status', serverHandler)",
         "}",
         "",
         "export function handler(req, res) {",
         "  return res.send(req.query.name)",
         "}",
         "",
-        "app.get('/profile', handler)",
+        "export function resetPassword() {",
+        "  return async ({ body }, res, next) => res.json(body)",
+        "}",
+        "",
+        "export function serverHandler(req, res) {",
+        "  return res.json(req.body)",
+        "}",
       ].join("\n"),
     );
     await writeFile(
@@ -196,8 +204,12 @@ EOF`,
         'if [ -z "$out" ]; then echo missing outFile >&2; exit 2; fi',
         `cat > "$out" <<'EOF'
 METHOD	${enc("src/server.ts::program:configureApp")}	${enc("configureApp")}	${enc(serverPath)}	1	1	${enc("configureApp")}	${enc([param("app"), param("seq")].join(";"))}	${enc(" ")}
-METHOD	${enc("src/server.ts::program:handler")}	${enc("handler")}	${enc(serverPath)}	5	1	${enc("handler")}	${enc([param("req", "express.Request"), param("res", "express.Response")].join(";"))}	${enc(" ")}
+METHOD	${enc("src/server.ts::program:handler")}	${enc("handler")}	${enc(serverPath)}	6	1	${enc("handler")}	${enc([param("req", "express.Request"), param("res", "express.Response")].join(";"))}	${enc(" ")}
+METHOD	${enc("src/server.ts::program:resetPassword")}	${enc("resetPassword")}	${enc(serverPath)}	10	1	${enc("resetPassword")}	${enc("")}	${enc(" ")}
+METHOD	${enc("src/server.ts::program:serverHandler")}	${enc("serverHandler")}	${enc(serverPath)}	14	1	${enc("serverHandler")}	${enc([param("req", "express.Request"), param("res", "express.Response")].join(";"))}	${enc(" ")}
 CALL	${enc("src/server.ts::program:configureApp")}	${enc("app.use")}	${enc("express.Application.use")}	${enc("app.use('/api', handler)")}	2	3
+CALL	${enc("src/server.ts::program:configureApp")}	${enc("app.post")}	${enc("express.Application.post")}	${enc("app.post('/reset', utils.asyncHandler(resetPassword()))")}	3	3
+CALL	${enc("src/server.ts::program:configureApp")}	${enc("server.post")}	${enc("express.Application.post")}	${enc("server.post('/status', serverHandler)")}	4	3
 EOF`,
       ].join("\n"),
       { mode: 0o755 },
@@ -237,8 +249,16 @@ EOF`,
     const handler = parsed.objectSlices.find(
       (slice) => slice.fullName === "src/server.ts::program:handler",
     );
+    const reset = parsed.objectSlices.find(
+      (slice) => slice.fullName === "src/server.ts::program:resetPassword",
+    );
+    const serverHandler = parsed.objectSlices.find(
+      (slice) => slice.fullName === "src/server.ts::program:serverHandler",
+    );
     expect(setup?.boundary).toBeUndefined();
-    expect(handler?.boundary?.routeOrName).toBe("handler");
+    expect(handler?.boundary?.routeOrName).toBe("/api");
+    expect(reset?.boundary?.routeOrName).toBe("/reset");
+    expect(serverHandler?.boundary?.routeOrName).toBe("/status");
   });
 
   it("extracts deterministic package import observations from source files", async () => {

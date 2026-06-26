@@ -130,6 +130,7 @@ async function extractDataFlow(cpgPath, tempRoot) {
 
 async function normalizeUsages(raw, sourceRoot) {
   const sources = sourceLookup(sourceRoot);
+  const sourceRoutes = routesRegisteredByCalls(raw.methods, raw.callsByParent);
   const objectSlices = [];
   for (const method of raw.methods) {
     const calls = raw.callsByParent.get(method.fullName) ?? [];
@@ -150,7 +151,11 @@ async function normalizeUsages(raw, sourceRoot) {
           columnNumber: call.columnNumber,
         },
       })),
-      ...boundaryHint(method, calls, await routeFromSource(sources, method)),
+      ...boundaryHint(
+        method,
+        calls,
+        sourceRoutes.get(method.fullName) ?? (await routeFromSource(sources, method)),
+      ),
       parameters: method.parameters,
     });
   }
@@ -420,6 +425,163 @@ async function routeFromSource(sources, method) {
   );
 }
 
+function routesRegisteredByCalls(methods, callsByParent) {
+  const methodsByName = new Map();
+  for (const method of methods) {
+    const name = string(method.name);
+    if (name === undefined) {
+      continue;
+    }
+    const current = methodsByName.get(name) ?? [];
+    current.push(method);
+    methodsByName.set(name, current);
+  }
+
+  const routesByMethod = new Map();
+  for (const calls of callsByParent.values()) {
+    for (const call of calls) {
+      const registration = routeRegistrationFromCall(call);
+      if (registration === undefined) {
+        continue;
+      }
+      for (const handlerName of registration.handlerNames) {
+        const targets = methodsByName.get(handlerName) ?? [];
+        if (targets.length !== 1) {
+          continue;
+        }
+        const target = targets[0];
+        if (target?.fullName === undefined || routesByMethod.has(target.fullName)) {
+          continue;
+        }
+        routesByMethod.set(target.fullName, {
+          boundaryType: registration.boundaryType,
+          routeOrName: registration.routeOrName,
+          method: registration.method,
+          sourceName: "request",
+        });
+      }
+    }
+  }
+  return routesByMethod;
+}
+
+function routeRegistrationFromCall(call) {
+  const code = string(call.code);
+  if (code === undefined) {
+    return undefined;
+  }
+  const method = routeMethodFromCall(call, code);
+  if (method === undefined) {
+    return undefined;
+  }
+  const route = firstRouteArgumentForMethod(code, method);
+  if (route === undefined) {
+    return undefined;
+  }
+  const handlerText = code.slice(route.endIndex);
+  const handlerNames = unique(handlerIdentifiers(handlerText));
+  if (handlerNames.length === 0) {
+    return undefined;
+  }
+  return {
+    boundaryType: "javascript-web",
+    routeOrName: route.routeOrName,
+    method,
+    handlerNames,
+  };
+}
+
+function routeMethodFromCall(call, code) {
+  const method =
+    routeMethodFromName(call.name) ??
+    routeMethodFromName(call.resolvedMethod) ??
+    routeMethodFromCode(code);
+  if (method === undefined) {
+    return undefined;
+  }
+  const routeCall = firstRouteArgumentForMethod(code, method);
+  if (routeCall === undefined) {
+    return undefined;
+  }
+  const resolvedMethod = (string(call.resolvedMethod) ?? "").toLowerCase();
+  if (/\bexpress\b|router|express\.application/.test(resolvedMethod)) {
+    return method;
+  }
+  return isLikelyJavaScriptRouteReceiver(routeCall.receiver) ? method : undefined;
+}
+
+function routeMethodFromName(value) {
+  const name = string(value)?.toLowerCase();
+  const method = name?.split(/[.:#]/).at(-1);
+  return isJavaScriptRouteMethod(method) ? method.toUpperCase() : undefined;
+}
+
+function routeMethodFromCode(code) {
+  const match = code.match(/\.\s*(get|post|put|patch|delete|all|use)\s*\(/i);
+  const method = match?.[1]?.toLowerCase();
+  return isJavaScriptRouteMethod(method) ? method.toUpperCase() : undefined;
+}
+
+function firstRouteArgumentForMethod(code, method) {
+  const methodPattern = escapeRegExp(method.toLowerCase());
+  const match = code.match(
+    new RegExp(
+      String.raw`\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\.\s*${methodPattern}\s*\(\s*(?:["'\`]([^"'\`]+)["'\`]|\[\s*["'\`]([^"'\`]+)["'\`])`,
+      "i",
+    ),
+  );
+  const receiver = match?.[1];
+  const routeOrName = match?.[2] ?? match?.[3];
+  if (receiver === undefined || routeOrName === undefined || match.index === undefined) {
+    return undefined;
+  }
+  return {
+    receiver,
+    routeOrName,
+    endIndex: match.index + match[0].length,
+  };
+}
+
+function isLikelyJavaScriptRouteReceiver(receiver) {
+  const lastSegment = receiver.split(".").at(-1)?.toLowerCase();
+  return (
+    lastSegment === "app" ||
+    lastSegment === "application" ||
+    lastSegment === "server" ||
+    lastSegment === "router" ||
+    lastSegment?.endsWith("router") === true ||
+    lastSegment?.endsWith("routes") === true
+  );
+}
+
+function isJavaScriptRouteMethod(value) {
+  return (
+    value === "get" ||
+    value === "post" ||
+    value === "put" ||
+    value === "patch" ||
+    value === "delete" ||
+    value === "all" ||
+    value === "use"
+  );
+}
+
+function handlerIdentifiers(value) {
+  const withoutStrings = stripStringLiterals(value);
+  const names = [];
+  for (const match of withoutStrings.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
+    const name = match[1];
+    if (name !== undefined && !isIgnoredRouteHandlerName(name)) {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+function stripStringLiterals(value) {
+  return value.replace(/(["'`])(?:\\.|(?!\1)[\s\S])*\1/g, "");
+}
+
 async function routeFromPythonSource(sources, method) {
   const repoPath = sources.normalizeRepoPath(method.fileName);
   if (repoPath === undefined || !repoPath.endsWith(".py")) {
@@ -617,6 +779,23 @@ function routeFromRequestParameter(method) {
 
 function hasRequestParameter(method) {
   return method.parameters.some((parameter) => isRequestParameter(parameter));
+}
+
+function isIgnoredRouteHandlerName(name) {
+  return (
+    name === "app" ||
+    name === "router" ||
+    name === "req" ||
+    name === "request" ||
+    name === "res" ||
+    name === "response" ||
+    name === "next" ||
+    name === "utils" ||
+    name === "asyncHandler" ||
+    name === "single" ||
+    name === "array" ||
+    name === "fields"
+  );
 }
 
 function isRequestParameter(parameter) {
@@ -1019,6 +1198,10 @@ function compareComponentUsageObservations(a, b) {
     a.packageName.localeCompare(b.packageName) ||
     a.usageKind.localeCompare(b.usageKind)
   );
+}
+
+function unique(values) {
+  return [...new Set(values)];
 }
 
 function string(value) {
