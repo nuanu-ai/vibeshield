@@ -289,6 +289,76 @@
       ]
     },
     {
+      "name": "Seeded mixed-language coverage fixture",
+      "language": "Fixture",
+      "split": "held-out",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/coverage-verdict/mixed-language-partial-repo"
+      },
+      "expectedVerdict": "looks-ok-for-now",
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "coverage": {
+        "language_support": {
+          "stateIn": ["partial"],
+          "minCoveredCount": 2,
+          "minTotalCount": 3,
+          "reasonIncludes": "php=1"
+        },
+        "data_flow": {
+          "stateIn": ["checked"],
+          "complete": true,
+          "minCoveredCount": 2,
+          "minTotalCount": 2
+        },
+        "dependency_usage": {
+          "stateIn": ["checked"],
+          "complete": true,
+          "minCoveredCount": 1,
+          "minTotalCount": 1
+        }
+      },
+      "notes": [
+        "Synthetic coverage fixture: mixed-language partial reporting is expected for one unsupported PHP file, while data-flow and dependency-usage coverage must be complete."
+      ]
+    },
+    {
+      "name": "Seeded deploy-blocking verdict fixture",
+      "language": "Fixture",
+      "split": "tuning",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/coverage-verdict/deploy-blocking-repo"
+      },
+      "expectedVerdict": "not-ready-to-deploy",
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "complete": true,
+          "minCoveredCount": 2,
+          "minTotalCount": 2
+        },
+        "data_flow": {
+          "stateIn": ["checked"],
+          "complete": true,
+          "minCoveredCount": 1,
+          "minTotalCount": 1
+        },
+        "dependency_usage": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      },
+      "notes": [
+        "Synthetic verdict fixture: a deploy-blocking repository must keep the deterministic verdict at not-ready-to-deploy."
+      ]
+    },
+    {
       "name": "WebGoat Java scored seed",
       "language": "Java",
       "split": "tuning",

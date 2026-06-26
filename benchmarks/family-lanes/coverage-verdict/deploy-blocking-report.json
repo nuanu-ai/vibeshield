@@ -1,0 +1,65 @@
+{
+  "runId": "fixture-coverage-verdict-deploy-blocking-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded deploy-blocking verdict fixture",
+      "localPath": "benchmarks/family-lanes/coverage-verdict/deploy-blocking-repo",
+      "commitSha": "fixture-coverage-verdict-deploy-blocking-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 280,
+      "sourceHash": "sha256:fixture-coverage-verdict-deploy-blocking-v1",
+      "commitSha": "fixture-coverage-verdict-deploy-blocking-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": []
+    },
+    "verdict": "not-ready-to-deploy",
+    "coverage": [],
+    "deepCoverage": [
+      {
+        "area": "language_support",
+        "state": "checked",
+        "coveredCount": 2,
+        "totalCount": 2,
+        "producer": "fixture",
+        "producerVersion": "coverage-verdict-v1"
+      },
+      {
+        "area": "data_flow",
+        "state": "checked",
+        "coveredCount": 1,
+        "totalCount": 1,
+        "producer": "fixture",
+        "producerVersion": "coverage-verdict-v1"
+      },
+      {
+        "area": "dependency_usage",
+        "state": "checked",
+        "coveredCount": 0,
+        "totalCount": 0,
+        "producer": "fixture",
+        "producerVersion": "coverage-verdict-v1"
+      }
+    ],
+    "findingSummary": {
+      "total": 0,
+      "bySeverity": {},
+      "byCategory": {}
+    },
+    "evidence": [],
+    "findings": [],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; this record pins the deploy-blocking verdict contract."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}

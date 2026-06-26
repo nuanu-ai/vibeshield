@@ -115,6 +115,8 @@ pnpm benchmark:score \
   benchmarks/family-lanes/iac-config/clean-dockerfile-report.json \
   benchmarks/family-lanes/deterministic-code-patterns/eval-code-report.json \
   benchmarks/family-lanes/deterministic-code-patterns/clean-code-report.json \
+  benchmarks/family-lanes/coverage-verdict/mixed-language-partial-report.json \
+  benchmarks/family-lanes/coverage-verdict/deploy-blocking-report.json \
   /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
   /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
@@ -138,6 +140,8 @@ pnpm benchmark:score-review \
   benchmarks/family-lanes/iac-config/clean-dockerfile-report.json \
   benchmarks/family-lanes/deterministic-code-patterns/eval-code-report.json \
   benchmarks/family-lanes/deterministic-code-patterns/clean-code-report.json \
+  benchmarks/family-lanes/coverage-verdict/mixed-language-partial-report.json \
+  benchmarks/family-lanes/coverage-verdict/deploy-blocking-report.json \
   /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
   /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
@@ -235,11 +239,14 @@ workflow and a clean workflow control. The IaC/config lane under
 `benchmarks/family-lanes/iac-config/` adds a weak Dockerfile and a clean
 Dockerfile control. The deterministic-code-patterns lane under
 `benchmarks/family-lanes/deterministic-code-patterns/` adds a dangerous
-JavaScript `eval` call and a clean code control. WebGoat and Juice Shop now
-promote their curated coverage-style static expectations into complete scored
-truth for the current pinned denominator: WebGoat scores 20/20 candidate matches
-and Juice Shop scores 36/36 candidate matches on the pinned runs. Python and Go
-include pinned static-truth slices curated from their READMEs and source:
+JavaScript `eval` call and a clean code control. The coverage/verdict lane under
+`benchmarks/family-lanes/coverage-verdict/` pins mixed-language partial coverage,
+complete dependency usage, and deploy-blocking verdict behavior. WebGoat and
+Juice Shop now promote their curated coverage-style static expectations into
+complete scored truth for the current pinned denominator: WebGoat scores 20/20
+candidate matches and Juice Shop scores 36/36 candidate matches on the pinned
+runs. Python and Go include pinned static-truth slices curated from their READMEs
+and source:
 Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
 WebGoat, Juice Shop, and go-dvwa have complete direct-finding review for the

@@ -1,0 +1,66 @@
+{
+  "runId": "fixture-coverage-verdict-mixed-language-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded mixed-language coverage fixture",
+      "localPath": "benchmarks/family-lanes/coverage-verdict/mixed-language-partial-repo",
+      "commitSha": "fixture-coverage-verdict-mixed-language-v1"
+    },
+    "manifest": {
+      "fileCount": 3,
+      "totalBytes": 360,
+      "sourceHash": "sha256:fixture-coverage-verdict-mixed-language-v1",
+      "commitSha": "fixture-coverage-verdict-mixed-language-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": []
+    },
+    "verdict": "looks-ok-for-now",
+    "coverage": [],
+    "deepCoverage": [
+      {
+        "area": "language_support",
+        "state": "partial",
+        "coveredCount": 2,
+        "totalCount": 3,
+        "reason": "Some source languages are not supported by Deep Static v1: php=1.",
+        "producer": "fixture",
+        "producerVersion": "coverage-verdict-v1"
+      },
+      {
+        "area": "data_flow",
+        "state": "checked",
+        "coveredCount": 2,
+        "totalCount": 2,
+        "producer": "fixture",
+        "producerVersion": "coverage-verdict-v1"
+      },
+      {
+        "area": "dependency_usage",
+        "state": "checked",
+        "coveredCount": 1,
+        "totalCount": 1,
+        "producer": "fixture",
+        "producerVersion": "coverage-verdict-v1"
+      }
+    ],
+    "findingSummary": {
+      "total": 0,
+      "bySeverity": {},
+      "byCategory": {}
+    },
+    "evidence": [],
+    "findings": [],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; this record pins mixed-language partial coverage and complete dependency usage."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}
