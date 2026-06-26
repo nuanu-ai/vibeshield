@@ -162,7 +162,7 @@
         }
       },
       "notes": [
-        "Direct finding review is complete for run 20260626085453-d38d52b5: the prior minified underscore code-pattern hit is suppressed, repeated JWT/API-key/private-key lesson materials are treated as true duplicates, and XStream CVE rows are grouped as duplicate dependency findings.",
+        "Direct finding review is complete for run 20260626100755-ec7c9df8: the prior minified underscore code-pattern hit is suppressed, repeated JWT/API-key/private-key lesson materials are treated as true duplicates, and XStream CVE rows are grouped as duplicate dependency findings.",
         "Seeded from the current coverage-style WebGoat expectations. Full static lesson/CWE truth and static support review are still required before static precision or recall can be claimed."
       ]
     },
@@ -426,7 +426,7 @@
         }
       },
       "notes": [
-        "Direct finding review is complete for run 20260626082921-4b7e2b26: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
+        "Direct finding review is complete for run 20260626100419-8ac77ddd: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
         "Seeded from the current coverage-style Juice Shop expectations. Challenge-level static truth and static support review are still required before static precision or recall can be claimed."
       ]
     },
