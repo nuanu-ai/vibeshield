@@ -76,16 +76,21 @@ export function correlateGraphRules(input: CorrelateGraphRulesInput): Hypothesis
 
   for (const rule of rules) {
     const ruleCandidates: HypothesisCandidate[] = [];
-    const seenCandidateKeys =
-      input.deduplicateSemanticCandidates === true ? new Set<string>() : undefined;
+    const semanticCandidateIndexes =
+      input.deduplicateSemanticCandidates === true ? new Map<string, number>() : undefined;
     for (const path of pathsForRule(input.graph, rule)) {
       const candidate = candidateForPath(input.graph, findingContexts, rule, path);
-      if (seenCandidateKeys !== undefined) {
+      if (semanticCandidateIndexes !== undefined) {
         const candidateKey = semanticCandidateKey(input.graph, candidate, path);
-        if (seenCandidateKeys.has(candidateKey)) {
+        const existingIndex = semanticCandidateIndexes.get(candidateKey);
+        if (existingIndex !== undefined) {
+          const existing = ruleCandidates[existingIndex];
+          if (existing !== undefined) {
+            ruleCandidates[existingIndex] = mergeSemanticCandidates(existing, candidate);
+          }
           continue;
         }
-        seenCandidateKeys.add(candidateKey);
+        semanticCandidateIndexes.set(candidateKey, ruleCandidates.length);
       }
       ruleCandidates.push(candidate);
       if (
@@ -113,8 +118,32 @@ function semanticCandidateKey(
     candidate.title,
     semanticNodeKey(nodesById.get(path.startNodeId)),
     semanticNodeKey(nodesById.get(path.endNodeId)),
-    candidate.findingIds.join(","),
   ].join("\0");
+}
+
+function mergeSemanticCandidates(
+  current: HypothesisCandidate,
+  duplicate: HypothesisCandidate,
+): HypothesisCandidate {
+  return {
+    ...current,
+    findingIds: uniqueSorted([...current.findingIds, ...duplicate.findingIds]),
+    supportingNodeIds: uniqueSorted([...current.supportingNodeIds, ...duplicate.supportingNodeIds]),
+    supportingEdgeIds: uniqueSorted([...current.supportingEdgeIds, ...duplicate.supportingEdgeIds]),
+    contradictingNodeIds: uniqueSorted([
+      ...current.contradictingNodeIds,
+      ...duplicate.contradictingNodeIds,
+    ]),
+    contradictingEdgeIds: uniqueSorted([
+      ...current.contradictingEdgeIds,
+      ...duplicate.contradictingEdgeIds,
+    ]),
+    coverageRefs: uniqueSorted([...current.coverageRefs, ...duplicate.coverageRefs]),
+    requiredValidation: uniqueSorted([
+      ...current.requiredValidation,
+      ...duplicate.requiredValidation,
+    ]),
+  };
 }
 
 function semanticNodeKey(node: SecurityGraphNode | undefined): string {

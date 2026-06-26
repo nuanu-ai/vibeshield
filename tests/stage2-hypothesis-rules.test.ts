@@ -125,6 +125,33 @@ describe("correlateStage2Hypotheses context and determinism", () => {
     );
   });
 
+  it("deduplicates dependency usage paths while preserving advisory finding links", () => {
+    const handler = node("CodeEntity", "CodeEntity:status-handler", "statusHandler", {
+      fullName: "statusHandler",
+    });
+    const lodashCveA = node("Component", "Component:lodash:CVE-A", "lodash", {
+      packageName: "lodash",
+    });
+    const lodashCveB = node("Component", "Component:lodash:CVE-B", "lodash", {
+      packageName: "lodash",
+    });
+    const usesA = edge("uses", handler, lodashCveA, "uses:handler:lodash-a");
+    const usesB = edge("uses", handler, lodashCveB, "uses:handler:lodash-b");
+
+    const candidates = familyCandidates(
+      "dependency_usage_path",
+      graph([handler, lodashCveA, lodashCveB], [usesA, usesB]),
+      [
+        context("finding-lodash-a", [lodashCveA.id], [usesA.id]),
+        context("finding-lodash-b", [lodashCveB.id], [usesB.id]),
+      ],
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.findingIds).toEqual(["finding-lodash-a", "finding-lodash-b"]);
+    expect(candidates[0]?.supportingEdgeIds).toEqual(expect.arrayContaining([usesA.id, usesB.id]));
+  });
+
   it("applies maxCandidatesPerRule after context-required filtering", () => {
     const fixture = dependencyFixture({ alternatePath: true });
     const candidates = correlateStage2Hypotheses({
