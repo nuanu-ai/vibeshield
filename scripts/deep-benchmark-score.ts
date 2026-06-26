@@ -45,6 +45,7 @@ export interface ScoredRepositoryExpectation {
   readonly staticHypotheses?: ReadonlyArray<StaticTruthItem>;
   readonly trueButUncuratedDirect?: ReadonlyArray<DirectMatcherItem>;
   readonly trueButUncuratedStatic?: ReadonlyArray<StaticMatcherItem>;
+  readonly falseSupportStatic?: ReadonlyArray<StaticMatcherItem>;
   readonly coverage?: Readonly<Record<string, CoverageExpectation>>;
   readonly notes?: ReadonlyArray<string>;
 }
@@ -210,6 +211,7 @@ export interface StaticSupportReviewSummary {
   readonly supported: number;
   readonly expectedTruth: number;
   readonly trueButUncurated: number;
+  readonly falseSupport: number;
   readonly unreviewed: number;
   readonly unreviewedGroups: ReadonlyArray<StaticSupportReviewGroup>;
 }
@@ -400,6 +402,7 @@ function staticSupportReviewSummary(
   }
 
   const trueButUncuratedIds = new Set<string>();
+  const falseSupportIds = new Set<string>();
   for (const hypothesis of supportedHypotheses) {
     if (expectedTruthIds.has(hypothesis.id)) {
       continue;
@@ -410,12 +413,24 @@ function staticSupportReviewSummary(
       )
     ) {
       trueButUncuratedIds.add(hypothesis.id);
+      continue;
+    }
+    if (
+      (expectation.falseSupportStatic ?? []).some((item) =>
+        matchesStaticHypothesis(hypothesis, candidatesById, item.matcher),
+      )
+    ) {
+      falseSupportIds.add(hypothesis.id);
     }
   }
 
   const groups = new Map<string, MutableStaticSupportReviewGroup>();
   for (const hypothesis of supportedHypotheses) {
-    if (expectedTruthIds.has(hypothesis.id) || trueButUncuratedIds.has(hypothesis.id)) {
+    if (
+      expectedTruthIds.has(hypothesis.id) ||
+      trueButUncuratedIds.has(hypothesis.id) ||
+      falseSupportIds.has(hypothesis.id)
+    ) {
       continue;
     }
     const candidate = candidatesById.get(hypothesis.candidateId);
@@ -460,7 +475,12 @@ function staticSupportReviewSummary(
     supported: supportedHypotheses.length,
     expectedTruth: expectedTruthIds.size,
     trueButUncurated: trueButUncuratedIds.size,
-    unreviewed: supportedHypotheses.length - expectedTruthIds.size - trueButUncuratedIds.size,
+    falseSupport: falseSupportIds.size,
+    unreviewed:
+      supportedHypotheses.length -
+      expectedTruthIds.size -
+      trueButUncuratedIds.size -
+      falseSupportIds.size,
     unreviewedGroups,
   };
 }
@@ -696,12 +716,8 @@ function scoreStaticHypotheses(
   let unreviewedSupported = 0;
   const unreviewedSupportedIds: string[] = [];
   const usedSupportedIds = new Set<string>();
-  const supportPrecisionBlockedBy = completenessBlockers(
-    expectation.staticTruth,
-    expectation.staticSupportReview,
-    "static ground truth is incomplete",
-    "static support review is incomplete",
-  );
+  const supportPrecisionBlockedBy =
+    expectation.staticSupportReview === "complete" ? [] : ["static support review is incomplete"];
 
   for (const item of expectation.staticHypotheses ?? []) {
     const hypothesis = supportedHypotheses.find(
@@ -726,6 +742,18 @@ function scoreStaticHypotheses(
       )
     ) {
       trueButUncuratedSupport += 1;
+      continue;
+    }
+    if (
+      (expectation.falseSupportStatic ?? []).some((item) =>
+        matchesStaticHypothesis(hypothesis, candidatesById, item.matcher),
+      )
+    ) {
+      falseSupport += 1;
+      staticFamilyCounter(
+        familyCounters,
+        staticFamilyForSupportedHypothesis(hypothesis, candidatesById),
+      ).falseSupport += 1;
       continue;
     }
     if (supportPrecisionBlockedBy.length === 0) {
@@ -1567,7 +1595,7 @@ function printStaticSupportReviewSummaries(
 ): void {
   for (const summary of summaries) {
     process.stdout.write(
-      `REVIEW ${summary.name} ${summary.runId} supported=${summary.supported} expectedTruth=${summary.expectedTruth} trueButUncurated=${summary.trueButUncurated} unreviewed=${summary.unreviewed}\n`,
+      `REVIEW ${summary.name} ${summary.runId} supported=${summary.supported} expectedTruth=${summary.expectedTruth} trueButUncurated=${summary.trueButUncurated} falseSupport=${summary.falseSupport} unreviewed=${summary.unreviewed}\n`,
     );
     for (const group of summary.unreviewedGroups) {
       process.stdout.write(`  ${group.count} ${group.family} | ${group.title}\n`);

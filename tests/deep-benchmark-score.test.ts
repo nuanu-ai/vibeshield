@@ -252,9 +252,90 @@ describe("deep benchmark score", () => {
       "direct precision not scoreable: direct ground truth is incomplete",
     );
     expect(summary.repositories[0]?.scoreabilityErrors).toContain(
-      "static support precision not scoreable: static ground truth is incomplete",
+      "static support precision not scoreable: static support review is incomplete",
     );
     expect(summary.targetErrors.some((error) => error.includes("not scoreable"))).toBe(true);
+  });
+
+  it("scores static support precision when support review is complete but recall truth is incomplete", () => {
+    const summary = scoreBenchmarkReports(
+      {
+        version: 1,
+        targets: { staticSupportPrecision: 0.5, maxTuningHeldOutGap: 1 },
+        repositories: [
+          {
+            name: "Support reviewed fixture",
+            language: "JS/TS",
+            split: "tuning",
+            match: { originUrl: "https://example.test/support-reviewed" },
+            directTruth: "complete",
+            directFpReview: "complete",
+            staticTruth: "incomplete",
+            staticSupportReview: "complete",
+            staticHypotheses: [
+              {
+                id: "static.sql",
+                title: "SQL injection path",
+                coverageArea: "data_flow",
+                candidateFamily: "external_input_to_dangerous_operation",
+                matcher: { titleIncludes: "SQL injection", statusIn: ["statically_supported"] },
+              },
+            ],
+            falseSupportStatic: [
+              {
+                id: "false.open-redirect",
+                reason:
+                  "The reviewed redirect trace does not carry request-controlled target data.",
+                matcher: { titleIncludes: "Open redirect", statusIn: ["statically_supported"] },
+              },
+            ],
+          },
+        ],
+      },
+      [
+        report({
+          originUrl: "https://example.test/support-reviewed",
+          candidates: [
+            candidate("candidate.sql", {
+              family: "external_input_to_dangerous_operation",
+              title: "SQL injection path",
+            }),
+            candidate("candidate.open-redirect", {
+              family: "external_input_to_dangerous_operation",
+              title: "Open redirect path",
+            }),
+          ],
+          hypotheses: [
+            hypothesis("hypothesis.sql", "candidate.sql", {
+              status: "statically_supported",
+              title: "SQL injection path",
+            }),
+            hypothesis("hypothesis.open-redirect", "candidate.open-redirect", {
+              status: "statically_supported",
+              title: "Open redirect path",
+            }),
+          ],
+        }),
+      ],
+    );
+
+    const repository = summary.repositories[0];
+    expect(repository?.staticHypotheses).toMatchObject({
+      supportedTp: 1,
+      falseSupport: 1,
+      unreviewedSupported: 0,
+    });
+    expect(repository?.staticHypotheses.supportPrecision.value).toBe(0.5);
+    expect(repository?.staticHypotheses.supportPrecision.blockedBy).toEqual([]);
+    expect(repository?.staticHypotheses.candidateRecall.blockedBy).toEqual([
+      "static ground truth is incomplete",
+    ]);
+    expect(repository?.scoreabilityErrors).not.toContain(
+      "static support precision not scoreable: static ground truth is incomplete",
+    );
+    expect(repository?.scoreabilityErrors).toContain(
+      "static candidate recall not scoreable: static ground truth is incomplete",
+    );
   });
 
   it("summarizes static support review queues without changing scoreability", () => {
@@ -287,6 +368,14 @@ describe("deep benchmark score", () => {
                 matcher: { titleIncludes: "Cross-site scripting" },
               },
             ],
+            falseSupportStatic: [
+              {
+                id: "false.open-redirect",
+                reason:
+                  "The reviewed redirect trace does not carry request-controlled target data.",
+                matcher: { titleIncludes: "Open redirect" },
+              },
+            ],
           },
         ],
       },
@@ -309,6 +398,11 @@ describe("deep benchmark score", () => {
               title: "Open redirect path",
               candidateReason: "Open redirect path: /go reaches redirect",
             }),
+            candidate("candidate.auth-bypass", {
+              family: "external_input_to_dangerous_operation",
+              title: "Authentication bypass path",
+              candidateReason: "Authentication bypass path: /login reaches verifier",
+            }),
           ],
           hypotheses: [
             hypothesis("hypothesis.sql", "candidate.sql", {
@@ -323,6 +417,10 @@ describe("deep benchmark score", () => {
               status: "statically_supported",
               title: "Open redirect path",
             }),
+            hypothesis("hypothesis.auth-bypass", "candidate.auth-bypass", {
+              status: "statically_supported",
+              title: "Authentication bypass path",
+            }),
           ],
         }),
       ],
@@ -330,17 +428,18 @@ describe("deep benchmark score", () => {
 
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toMatchObject({
-      supported: 3,
+      supported: 4,
       expectedTruth: 1,
       trueButUncurated: 1,
+      falseSupport: 1,
       unreviewed: 1,
       unreviewedGroups: [
         {
           family: "external_input_to_dangerous_operation",
-          title: "Open redirect path",
+          title: "Authentication bypass path",
           count: 1,
-          sampleHypothesisIds: ["hypothesis.open-redirect"],
-          sampleCandidateReasons: ["Open redirect path: /go reaches redirect"],
+          sampleHypothesisIds: ["hypothesis.auth-bypass"],
+          sampleCandidateReasons: ["Authentication bypass path: /login reaches verifier"],
         },
       ],
     });
