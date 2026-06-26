@@ -101,6 +101,7 @@ describe("deep benchmark score", () => {
       fn: 0,
       fnIds: [],
     });
+    expect(repository?.scoreabilityErrors).toEqual([]);
     expect(repository?.direct.precision.value).toBe(0.5);
     expect(repository?.direct.recall.value).toBe(1);
     expect(repository?.staticHypotheses).toMatchObject({
@@ -418,6 +419,7 @@ describe("deep benchmark score", () => {
 
     const pythonAggregate = summary.aggregates.find((item) => item.key === "language:Python");
     expect(pythonAggregate?.directPrecision.blockedBy).toEqual(["metric denominator is zero"]);
+    expect(summary.repositories[1]?.scoreabilityErrors).toEqual([]);
     expect(summary.targetErrors.some((error) => error.includes("language:Python direct"))).toBe(
       false,
     );

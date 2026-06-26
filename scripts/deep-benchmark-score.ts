@@ -504,12 +504,12 @@ export function scoreRepository(
     ...direct.recall.blockedBy
       .filter((reason) => !isZeroDenominatorReason(reason))
       .map((reason) => `direct recall not scoreable: ${reason}`),
-    ...staticHypotheses.supportPrecision.blockedBy.map(
-      (reason) => `static support precision not scoreable: ${reason}`,
-    ),
-    ...staticHypotheses.candidateRecall.blockedBy.map(
-      (reason) => `static candidate recall not scoreable: ${reason}`,
-    ),
+    ...staticHypotheses.supportPrecision.blockedBy
+      .filter((reason) => !isZeroDenominatorReason(reason))
+      .map((reason) => `static support precision not scoreable: ${reason}`),
+    ...staticHypotheses.candidateRecall.blockedBy
+      .filter((reason) => !isZeroDenominatorReason(reason))
+      .map((reason) => `static candidate recall not scoreable: ${reason}`),
   ];
 
   return {

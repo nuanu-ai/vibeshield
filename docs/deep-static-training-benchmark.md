@@ -106,6 +106,8 @@ until the scored truth file is complete:
 
 ```bash
 pnpm benchmark:score \
+  benchmarks/family-lanes/secrets/planted-secret-report.json \
+  benchmarks/family-lanes/secrets/clean-secret-report.json \
   /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
   /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
@@ -119,6 +121,8 @@ remaining review queue by family/title with sample evidence:
 
 ```bash
 pnpm benchmark:score-review \
+  benchmarks/family-lanes/secrets/planted-secret-report.json \
+  benchmarks/family-lanes/secrets/clean-secret-report.json \
   /Users/dmitry/.vibeshield/runs/20260626112711-237f9ec7 \
   /Users/dmitry/.vibeshield/runs/20260626112812-9d82f57e \
   /Users/dmitry/.vibeshield/runs/20260626082052-aa2c42be \
@@ -205,11 +209,14 @@ curated class?" They do not yet compute TP, FP, FN, precision, recall, F0.5,
 support precision, false contradiction, or true-but-uncurated buckets.
 
 The scored seed lives at `benchmarks/deep-static-scored-ground-truth.json`. It
-contains the four scored repositories and the Phase 1 target values. WebGoat and
-Juice Shop now carry the current curated coverage-style static expectations in
-the scored truth file: WebGoat scores the current slice at 20/20 candidate
-matches and Juice Shop scores 36/36 candidate matches on the pinned runs. Python
-and Go include pinned static-truth slices curated from their READMEs and source:
+contains the current scored reports and the Phase 1 target values. The first
+standalone family-lane entries are the committed secrets fixtures under
+`benchmarks/family-lanes/secrets/`: one planted fake Stripe key for direct
+secrets recall and one clean control for false-positive review. WebGoat and
+Juice Shop carry the current curated coverage-style static expectations in the
+scored truth file: WebGoat scores the current slice at 20/20 candidate matches
+and Juice Shop scores 36/36 candidate matches on the pinned runs. Python and Go
+include pinned static-truth slices curated from their READMEs and source:
 Vulnerable-Flask-App currently scores static candidate recall at 9/9, and
 go-dvwa scores 2/2 for the implemented SQL injection and shell injection cases.
 WebGoat, Juice Shop, and go-dvwa have complete direct-finding review for the

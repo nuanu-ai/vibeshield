@@ -10,6 +10,63 @@
   },
   "repositories": [
     {
+      "name": "Seeded secrets planted fixture",
+      "language": "Fixture",
+      "split": "tuning",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/secrets/planted-secret-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "directFindings": [
+        {
+          "id": "seeded-secrets.stripe-access-token",
+          "title": "Seeded fake Stripe access token is reported by gitleaks",
+          "checkFamily": "secrets",
+          "class": "Secret",
+          "coverageArea": "language_support",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "ruleId": "stripe-access-token",
+            "category": "secret",
+            "filePathIncludes": "src/config.ts"
+          }
+        }
+      ],
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: the fake Stripe key is planted by construction, so this is a direct secrets recall item with a clean truth oracle."
+      ]
+    },
+    {
+      "name": "Seeded secrets clean fixture",
+      "language": "Fixture",
+      "split": "held-out",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/secrets/clean-secret-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "coverage": {
+        "language_support": {
+          "stateIn": ["checked"],
+          "complete": true
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: the control repository contains no planted secret, so any direct secret finding would score as a false positive."
+      ]
+    },
+    {
       "name": "WebGoat Java scored seed",
       "language": "Java",
       "split": "tuning",
