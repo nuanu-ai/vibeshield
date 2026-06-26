@@ -221,6 +221,9 @@ describe("composeProgramAnalysisGraph path", () => {
     const graph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", serverSideFetchSlices())] }),
     );
+    const webhookGraph = composeProgramAnalysisGraph(
+      input({ artifacts: [artifact("entities", serverSideStaticWebhookFetchSlices())] }),
+    );
     const frontendGraph = composeProgramAnalysisGraph(
       input({ artifacts: [artifact("entities", monorepoWebFetchSlices())] }),
     );
@@ -228,6 +231,10 @@ describe("composeProgramAnalysisGraph path", () => {
     expect(graph.nodes.find((node) => node.kind === "Sink")).toMatchObject({
       label: "fetch",
       properties: { sinkType: "server_side_request" },
+    });
+    expect(webhookGraph.nodes.find((node) => node.kind === "Sink")).toMatchObject({
+      label: "fetch",
+      properties: { sinkType: "outbound_http" },
     });
     expect(frontendGraph.nodes.find((node) => node.kind === "Sink")).toMatchObject({
       label: "fetch",
@@ -1533,6 +1540,30 @@ function serverSideFetchSlices() {
   };
 }
 
+function serverSideStaticWebhookFetchSlices() {
+  return {
+    objectSlices: [
+      {
+        fullName: "lib/webhook.ts::program:notify",
+        fileName: "lib/webhook.ts",
+        lineNumber: 14,
+        parameters: [{ name: "challenge" }],
+        usages: [
+          {
+            targetObj: {
+              name: "fetch",
+              resolvedMethod: "fetch",
+              code: "fetch(process.env.SOLUTIONS_WEBHOOK, { method: 'POST' })",
+              label: "CALL",
+              lineNumber: 18,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function monorepoWebFetchSlices() {
   return {
     objectSlices: [
@@ -2615,6 +2646,7 @@ function manifest(): Manifest {
       { path: "routes/login.ts", size: 100, sha256: "juice-login-sha" },
       { path: "routes/resetPassword.ts", size: 100, sha256: "juice-reset-password-sha" },
       { path: "routes/verify.ts", size: 100, sha256: "juice-verify-sha" },
+      { path: "lib/webhook.ts", size: 100, sha256: "juice-webhook-sha" },
       {
         path: "lib/startup/registerWebsocketEvents.ts",
         size: 100,

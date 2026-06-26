@@ -844,9 +844,10 @@ function classifySinkCall(
     stringValue(target.resolvedMethod) ?? "",
     stringValue(target.code) ?? "",
   ]).filter((value) => value !== "");
+  const contextCandidate = stringValue(target.code);
 
   for (const candidate of candidates) {
-    const classification = classifySinkCandidate(candidate, entity);
+    const classification = classifySinkCandidate(candidate, entity, contextCandidate);
     if (classification !== undefined) {
       return classification;
     }
@@ -857,8 +858,10 @@ function classifySinkCall(
 function classifySinkCandidate(
   candidate: string,
   entity: ObservedEntity,
+  contextCandidate?: string,
 ): SinkClassification | undefined {
   const lower = candidate.toLowerCase();
+  const contextLower = (contextCandidate ?? candidate).toLowerCase();
   const rawMethodName = methodNameFromCall(candidate);
   const methodName = rawMethodName.toLowerCase();
   const label = normalizedCallLabel(candidate, rawMethodName);
@@ -882,7 +885,7 @@ function classifySinkCandidate(
 
   const httpLabel = outboundHttpLabel(candidate, lower, methodName);
   if (httpLabel !== undefined) {
-    return { label: httpLabel, sinkType: outboundHttpSinkType(repoPath, lower) };
+    return { label: httpLabel, sinkType: outboundHttpSinkType(repoPath, contextLower, entity) };
   }
 
   if (isCryptographicOperation(candidate, lower, methodName, entity)) {
@@ -2363,7 +2366,7 @@ function outboundHttpLabel(
   return undefined;
 }
 
-function outboundHttpSinkType(repoPath: string, lower: string): string {
+function outboundHttpSinkType(repoPath: string, lower: string, entity: ObservedEntity): string {
   if (
     isLikelyBrowserClientPath(repoPath) ||
     lower.includes("this.http") ||
@@ -2371,7 +2374,35 @@ function outboundHttpSinkType(repoPath: string, lower: string): string {
   ) {
     return "outbound_http";
   }
-  return "server_side_request";
+  return hasRequestControlledOutboundTarget(lower, entity)
+    ? "server_side_request"
+    : "outbound_http";
+}
+
+function hasRequestControlledOutboundTarget(candidate: string, entity: ObservedEntity): boolean {
+  if (
+    /\b(?:req|request|ctx|context)\s*(?:\.\s*(?:params|body|query|headers))?\s*(?:\.|\[)/i.test(
+      candidate,
+    ) ||
+    /\b(?:params|body|query|headers)\s*\[/i.test(candidate)
+  ) {
+    return true;
+  }
+  if (!hasExternalRequestSource(entity) && boundaryHint(entity.slice.boundary) === undefined) {
+    return false;
+  }
+  const names = requestControlledNames(entity);
+  if (
+    names.some((name) => new RegExp(String.raw`\b${escapeRegExp(name)}\b`, "i").test(candidate))
+  ) {
+    return true;
+  }
+  return (
+    hasExternalRequestSource(entity) &&
+    /\b[a-z0-9_$]*(?:url|uri|host|hostname|endpoint|target|callback|redirect|domain)[a-z0-9_$]*\b/i.test(
+      candidate,
+    )
+  );
 }
 
 function isLikelyBrowserClientPath(repoPath: string): boolean {

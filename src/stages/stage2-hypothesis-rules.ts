@@ -43,7 +43,7 @@ export function stage2HypothesisRules(
       family: "external_input_to_dangerous_operation",
       title: "External input reaches a dangerous operation",
       source: { kinds: ["Boundary", "Source"] },
-      target: { kinds: ["Sink"] },
+      target: { kinds: ["Sink"], propertyNotEquals: { sinkType: "outbound_http" } },
       path: {
         allowedEdgeKinds: ["receives", "registers", "calls", "flows_to"],
         maxPathLength,

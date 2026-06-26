@@ -152,6 +152,33 @@ describe("correlateStage2Hypotheses context and determinism", () => {
     expect(candidates[0]?.supportingEdgeIds).toEqual(expect.arrayContaining([usesA.id, usesB.id]));
   });
 
+  it("does not promote generic outbound HTTP calls as dangerous external-input paths", () => {
+    const boundary = node("Boundary", "Boundary:GET /proxy", "GET /proxy", {
+      boundaryType: "http_route",
+    });
+    const outbound = node("Sink", "Sink:outbound-fetch", "fetch", {
+      sinkType: "outbound_http",
+    });
+    const serverSide = node("Sink", "Sink:ssrf-fetch", "fetch", {
+      sinkType: "server_side_request",
+    });
+
+    expect(
+      familyCandidates(
+        "external_input_to_dangerous_operation",
+        graph([boundary, outbound], [edge("calls", boundary, outbound, "calls:boundary:outbound")]),
+        [],
+      ),
+    ).toEqual([]);
+    expect(
+      familyCandidates(
+        "external_input_to_dangerous_operation",
+        graph([boundary, serverSide], [edge("calls", boundary, serverSide, "calls:boundary:ssrf")]),
+        [],
+      ),
+    ).toHaveLength(1);
+  });
+
   it("applies maxCandidatesPerRule after context-required filtering", () => {
     const fixture = dependencyFixture({ alternatePath: true });
     const candidates = correlateStage2Hypotheses({

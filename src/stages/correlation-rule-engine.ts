@@ -32,6 +32,7 @@ export interface CorrelationNodeSelector {
   readonly stableKeys?: ReadonlyArray<string>;
   readonly coverageStates?: ReadonlyArray<GraphCoverageState>;
   readonly propertyEquals?: Readonly<Record<string, string | number | boolean>>;
+  readonly propertyNotEquals?: Readonly<Record<string, string | number | boolean>>;
 }
 
 export interface CorrelationPathDefinition {
@@ -640,6 +641,11 @@ function matchesSelector(node: SecurityGraphNode, selector: CorrelationNodeSelec
       return false;
     }
   }
+  for (const [key, excluded] of Object.entries(selector.propertyNotEquals ?? {})) {
+    if (node.properties[key] === excluded) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -808,11 +814,18 @@ function assertSelector(selector: CorrelationNodeSelector, label: string): void 
     assertNonEmptyList(selector.coverageStates, `${label} coverageStates`);
   }
   const propertyKeys = Object.keys(selector.propertyEquals ?? {});
+  const negativePropertyKeys = Object.keys(selector.propertyNotEquals ?? {});
   if (selector.propertyEquals !== undefined && propertyKeys.length === 0) {
     throw new Error(`${label} propertyEquals must constrain at least one property`);
   }
+  if (selector.propertyNotEquals !== undefined && negativePropertyKeys.length === 0) {
+    throw new Error(`${label} propertyNotEquals must constrain at least one property`);
+  }
   for (const key of propertyKeys) {
     assertNonEmpty(key, `${label} propertyEquals key`);
+  }
+  for (const key of negativePropertyKeys) {
+    assertNonEmpty(key, `${label} propertyNotEquals key`);
   }
 }
 
