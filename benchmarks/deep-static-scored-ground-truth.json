@@ -26,7 +26,7 @@
           "title": "Seeded fake Stripe access token is reported by gitleaks",
           "checkFamily": "secrets",
           "class": "Secret",
-          "coverageArea": "language_support",
+          "coverageArea": "secrets.gitleaks",
           "matcher": {
             "sourceTool": "gitleaks",
             "ruleId": "stripe-access-token",
@@ -36,9 +36,8 @@
         }
       ],
       "coverage": {
-        "language_support": {
-          "stateIn": ["checked"],
-          "complete": true
+        "secrets.gitleaks": {
+          "stateIn": ["checked"]
         }
       },
       "notes": [
@@ -57,9 +56,8 @@
       "staticTruth": "complete",
       "staticSupportReview": "complete",
       "coverage": {
-        "language_support": {
-          "stateIn": ["checked"],
-          "complete": true
+        "secrets.gitleaks": {
+          "stateIn": ["checked"]
         }
       },
       "notes": [

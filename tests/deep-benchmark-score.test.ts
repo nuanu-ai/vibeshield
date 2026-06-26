@@ -35,7 +35,7 @@ describe("deep benchmark score", () => {
               {
                 id: "direct.secret",
                 title: "Secret is found",
-                coverageArea: "language_support",
+                coverageArea: "secrets.gitleaks",
                 matcher: { ruleId: "generic-api-key", category: "secret" },
               },
             ],
@@ -57,6 +57,7 @@ describe("deep benchmark score", () => {
       },
       [
         report({
+          coverage: [{ check: "secrets.gitleaks", status: "checked" }],
           findings: [
             finding("finding.secret", {
               ruleId: "generic-api-key",
@@ -446,8 +447,8 @@ describe("deep benchmark score", () => {
             directFindings: [
               {
                 id: "direct.secret",
-                title: "Secret is in failed coverage",
-                coverageArea: "data_flow",
+                title: "Secret is in failed scanner coverage",
+                coverageArea: "secrets.gitleaks",
                 matcher: { ruleId: "generic-api-key", category: "secret" },
               },
             ],
@@ -461,7 +462,7 @@ describe("deep benchmark score", () => {
               },
             ],
             coverage: {
-              data_flow: { stateIn: ["failed"] },
+              "secrets.gitleaks": { stateIn: ["checked"] },
               language_support: { stateIn: ["partial"] },
             },
           },
@@ -470,8 +471,8 @@ describe("deep benchmark score", () => {
       [
         report({
           originUrl: "https://example.test/coverage",
+          coverage: [{ check: "secrets.gitleaks", status: "failed", reason: "scanner failed" }],
           deepCoverage: [
-            { area: "data_flow", state: "failed", reason: "backend failed" },
             { area: "language_support", state: "partial", reason: "unsupported php=1" },
           ],
         }),
@@ -482,11 +483,19 @@ describe("deep benchmark score", () => {
     expect(summary.repositories[0]?.direct.fn).toBe(0);
     expect(summary.repositories[0]?.staticHypotheses.coverageLoss).toBe(1);
     expect(summary.repositories[0]?.staticHypotheses.candidateFn).toBe(0);
+    expect(summary.repositories[0]?.coverageErrors).toContain(
+      "coverage secrets.gitleaks state failed not in checked",
+    );
   });
 });
 
 function report(input: {
   readonly originUrl?: string;
+  readonly coverage?: ReadonlyArray<{
+    readonly check: string;
+    readonly status: "checked" | "degraded" | "failed" | "skipped";
+    readonly reason?: string;
+  }>;
   readonly findings?: ReadonlyArray<Finding>;
   readonly candidates?: ReadonlyArray<HypothesisCandidate>;
   readonly hypotheses?: ReadonlyArray<StaticHypothesis>;
@@ -526,7 +535,7 @@ function report(input: {
       },
       toolchain: { imageTag: "fixture", tools: [] },
       verdict: "not-ready-to-deploy",
-      coverage: [],
+      coverage: input.coverage ?? [],
       deepCoverage,
       findingSummary: { total: input.findings?.length ?? 0, bySeverity: {}, byCategory: {} },
       evidence: [],

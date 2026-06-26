@@ -3,7 +3,6 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Verdict } from "../src/domain/assessment.js";
-import type { DeepCoverageEntry } from "../src/domain/deep-coverage.js";
 import type { Finding } from "../src/domain/finding.js";
 import type { HypothesisCandidate } from "../src/domain/hypothesis-candidate.js";
 import type { SecurityAssessment } from "../src/domain/security-assessment.js";
@@ -493,7 +492,7 @@ export function scoreRepository(
   report: DeepReportJson,
   expectation: ScoredRepositoryExpectation,
 ): RepositoryScore {
-  const coverage = coverageSummary(report.assessment.deepCoverage ?? []);
+  const coverage = coverageSummary(report.assessment);
   const direct = scoreDirectFindings(report.assessment, expectation, coverage);
   const staticHypotheses = scoreStaticHypotheses(report.assessment, expectation, coverage);
   const coverageErrors = coverageGateErrors(coverage, expectation);
@@ -1166,12 +1165,13 @@ function coverageGateErrors(
 ): string[] {
   const errors: string[] = [];
   for (const [area, entry] of Object.entries(coverage)) {
-    if (entry.state === "failed") {
+    if (entry.kind === "deep" && entry.state === "failed") {
       errors.push(`deep coverage failed for ${area}${reasonSuffix(entry.reason)}`);
     }
   }
   const dependencyUsage = coverage.dependency_usage;
   if (
+    dependencyUsage?.kind === "deep" &&
     dependencyUsage?.totalCount !== undefined &&
     dependencyUsage.totalCount > 0 &&
     dependencyUsage.coveredCount !== dependencyUsage.totalCount
@@ -1485,12 +1485,18 @@ function fScore(precision: RatioMetric, recall: RatioMetric, beta: number): Rati
   };
 }
 
-function coverageSummary(
-  entries: ReadonlyArray<DeepCoverageEntry>,
-): Record<string, CoverageSummary> {
+function coverageSummary(assessment: SecurityAssessment): Record<string, CoverageSummary> {
   const out: Record<string, CoverageSummary> = {};
-  for (const entry of entries) {
+  for (const entry of assessment.coverage) {
+    out[entry.check] = {
+      kind: "quick",
+      state: entry.status,
+      ...(entry.reason === undefined ? {} : { reason: entry.reason }),
+    };
+  }
+  for (const entry of assessment.deepCoverage ?? []) {
     out[entry.area] = {
+      kind: "deep",
       state: entry.state,
       ...(entry.coveredCount === undefined ? {} : { coveredCount: entry.coveredCount }),
       ...(entry.totalCount === undefined ? {} : { totalCount: entry.totalCount }),
@@ -1501,6 +1507,7 @@ function coverageSummary(
 }
 
 interface CoverageSummary {
+  readonly kind: "deep" | "quick";
   readonly state: string;
   readonly coveredCount?: number;
   readonly totalCount?: number;

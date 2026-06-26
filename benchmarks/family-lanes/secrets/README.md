@@ -9,4 +9,6 @@ These committed reports are the first standalone scored `secrets` family lane.
   secret finding in that report would score as a false positive.
 
 The planted value is fake and non-live. The truth oracle is fixture construction,
-not VibeShield output.
+not VibeShield output. Coverage is proven by the Quick Scan
+`secrets.gitleaks` check in `assessment.coverage`; these direct-finding fixtures
+do not need Deep Static coverage.
