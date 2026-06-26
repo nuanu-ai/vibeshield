@@ -1,12 +1,13 @@
 # Deep Static Training Benchmark
 
 This benchmark is the current regression gate for the Joern-backed Deep Static
-pipeline on training and model repositories. It proves that a run emits
+lane on training and model repositories. It proves that a run emits
 machine-readable hypothesis candidates, supported static hypotheses, no failed
 Deep Static coverage, and complete `dependency_usage` coverage when dependency
 components exist.
 
-This is a regression gate, not the final scored quality result. The broader
+This is a regression gate for one product lane, not the final scored quality
+result for VibeShield as a whole. The broader family-based benchmark,
 precision/recall methodology, targets, anti-overfit rules, and Phase 1/Phase 2
 contract live in [benchmark-methodology.md](benchmark-methodology.md). The first
 scored harness is `pnpm benchmark:score`; it intentionally fails target gates
@@ -19,11 +20,14 @@ repository. Failures should expose systemic gaps in Joern extraction, graph
 construction, rule coverage, validation, or reporting.
 
 The scored harness is not yet an achieved TP/FP/FN benchmark. Claiming
-precision, recall, or exhaustive coverage for WebGoat, Juice Shop,
+precision, recall, or exhaustive Deep Static coverage for WebGoat, Juice Shop,
 Vulnerable-Flask-App, go-dvwa, or another intentionally vulnerable app still
 requires pinned curated truth, static-detectability markings, complete
 FP/support review, coverage-aware denominators, and matchers from expected
-vulnerability classes to VibeShield findings or static hypotheses.
+vulnerability classes to VibeShield findings or static hypotheses. Claiming the
+overall product target additionally requires scored lanes for secrets,
+dependencies, CI/CD, IaC/config, deterministic code patterns, coverage, and
+verdict behavior.
 
 When generating fresh benchmark reports, use `--no-model` or
 `VIBESHIELD_NO_MODEL=1` so optional OpenRouter wording cannot slow or perturb the
@@ -163,6 +167,11 @@ path`, `Credential trust path`, `Two-factor authentication path`,
 `Security misconfiguration path`, `Anti-automation bypass path`,
 `Hidden content/resource exposure path`, and `Smart contract risk path`.
 
+This baseline intentionally remains a Deep Static/taint-heavy slice. It is not
+evidence that the full VibeShield product benchmark is covered, because it does
+not exercise the secrets, dependency, CI/CD, IaC/config, deterministic-pattern,
+and deploy-verdict lanes with their own clean truth oracles.
+
 ## Expectation Files
 
 The checked-in regression baseline lives at
@@ -240,19 +249,24 @@ documented static-analysis limitation.
 
 ## Next Methodology Gate
 
-The next quality gate should turn the current regression slice into the first
-scored baseline described in [benchmark-methodology.md](benchmark-methodology.md).
+The next Deep Static quality gate should turn the current regression slice into
+the first scored taint/static-hypothesis lane described in
+[benchmark-methodology.md](benchmark-methodology.md). It should not be treated as
+the full Phase 1 product benchmark.
 That means:
 
-- keep expanding WebGoat and Juice Shop from category/class expectations toward
-  lesson/CWE or challenge-level scored truth;
-- add pinned curated truth for Vulnerable-Flask-App and go-dvwa before claiming
-  Python or Go precision/recall;
+- keep WebGoat and Juice Shop scoped to static-detectable classes and reviewed
+  supported paths, instead of treating every runtime/business-logic challenge as
+  a static recall target;
+- use Vulnerable-Flask-App and go-dvwa as held-out taint/injection checks with
+  pinned truth and static-detectability markings;
 - keep Freeland as a local stability and determinism canary, not a scored
   precision/recall repository;
 - complete `benchmarks/deep-static-scored-ground-truth.json` so
   `pnpm benchmark:score` can separate TP, FP, FN, true-but-uncurated, coverage
-  loss, and systemic miss causes.
+  loss, and systemic miss causes;
+- add separate scored benchmark lanes for secrets, dependencies, CI/CD, and
+  IaC/config before using the target table as a product-level success claim.
 
 Each expected item should map to one of:
 
