@@ -99,8 +99,11 @@ export interface StaticHypothesisMatcher {
   readonly family?: string;
   readonly ruleId?: string;
   readonly titleIncludes?: string;
+  readonly titleIncludesAll?: ReadonlyArray<string>;
   readonly candidateReasonIncludes?: string;
+  readonly candidateReasonIncludesAll?: ReadonlyArray<string>;
   readonly pathSummaryIncludes?: string;
+  readonly pathSummaryIncludesAll?: ReadonlyArray<string>;
   readonly statusIn?: ReadonlyArray<string>;
 }
 
@@ -862,6 +865,9 @@ function matchesCandidate(candidate: HypothesisCandidate, item: StaticTruthItem)
   ) {
     return false;
   }
+  if (!includesAll(candidate.candidateReason, item.matcher.candidateReasonIncludesAll)) {
+    return false;
+  }
   return true;
 }
 
@@ -887,10 +893,16 @@ function matchesStaticHypothesis(
   if (matcher.titleIncludes !== undefined && !hypothesis.title.includes(matcher.titleIncludes)) {
     return false;
   }
+  if (!includesAll(hypothesis.title, matcher.titleIncludesAll)) {
+    return false;
+  }
   if (
     matcher.candidateReasonIncludes !== undefined &&
     !candidate.candidateReason.includes(matcher.candidateReasonIncludes)
   ) {
+    return false;
+  }
+  if (!includesAll(candidate.candidateReason, matcher.candidateReasonIncludesAll)) {
     return false;
   }
   if (
@@ -899,10 +911,17 @@ function matchesStaticHypothesis(
   ) {
     return false;
   }
+  if (!includesAll(hypothesis.pathSummary, matcher.pathSummaryIncludesAll)) {
+    return false;
+  }
   if (matcher.statusIn !== undefined && !matcher.statusIn.includes(hypothesis.status)) {
     return false;
   }
   return true;
+}
+
+function includesAll(value: string, expected: ReadonlyArray<string> | undefined): boolean {
+  return expected === undefined || expected.every((part) => value.includes(part));
 }
 
 function coverageAllowsDirectRecall(entry: CoverageSummary | undefined): boolean {

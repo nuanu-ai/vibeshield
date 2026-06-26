@@ -225,7 +225,7 @@
           "candidateFamily": "external_input_to_dangerous_operation",
           "matcher": {
             "titleIncludes": "Template injection",
-            "candidateReasonIncludes": "/hello reaches render_template_string",
+            "candidateReasonIncludesAll": ["/hello", "render_template_string"],
             "statusIn": ["statically_supported"]
           }
         },
@@ -237,7 +237,7 @@
           "candidateFamily": "external_input_to_dangerous_operation",
           "matcher": {
             "titleIncludes": "SQL injection",
-            "candidateReasonIncludes": "/user/<string:name> reaches execute",
+            "candidateReasonIncludesAll": ["/user/<string:name>", "execute"],
             "statusIn": ["statically_supported"]
           }
         },
@@ -261,7 +261,7 @@
           "candidateFamily": "external_input_to_dangerous_operation",
           "matcher": {
             "titleIncludes": "Code execution",
-            "candidateReasonIncludes": "/get_users reaches check_output",
+            "candidateReasonIncludesAll": ["/get_users", "check_output"],
             "statusIn": ["statically_supported"]
           }
         },
@@ -284,7 +284,7 @@
           "candidateFamily": "external_input_to_dangerous_operation",
           "matcher": {
             "titleIncludes": "Insecure deserialization",
-            "candidateReasonIncludes": "/deserialization/ reaches loads",
+            "candidateReasonIncludesAll": ["/deserialization/", "loads"],
             "statusIn": ["statically_supported"]
           }
         },

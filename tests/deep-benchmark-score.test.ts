@@ -43,7 +43,8 @@ describe("deep benchmark score", () => {
                 coverageArea: "data_flow",
                 candidateFamily: "external_input_to_dangerous_operation",
                 matcher: {
-                  titleIncludes: "SQL injection",
+                  titleIncludesAll: ["SQL", "injection"],
+                  candidateReasonIncludesAll: ["/users", "query"],
                   statusIn: ["statically_supported"],
                 },
               },
@@ -69,6 +70,7 @@ describe("deep benchmark score", () => {
             candidate("candidate.sqli", {
               family: "external_input_to_dangerous_operation",
               title: "SQL injection path",
+              candidateReason: "SQL injection path: /users (src/server.ts:12) reaches query",
             }),
             candidate("candidate.noise", {
               family: "external_input_to_dangerous_operation",
@@ -299,6 +301,7 @@ function candidate(
   input: {
     readonly family: string;
     readonly title: string;
+    readonly candidateReason?: string;
   },
 ): HypothesisCandidate {
   return {
@@ -313,7 +316,7 @@ function candidate(
     contradictingEdgeIds: [],
     coverageRefs: ["data_flow:checked"],
     requiredValidation: ["runtime_validation"],
-    candidateReason: input.title,
+    candidateReason: input.candidateReason ?? input.title,
   };
 }
 
