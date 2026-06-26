@@ -36,7 +36,8 @@
           "title": "SSRF task reaches a server-side fetch or file read sink",
           "kind": "hypothesis",
           "family": "external_input_to_dangerous_operation",
-          "candidateReasonIncludes": "/SSRF/task2",
+          "titleIncludes": "Path traversal or file access",
+          "candidateReasonIncludes": "SSRFTask2.java",
           "statusIn": ["statically_supported"]
         },
         {

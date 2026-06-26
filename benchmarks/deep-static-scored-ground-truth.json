@@ -53,7 +53,7 @@
           "coverageArea": "data_flow",
           "candidateFamily": "external_input_to_dangerous_operation",
           "matcher": {
-            "candidateReasonIncludes": "/SSRF/task2",
+            "candidateReasonIncludesAll": ["SSRFTask2.java", "readAllBytes"],
             "statusIn": ["statically_supported"]
           }
         },
