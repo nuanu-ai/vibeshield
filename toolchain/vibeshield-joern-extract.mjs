@@ -426,12 +426,10 @@ async function routeFromSource(sources, method) {
 }
 
 function routesRegisteredByCalls(methods, callsByParent) {
+  const indexableMethods = methods.filter((method) => isIndexableMethod(method));
   const methodsByFullName = new Map();
   const methodsByName = new Map();
-  for (const method of methods) {
-    if (!isIndexableMethod(method)) {
-      continue;
-    }
+  for (const method of indexableMethods) {
     methodsByFullName.set(method.fullName, method);
     for (const name of methodLookupNames(method)) {
       const current = methodsByName.get(name) ?? [];
@@ -464,16 +462,36 @@ function routesRegisteredByCalls(methods, callsByParent) {
         if (target?.fullName === undefined || routesByMethod.has(target.fullName)) {
           continue;
         }
-        routesByMethod.set(target.fullName, {
-          boundaryType: registration.boundaryType,
-          routeOrName: registration.routeOrName,
-          method: registration.method,
-          sourceName: "request",
-        });
+        routesByMethod.set(target.fullName, routeBoundary(registration, target));
+        for (const descendant of routeHandlerDescendants(target, indexableMethods)) {
+          if (!routesByMethod.has(descendant.fullName)) {
+            routesByMethod.set(descendant.fullName, routeBoundary(registration, descendant));
+          }
+        }
       }
     }
   }
   return routesByMethod;
+}
+
+function routeBoundary(registration, method) {
+  return {
+    boundaryType: registration.boundaryType,
+    routeOrName: registration.routeOrName,
+    method: registration.method,
+    sourceName: requestParameterSourceName(method) ?? "request",
+  };
+}
+
+function routeHandlerDescendants(target, methods) {
+  const prefix = `${target.fullName}:`;
+  return methods.filter(
+    (method) => method.fullName?.startsWith(prefix) === true && hasRequestParameter(method),
+  );
+}
+
+function requestParameterSourceName(method) {
+  return method.parameters.find((parameter) => isRequestParameter(parameter))?.name;
 }
 
 function isIndexableMethod(method) {

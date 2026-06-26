@@ -216,6 +216,7 @@ EOF`,
 METHOD	${enc("src/server.ts::program:configureApp")}	${enc("configureApp")}	${enc(serverPath)}	1	1	${enc("configureApp")}	${enc([param("app"), param("seq")].join(";"))}	${enc(" ")}
 METHOD	${enc("src/server.ts::program:handler")}	${enc("handler")}	${enc(serverPath)}	8	1	${enc("handler")}	${enc([param("req", "express.Request"), param("res", "express.Response")].join(";"))}	${enc(" ")}
 METHOD	${enc("src/server.ts::program:resetPassword")}	${enc("<lambda>")}	${enc(serverPath)}	12	1	${enc("resetPassword")}	${enc("")}	${enc(" ")}
+METHOD	${enc("src/server.ts::program:resetPassword:<lambda>0")}	${enc("<lambda>0")}	${enc(serverPath)}	13	3	${enc("async ({ body }, res, next) => res.json(body)")}	${enc([param("body", "express.Request.body"), param("res", "express.Response")].join(";"))}	${enc(" ")}
 METHOD	${enc("src/server.ts::program:serverHandler")}	${enc("serverHandler")}	${enc(serverPath)}	16	1	${enc("serverHandler")}	${enc([param("req", "express.Request"), param("res", "express.Response")].join(";"))}	${enc(" ")}
 METHOD	${enc("src/server.ts::program:max")}	${enc("max")}	${enc(serverPath)}	20	1	${enc("max")}	${enc(param("value"))}	${enc(" ")}
 METHOD	${enc("src/client.ts::program:resetPassword")}	${enc("resetPassword")}	${enc(clientPath)}	1	1	${enc("resetPassword")}	${enc("")}	${enc(" ")}
@@ -254,7 +255,7 @@ EOF`,
     const parsed = JSON.parse(await readFile(outPath, "utf8")) as {
       readonly objectSlices: ReadonlyArray<{
         readonly fullName?: string;
-        readonly boundary?: { readonly routeOrName?: string };
+        readonly boundary?: { readonly routeOrName?: string; readonly sourceName?: string };
       }>;
     };
     const setup = parsed.objectSlices.find(
@@ -266,6 +267,9 @@ EOF`,
     const reset = parsed.objectSlices.find(
       (slice) => slice.fullName === "src/server.ts::program:resetPassword",
     );
+    const resetHandler = parsed.objectSlices.find(
+      (slice) => slice.fullName === "src/server.ts::program:resetPassword:<lambda>0",
+    );
     const serverHandler = parsed.objectSlices.find(
       (slice) => slice.fullName === "src/server.ts::program:serverHandler",
     );
@@ -275,6 +279,8 @@ EOF`,
     expect(setup?.boundary).toBeUndefined();
     expect(handler?.boundary?.routeOrName).toBe("/api");
     expect(reset?.boundary?.routeOrName).toBe("/reset");
+    expect(resetHandler?.boundary?.routeOrName).toBe("/reset");
+    expect(resetHandler?.boundary?.sourceName).toBe("body");
     expect(serverHandler?.boundary?.routeOrName).toBe("/status");
     expect(max?.boundary).toBeUndefined();
   });
