@@ -1,0 +1,83 @@
+{
+  "runId": "fixture-deterministic-code-eval-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded deterministic code eval fixture",
+      "localPath": "benchmarks/family-lanes/deterministic-code-patterns/eval-code-repo",
+      "commitSha": "fixture-deterministic-code-eval-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 290,
+      "sourceHash": "sha256:fixture-deterministic-code-eval-v1",
+      "commitSha": "fixture-deterministic-code-eval-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": [
+        {
+          "tool": "opengrep",
+          "version": "1.23.0"
+        }
+      ]
+    },
+    "verdict": "not-ready-to-deploy",
+    "coverage": [
+      {
+        "check": "code-patterns.opengrep",
+        "status": "checked"
+      }
+    ],
+    "findingSummary": {
+      "total": 1,
+      "bySeverity": {
+        "critical": 1
+      },
+      "byCategory": {
+        "code-pattern": 1
+      }
+    },
+    "evidence": [
+      {
+        "id": "evidence.seeded-javascript-eval",
+        "rawArtifactBlobSha256": "sha256:opengrep-javascript-eval-fixture",
+        "filePath": "src/app.js",
+        "startLine": 4,
+        "endLine": 4,
+        "snippet": "eval(userInput)",
+        "snippetHash": "sha256:seeded-javascript-eval",
+        "tool": "opengrep"
+      }
+    ],
+    "findings": [
+      {
+        "id": "finding.seeded-javascript-eval",
+        "sourceTool": "opengrep",
+        "ruleId": "vibeshield.javascript-eval",
+        "category": "code-pattern",
+        "severity": "critical",
+        "confidence": "high",
+        "locations": [
+          {
+            "filePath": "src/app.js",
+            "startLine": 4,
+            "endLine": 4
+          }
+        ],
+        "evidenceIds": ["evidence.seeded-javascript-eval"],
+        "fingerprint": "src/app.js:vibeshield.javascript-eval:4",
+        "remediationKey": "dangerous-code-pattern"
+      }
+    ],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; the JavaScript eval call is synthetic."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}

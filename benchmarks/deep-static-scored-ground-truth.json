@@ -234,6 +234,61 @@
       ]
     },
     {
+      "name": "Seeded deterministic code eval fixture",
+      "language": "Fixture",
+      "split": "tuning",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/deterministic-code-patterns/eval-code-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "directFindings": [
+        {
+          "id": "seeded-deterministic-code.javascript-eval",
+          "title": "Seeded JavaScript eval call is reported by OpenGrep",
+          "checkFamily": "deterministic-code-patterns",
+          "class": "code execution",
+          "coverageArea": "code-patterns.opengrep",
+          "matcher": {
+            "sourceTool": "opengrep",
+            "ruleId": "vibeshield.javascript-eval",
+            "category": "code-pattern",
+            "filePathIncludes": "src/app.js"
+          }
+        }
+      ],
+      "coverage": {
+        "code-patterns.opengrep": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: a dangerous JavaScript eval call is planted by construction, so this is a direct deterministic-code-pattern recall item with a clean truth oracle."
+      ]
+    },
+    {
+      "name": "Seeded deterministic code clean fixture",
+      "language": "Fixture",
+      "split": "held-out",
+      "match": {
+        "localPathSuffix": "benchmarks/family-lanes/deterministic-code-patterns/clean-code-repo"
+      },
+      "directTruth": "complete",
+      "directFpReview": "complete",
+      "staticTruth": "complete",
+      "staticSupportReview": "complete",
+      "coverage": {
+        "code-patterns.opengrep": {
+          "stateIn": ["checked"]
+        }
+      },
+      "notes": [
+        "Synthetic family-lane fixture: the clean control contains no planted dangerous code pattern, so any direct deterministic code-pattern finding would score as a false positive."
+      ]
+    },
+    {
       "name": "WebGoat Java scored seed",
       "language": "Java",
       "split": "tuning",

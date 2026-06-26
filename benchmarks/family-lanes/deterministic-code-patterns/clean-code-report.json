@@ -1,0 +1,49 @@
+{
+  "runId": "fixture-deterministic-code-clean-v1",
+  "assessment": {
+    "repository": {
+      "name": "Seeded deterministic code clean fixture",
+      "localPath": "benchmarks/family-lanes/deterministic-code-patterns/clean-code-repo",
+      "commitSha": "fixture-deterministic-code-clean-v1"
+    },
+    "manifest": {
+      "fileCount": 2,
+      "totalBytes": 260,
+      "sourceHash": "sha256:fixture-deterministic-code-clean-v1",
+      "commitSha": "fixture-deterministic-code-clean-v1",
+      "exclusionCount": 0
+    },
+    "toolchain": {
+      "imageTag": "fixture",
+      "tools": [
+        {
+          "tool": "opengrep",
+          "version": "1.23.0"
+        }
+      ]
+    },
+    "verdict": "looks-ok-for-now",
+    "coverage": [
+      {
+        "check": "code-patterns.opengrep",
+        "status": "checked"
+      }
+    ],
+    "findingSummary": {
+      "total": 0,
+      "bySeverity": {},
+      "byCategory": {}
+    },
+    "evidence": [],
+    "findings": [],
+    "findingClusters": [],
+    "rankedActions": [],
+    "hypothesisCandidates": [],
+    "staticHypotheses": [],
+    "limitations": [
+      "Fixture report for the family-based scored benchmark; this clean control should produce no deterministic code-pattern finding."
+    ],
+    "limitation": "This scan did not run your app; authorization logic and runtime behavior were not checked.",
+    "generatedAt": "2026-06-26T00:00:00.000Z"
+  }
+}
