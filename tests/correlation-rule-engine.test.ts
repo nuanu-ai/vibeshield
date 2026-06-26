@@ -289,6 +289,12 @@ describe("correlateGraphRules candidates", () => {
           "Credential trust path: request-controlled login data reaches hardcoded or default credential logic",
       },
       {
+        boundaryLabel: "routes/login.ts::program:login:verifyPreLoginChallenges",
+        sinkType: "security_misconfiguration",
+        title:
+          "Security misconfiguration path: request-controlled check reaches insecure configuration behavior",
+      },
+      {
         boundaryLabel: "routes/resetPassword.ts::program:resetPassword",
         sinkType: "password_reset_trust",
         title: "Password reset path: request-controlled recovery data reaches password reset flow",

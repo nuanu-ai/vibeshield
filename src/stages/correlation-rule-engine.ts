@@ -276,6 +276,9 @@ function candidateTitle(
     return rule.title;
   }
   const sinkType = stringProperty(target.properties.sinkType);
+  if (sinkType === "security_misconfiguration") {
+    return "Security misconfiguration path: request-controlled check reaches insecure configuration behavior";
+  }
   const pathNodes = nodesForPath(nodes, path);
   const routeSemanticTitle = routeSemanticTitleForPath(pathNodes);
   if (routeSemanticTitle !== undefined) {
