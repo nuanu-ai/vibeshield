@@ -397,7 +397,7 @@ function boundaryHint(method, calls, sourceRoute) {
   const code = string(method.code) ?? "";
   const route =
     routeFromAnnotations(method.annotations) ??
-    routeFromCode(code) ??
+    routeFromCode(method, code) ??
     sourceRoute ??
     routeFromCalls(method, calls) ??
     routeFromRequestParameter(method);
@@ -504,7 +504,7 @@ function pythonHttpMethod(decoratorMethod, argsText) {
   return explicit?.[1]?.toUpperCase() ?? "ANY";
 }
 
-function routeFromCode(code) {
+function routeFromCode(method, code) {
   const spring = code.match(
     /@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping|RequestMapping)[\s\S]*?(?:\)|$)/m,
   );
@@ -524,9 +524,9 @@ function routeFromCode(code) {
     };
   }
 
-  const js = code.match(
-    /\b(?:app|router)\.(get|post|put|patch|delete|all|use)\s*\(\s*["']([^"']+)["']/m,
-  );
+  const js = hasRequestParameter(method)
+    ? code.match(/\b(?:app|router)\.(get|post|put|patch|delete|all|use)\s*\(\s*["']([^"']+)["']/m)
+    : null;
   if (js !== null) {
     return {
       boundaryType: "javascript-web",
@@ -574,6 +574,9 @@ function routeFromCalls(method, calls) {
   if ((method.fileName ?? "").endsWith(".java")) {
     return undefined;
   }
+  if (!hasRequestParameter(method)) {
+    return undefined;
+  }
   const routeCall = calls.find((call) => {
     const code = (string(call.code) ?? "").toLowerCase();
     return /\b(?:app|router)\.(?:get|post|put|patch|delete|all|use)\s*\(/.test(code);
@@ -610,6 +613,10 @@ function routeFromRequestParameter(method) {
     routeOrName: method.name ?? method.fullName.split(":").at(-1) ?? method.fullName,
     sourceName: requestParameter.name ?? "request",
   };
+}
+
+function hasRequestParameter(method) {
+  return method.parameters.some((parameter) => isRequestParameter(parameter));
 }
 
 function isRequestParameter(parameter) {

@@ -158,6 +158,89 @@ EOF`,
     expect(parsed.objectSlices[0]?.boundary?.routeOrName).toBe("/welcome2/<string:name>");
   });
 
+  it("does not infer JavaScript web boundaries from setup-only route registration", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "vibeshield-extractor-test-"));
+    const binDir = path.join(dir, "bin");
+    const sourceRoot = path.join(dir, "source");
+    const sourceDir = path.join(sourceRoot, "src");
+    const outPath = path.join(dir, "entities.json");
+    const serverPath = path.join(sourceDir, "server.ts");
+    await mkdir(binDir, { recursive: true });
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(
+      serverPath,
+      [
+        "export function configureApp(app, seq) {",
+        "  app.use('/api', handler)",
+        "}",
+        "",
+        "export function handler(req, res) {",
+        "  return res.send(req.query.name)",
+        "}",
+        "",
+        "app.get('/profile', handler)",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(binDir, "joern"),
+      [
+        "#!/bin/sh",
+        "out=''",
+        "prev=''",
+        'for arg in "$@"; do',
+        "  if [ \"$prev\" = '--param' ]; then",
+        '    case "$arg" in outFile=*) out="$(printf %s "$arg" | sed s/^outFile=//)" ;; esac',
+        "  fi",
+        '  prev="$arg"',
+        "done",
+        'if [ -z "$out" ]; then echo missing outFile >&2; exit 2; fi',
+        `cat > "$out" <<'EOF'
+METHOD	${enc("src/server.ts::program:configureApp")}	${enc("configureApp")}	${enc(serverPath)}	1	1	${enc("configureApp")}	${enc([param("app"), param("seq")].join(";"))}	${enc(" ")}
+METHOD	${enc("src/server.ts::program:handler")}	${enc("handler")}	${enc(serverPath)}	5	1	${enc("handler")}	${enc([param("req", "express.Request"), param("res", "express.Response")].join(";"))}	${enc(" ")}
+CALL	${enc("src/server.ts::program:configureApp")}	${enc("app.use")}	${enc("express.Application.use")}	${enc("app.use('/api', handler)")}	2	3
+EOF`,
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    await execFileAsync(
+      process.execPath,
+      [
+        extractorPath,
+        "--kind",
+        "entities",
+        "--cpg",
+        "/work/vibeshield/app.cpg.bin",
+        "--source-root",
+        sourceRoot,
+        "-o",
+        outPath,
+      ],
+      {
+        env: {
+          ...process.env,
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          TMPDIR: dir,
+        },
+      },
+    );
+
+    const parsed = JSON.parse(await readFile(outPath, "utf8")) as {
+      readonly objectSlices: ReadonlyArray<{
+        readonly fullName?: string;
+        readonly boundary?: { readonly routeOrName?: string };
+      }>;
+    };
+    const setup = parsed.objectSlices.find(
+      (slice) => slice.fullName === "src/server.ts::program:configureApp",
+    );
+    const handler = parsed.objectSlices.find(
+      (slice) => slice.fullName === "src/server.ts::program:handler",
+    );
+    expect(setup?.boundary).toBeUndefined();
+    expect(handler?.boundary?.routeOrName).toBe("handler");
+  });
+
   it("extracts deterministic package import observations from source files", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "vibeshield-extractor-test-"));
     const binDir = path.join(dir, "bin");
@@ -246,6 +329,10 @@ EOF`,
 
 function enc(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
+}
+
+function param(name: string, typeFullName = ""): string {
+  return [enc(name), typeFullName === "" ? "" : enc(typeFullName), "", ""].join(",");
 }
 
 function shellQuote(value: string): string {
