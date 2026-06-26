@@ -127,6 +127,45 @@ describe("deep benchmark score", () => {
             directFpReview: "incomplete",
             staticTruth: "incomplete",
             staticSupportReview: "incomplete",
+            directFindings: [
+              {
+                id: "direct.secret",
+                title: "Secret is found",
+                coverageArea: "language_support",
+                matcher: {
+                  ruleId: "generic-api-key",
+                  category: "secret",
+                  filePathIncludes: "config.py",
+                },
+              },
+            ],
+            trueButUncuratedDirect: [
+              {
+                id: "extra.secret",
+                reason: "Repeated config fixture secret is a true duplicate.",
+                matcher: {
+                  ruleId: "generic-api-key",
+                  category: "secret",
+                  filePathIncludes: "extra.py",
+                },
+              },
+            ],
+            staticHypotheses: [
+              {
+                id: "static.sqli",
+                title: "SQL injection path",
+                coverageArea: "data_flow",
+                candidateFamily: "external_input_to_dangerous_operation",
+                matcher: { titleIncludes: "SQL injection", statusIn: ["statically_supported"] },
+              },
+            ],
+            trueButUncuratedStatic: [
+              {
+                id: "extra.xss",
+                reason: "Repeated reflected response path is a true duplicate.",
+                matcher: { titleIncludes: "Cross-site scripting" },
+              },
+            ],
           },
         ],
       },
@@ -139,11 +178,29 @@ describe("deep benchmark score", () => {
               category: "secret",
               filePath: "config.py",
             }),
+            finding("finding.extra-secret", {
+              ruleId: "generic-api-key",
+              category: "secret",
+              filePath: "extra.py",
+            }),
+            finding("finding.unreviewed", {
+              ruleId: "unused-secret",
+              category: "secret",
+              filePath: "scratch.py",
+            }),
           ],
           candidates: [
             candidate("candidate.sqli", {
               family: "external_input_to_dangerous_operation",
               title: "SQL injection path",
+            }),
+            candidate("candidate.xss", {
+              family: "external_input_to_dangerous_operation",
+              title: "Cross-site scripting path",
+            }),
+            candidate("candidate.open-redirect", {
+              family: "external_input_to_dangerous_operation",
+              title: "Open redirect path",
             }),
           ],
           hypotheses: [
@@ -151,11 +208,31 @@ describe("deep benchmark score", () => {
               status: "statically_supported",
               title: "SQL injection path",
             }),
+            hypothesis("hypothesis.xss", "candidate.xss", {
+              status: "statically_supported",
+              title: "Cross-site scripting path",
+            }),
+            hypothesis("hypothesis.unreviewed", "candidate.open-redirect", {
+              status: "statically_supported",
+              title: "Open redirect path",
+            }),
           ],
         }),
       ],
     );
 
+    expect(summary.repositories[0]?.direct).toMatchObject({
+      tp: 1,
+      trueButUncurated: 1,
+      unreviewedFindings: 1,
+      unreviewedFindingIds: ["finding.unreviewed"],
+    });
+    expect(summary.repositories[0]?.staticHypotheses).toMatchObject({
+      supportedTp: 1,
+      trueButUncuratedSupport: 1,
+      unreviewedSupported: 1,
+      unreviewedSupportedIds: ["hypothesis.unreviewed"],
+    });
     expect(summary.repositories[0]?.scoreabilityErrors).toContain(
       "direct precision not scoreable: direct ground truth is incomplete",
     );

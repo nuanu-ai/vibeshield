@@ -537,7 +537,7 @@ function scoreDirectFindings(
   let fp = 0;
   let trueButUncurated = 0;
   let unreviewedFindings = 0;
-  let unreviewedFindingIds: string[] = [];
+  const unreviewedFindingIds: string[] = [];
   const directPrecisionBlockedBy = completenessBlockers(
     expectation.directTruth,
     expectation.directFpReview,
@@ -545,26 +545,25 @@ function scoreDirectFindings(
     "direct false-positive review is incomplete",
   );
 
-  if (directPrecisionBlockedBy.length === 0) {
-    for (const index of unusedFindingIndexes) {
-      const finding = findings[index];
-      if (
-        finding !== undefined &&
-        (expectation.trueButUncuratedDirect ?? []).some((item) =>
-          matchesFinding(finding, item.matcher),
-        )
-      ) {
-        trueButUncurated += 1;
-      } else {
-        fp += 1;
-      }
+  for (const index of unusedFindingIndexes) {
+    const finding = findings[index];
+    if (finding === undefined) {
+      continue;
     }
-  } else {
-    unreviewedFindings = unusedFindingIndexes.size;
-    unreviewedFindingIds = [...unusedFindingIndexes].flatMap((index) => {
-      const finding = findings[index];
-      return finding === undefined ? [] : [finding.id];
-    });
+    if (
+      (expectation.trueButUncuratedDirect ?? []).some((item) =>
+        matchesFinding(finding, item.matcher),
+      )
+    ) {
+      trueButUncurated += 1;
+      continue;
+    }
+    if (directPrecisionBlockedBy.length === 0) {
+      fp += 1;
+    } else {
+      unreviewedFindings += 1;
+      unreviewedFindingIds.push(finding.id);
+    }
   }
 
   const precision = ratio(tp, tp + fp, directPrecisionBlockedBy);
@@ -646,7 +645,7 @@ function scoreStaticHypotheses(
   let falseSupport = 0;
   let trueButUncuratedSupport = 0;
   let unreviewedSupported = 0;
-  let unreviewedSupportedIds: string[] = [];
+  const unreviewedSupportedIds: string[] = [];
   const usedSupportedIds = new Set<string>();
   const supportPrecisionBlockedBy = completenessBlockers(
     expectation.staticTruth,
@@ -655,36 +654,36 @@ function scoreStaticHypotheses(
     "static support review is incomplete",
   );
 
-  if (supportPrecisionBlockedBy.length === 0) {
-    for (const item of expectation.staticHypotheses ?? []) {
-      const hypothesis = supportedHypotheses.find(
-        (supported) =>
-          !usedSupportedIds.has(supported.id) &&
-          matchesStaticHypothesis(supported, candidatesById, item.matcher, item.candidateFamily),
-      );
-      if (hypothesis !== undefined) {
-        supportedTp += 1;
-        usedSupportedIds.add(hypothesis.id);
-      }
+  for (const item of expectation.staticHypotheses ?? []) {
+    const hypothesis = supportedHypotheses.find(
+      (supported) =>
+        !usedSupportedIds.has(supported.id) &&
+        matchesStaticHypothesis(supported, candidatesById, item.matcher, item.candidateFamily),
+    );
+    if (hypothesis !== undefined) {
+      supportedTp += 1;
+      usedSupportedIds.add(hypothesis.id);
     }
+  }
 
-    for (const hypothesis of supportedHypotheses) {
-      if (usedSupportedIds.has(hypothesis.id)) {
-        continue;
-      }
-      if (
-        (expectation.trueButUncuratedStatic ?? []).some((item) =>
-          matchesStaticHypothesis(hypothesis, candidatesById, item.matcher),
-        )
-      ) {
-        trueButUncuratedSupport += 1;
-      } else {
-        falseSupport += 1;
-      }
+  for (const hypothesis of supportedHypotheses) {
+    if (usedSupportedIds.has(hypothesis.id)) {
+      continue;
     }
-  } else {
-    unreviewedSupported = supportedHypotheses.length;
-    unreviewedSupportedIds = supportedHypotheses.map((hypothesis) => hypothesis.id);
+    if (
+      (expectation.trueButUncuratedStatic ?? []).some((item) =>
+        matchesStaticHypothesis(hypothesis, candidatesById, item.matcher),
+      )
+    ) {
+      trueButUncuratedSupport += 1;
+      continue;
+    }
+    if (supportPrecisionBlockedBy.length === 0) {
+      falseSupport += 1;
+    } else {
+      unreviewedSupported += 1;
+      unreviewedSupportedIds.push(hypothesis.id);
+    }
   }
 
   const candidateRecall = ratio(
