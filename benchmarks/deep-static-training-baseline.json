@@ -7,11 +7,11 @@
         "originUrl": "https://github.com/WebGoat/WebGoat.git"
       },
       "minFindings": 60,
-      "minHypothesisCandidates": 616,
-      "minSupportedHypotheses": 616,
+      "minHypothesisCandidates": 674,
+      "minSupportedHypotheses": 674,
       "requiredFamilies": {
         "dependency_usage_path": 36,
-        "external_input_to_dangerous_operation": 580
+        "external_input_to_dangerous_operation": 638
       },
       "coverage": {
         "language_support": {
@@ -21,7 +21,7 @@
         },
         "data_flow": {
           "stateIn": ["checked"],
-          "minCoveredCount": 290
+          "minCoveredCount": 319
         },
         "component_usage": {
           "stateIn": ["checked"],
@@ -43,11 +43,11 @@
         "originUrl": "https://github.com/juice-shop/juice-shop.git"
       },
       "minFindings": 88,
-      "minHypothesisCandidates": 1789,
-      "minSupportedHypotheses": 1789,
+      "minHypothesisCandidates": 1797,
+      "minSupportedHypotheses": 1797,
       "requiredFamilies": {
         "dependency_usage_path": 31,
-        "external_input_to_dangerous_operation": 1741,
+        "external_input_to_dangerous_operation": 1749,
         "ci_supply_chain_path": 3,
         "content_resource_exposure_path": 13,
         "smart_contract_risk_path": 1
@@ -60,7 +60,7 @@
         },
         "data_flow": {
           "stateIn": ["checked"],
-          "minCoveredCount": 728
+          "minCoveredCount": 732
         },
         "component_usage": {
           "stateIn": ["checked"],
