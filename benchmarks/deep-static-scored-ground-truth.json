@@ -174,10 +174,70 @@
         "originUrl": "https://github.com/juice-shop/juice-shop.git"
       },
       "expectedVerdict": "not-ready-to-deploy",
-      "directTruth": "incomplete",
-      "directFpReview": "incomplete",
+      "directTruth": "complete",
+      "directFpReview": "complete",
       "staticTruth": "incomplete",
       "staticSupportReview": "incomplete",
+      "trueButUncuratedDirect": [
+        {
+          "id": "juice.additional-hardcoded-secrets",
+          "reason": "Additional JWT/API-key/private-key fixtures are repeated true hardcoded-secret findings in the intentionally vulnerable app and tests, but are not separate direct recall-denominator items.",
+          "matcher": {
+            "sourceTool": "gitleaks",
+            "category": "secret"
+          }
+        },
+        {
+          "id": "juice.additional-eval-paths",
+          "reason": "The second eval sink is a true code-pattern finding, but one eval item is enough for the current direct recall denominator.",
+          "matcher": {
+            "sourceTool": "opengrep",
+            "ruleId": "vibeshield.javascript-eval",
+            "category": "code-pattern"
+          }
+        },
+        {
+          "id": "juice.additional-jsonwebtoken-cves",
+          "reason": "The same jsonwebtoken package version produces several advisory rows; one package finding is kept as the recall-denominator item and the rest are true duplicates.",
+          "matcher": {
+            "sourceTool": "osv",
+            "category": "dependency",
+            "metadata": {
+              "packageName": "jsonwebtoken",
+              "installedVersion": "0.4.0"
+            }
+          }
+        },
+        {
+          "id": "juice.additional-sanitize-html-cves",
+          "reason": "The same sanitize-html package version produces several advisory rows; one package finding is kept as the recall-denominator item and the rest are true duplicates.",
+          "matcher": {
+            "sourceTool": "osv",
+            "category": "dependency",
+            "metadata": {
+              "packageName": "sanitize-html",
+              "installedVersion": "1.4.2"
+            }
+          }
+        },
+        {
+          "id": "juice.additional-actionlint-expressions",
+          "reason": "The same workflow matrix expression produces two actionlint rows at the same workflow line; one is kept as the recall-denominator item.",
+          "matcher": {
+            "sourceTool": "actionlint",
+            "ruleId": "expression",
+            "category": "github-action"
+          }
+        },
+        {
+          "id": "juice.additional-dockerfile-iac",
+          "reason": "Additional Dockerfile hardening rows are true IaC findings but are duplicate class coverage for the current direct recall denominator.",
+          "matcher": {
+            "sourceTool": "trivy",
+            "category": "iac"
+          }
+        }
+      ],
       "directFindings": [
         {
           "id": "juice.hardcoded-secrets",
@@ -197,6 +257,115 @@
           "matcher": {
             "ruleId": "vibeshield.javascript-eval",
             "category": "code-pattern"
+          }
+        },
+        {
+          "id": "juice.function-constructor",
+          "title": "Dangerous JavaScript Function constructor usage is reported as a direct finding",
+          "class": "code execution",
+          "coverageArea": "language_support",
+          "matcher": {
+            "sourceTool": "opengrep",
+            "ruleId": "vibeshield.javascript-function-constructor",
+            "category": "code-pattern"
+          }
+        },
+        {
+          "id": "juice.express-jwt-cve",
+          "title": "package.json pins vulnerable express-jwt",
+          "class": "Dependency vulnerability",
+          "coverageArea": "dependency_usage",
+          "matcher": {
+            "sourceTool": "osv",
+            "category": "dependency",
+            "metadata": {
+              "packageName": "express-jwt",
+              "installedVersion": "0.1.3"
+            }
+          }
+        },
+        {
+          "id": "juice.jsonwebtoken-cve",
+          "title": "package.json pins vulnerable jsonwebtoken",
+          "class": "Dependency vulnerability",
+          "coverageArea": "dependency_usage",
+          "matcher": {
+            "sourceTool": "osv",
+            "category": "dependency",
+            "metadata": {
+              "packageName": "jsonwebtoken",
+              "installedVersion": "0.4.0"
+            }
+          }
+        },
+        {
+          "id": "juice.sanitize-html-cve",
+          "title": "package.json pins vulnerable sanitize-html",
+          "class": "Dependency vulnerability",
+          "coverageArea": "dependency_usage",
+          "matcher": {
+            "sourceTool": "osv",
+            "category": "dependency",
+            "metadata": {
+              "packageName": "sanitize-html",
+              "installedVersion": "1.4.2"
+            }
+          }
+        },
+        {
+          "id": "juice.workflow-expression",
+          "title": "CI workflow has invalid matrix expression references",
+          "class": "GitHub Actions hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "actionlint",
+            "ruleId": "expression",
+            "category": "github-action",
+            "filePathIncludes": ".github/workflows/ci.yml"
+          }
+        },
+        {
+          "id": "juice.dockerfile-latest-tag",
+          "title": "Dockerfile uses latest-style base image tags",
+          "class": "IaC hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "DS-0001",
+            "category": "iac"
+          }
+        },
+        {
+          "id": "juice.dockerfile-root-user",
+          "title": "Smoke-test Dockerfile does not drop the default root user",
+          "class": "IaC hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "DS-0002",
+            "category": "iac"
+          }
+        },
+        {
+          "id": "juice.dockerfile-apk-no-cache",
+          "title": "Smoke-test Dockerfile installs apk packages without --no-cache",
+          "class": "IaC hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "DS-0025",
+            "category": "iac"
+          }
+        },
+        {
+          "id": "juice.dockerfile-no-healthcheck",
+          "title": "Dockerfiles do not define container healthchecks",
+          "class": "IaC hardening",
+          "coverageArea": "ci_iac",
+          "matcher": {
+            "sourceTool": "trivy",
+            "ruleId": "DS-0026",
+            "category": "iac"
           }
         }
       ],
@@ -257,7 +426,8 @@
         }
       },
       "notes": [
-        "Seeded from the current coverage-style Juice Shop expectations. Challenge-level truth and FP/support review are still required before precision or recall can be claimed."
+        "Direct finding review is complete for run 20260626082921-4b7e2b26: repeated test/app secrets, repeated package advisories, duplicated workflow expression rows, and duplicate Dockerfile hardening rows are treated as true-but-uncurated duplicate direct findings.",
+        "Seeded from the current coverage-style Juice Shop expectations. Challenge-level static truth and static support review are still required before static precision or recall can be claimed."
       ]
     },
     {
