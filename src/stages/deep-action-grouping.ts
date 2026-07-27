@@ -54,7 +54,11 @@ export function groupDeepActions(input: GroupDeepActionsInput): DeepActionGroup[
   }
 
   for (const hypothesis of staticHypotheses) {
-    if (hypothesis.status === "statically_contradicted" || linkedHypothesisIds.has(hypothesis.id)) {
+    if (
+      hypothesis.status !== "statically_supported" ||
+      !hypothesis.promotion.publishable ||
+      linkedHypothesisIds.has(hypothesis.id)
+    ) {
       continue;
     }
     groups.push(hypothesisOnlyGroup(hypothesis, requiredCandidate(hypothesis, candidateById)));
@@ -128,7 +132,7 @@ function linkedHypothesesForAction(
 ): string[] {
   const actionFindingIds = new Set(action.findingIds);
   const linkedByCandidate = staticHypotheses.flatMap((hypothesis) => {
-    if (hypothesis.status === "statically_contradicted") {
+    if (hypothesis.status !== "statically_supported" || !hypothesis.promotion.publishable) {
       return [];
     }
     const candidate = requiredCandidate(hypothesis, candidateById);
@@ -141,7 +145,10 @@ function linkedHypothesesForAction(
   );
   const allowedHypothesisIds = new Set(
     staticHypotheses
-      .filter((hypothesis) => hypothesis.status !== "statically_contradicted")
+      .filter(
+        (hypothesis) =>
+          hypothesis.status === "statically_supported" && hypothesis.promotion.publishable,
+      )
       .map((hypothesis) => hypothesis.id),
   );
   return uniqueSorted([...linkedByCandidate, ...linkedByContext]).filter((hypothesisId) =>

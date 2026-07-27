@@ -1618,6 +1618,8 @@ async function correlateOrDegrade(input: {
     const staticHypotheses = validateStaticHypotheses({
       graph: input.graph,
       candidates: hypothesisCandidates,
+      evidence: input.evidence,
+      manifestPaths: input.manifest.files.map((file) => file.path),
     });
     const findingContextAssessments = findingContextOrStandalone(
       input.findings,

@@ -194,8 +194,8 @@ describe("runScan quick scan vertical slice", () => {
       true,
     );
     expect(
-      outcome.assessment.staticHypotheses?.some(
-        (hypothesis) => hypothesis.status === "statically_supported",
+      outcome.assessment.staticHypotheses?.every(
+        (hypothesis) => hypothesis.status === "inconclusive" && !hypothesis.promotion.publishable,
       ),
     ).toBe(true);
 
@@ -205,10 +205,12 @@ describe("runScan quick scan vertical slice", () => {
         hypothesisCandidates?: Array<{ id: string; family: string }>;
         staticHypotheses?: Array<{ id: string; status: string }>;
       };
+      ownerReport: { validationGroups: unknown[] };
     };
     expect(report.assessment.repositoryMapArtifactRef?.role).toBe("repository-map.json");
     expect(report.assessment.hypothesisCandidates?.[0]?.id).toMatch(/^hypothesis_candidate_/);
     expect(report.assessment.staticHypotheses?.[0]?.id).toMatch(/^static_hypothesis_/);
+    expect(report.ownerReport.validationGroups).toEqual([]);
 
     const repositoryMap = JSON.parse(
       await readFile(outcome.reportPaths.repositoryMap ?? "", "utf8"),
@@ -234,11 +236,12 @@ describe("runScan quick scan vertical slice", () => {
     expect(persistedCoverage?.entries.some((entry) => entry.area === "call_graph")).toBe(true);
 
     const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
-    expect(markdown).toContain("## Likely attack paths");
-    expect(markdown).toContain("## What was checked");
+    expect(markdown).toContain("## Fix now");
+    expect(markdown).toContain("## Validate next");
+    expect(markdown).toContain("## Technical appendix");
   });
 
-  it("raises the verdict when Deep Static finds supported attack paths without quick findings", async () => {
+  it("does not raise the verdict for an unassessed-control static path", async () => {
     const source = await writeLocalFixture(dir);
     const sandbox = new FakeSandboxRuntime({
       exec: fakeQuickScanExec(manifestFor(source.path, deepManifestFiles()), [], {
@@ -255,18 +258,20 @@ describe("runScan quick scan vertical slice", () => {
 
     expect(outcome.assessment.findings).toHaveLength(0);
     expect(
-      outcome.assessment.staticHypotheses?.some(
-        (hypothesis) => hypothesis.status === "statically_supported",
+      outcome.assessment.staticHypotheses?.every(
+        (hypothesis) =>
+          hypothesis.status === "inconclusive" &&
+          hypothesis.promotion.reasons.includes("control_coverage_incomplete"),
       ),
     ).toBe(true);
-    expect(outcome.assessment.verdict).toBe("not-ready-to-deploy");
+    expect(outcome.assessment.verdict).toBe("looks-ok-for-now");
 
     const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
-    expect(markdown).toContain("**Verdict:** Not ready to deploy");
-    expect(markdown).toContain("1 likely attack path");
+    expect(markdown).toContain("**Verdict:** Coverage limited");
+    expect(markdown).toContain("No unlinked, statically supported hypotheses");
   });
 
-  it("uses the Deep Static deploy verdict without dropping critical Quick Scan evidence", async () => {
+  it("keeps the direct verdict and evidence when static control coverage is unassessed", async () => {
     const source = await writeLocalFixture(dir);
     const sandbox = new FakeSandboxRuntime({
       exec: fakeQuickScanExec(
@@ -294,7 +299,7 @@ describe("runScan quick scan vertical slice", () => {
       deep: true,
     });
 
-    expect(outcome.assessment.verdict).toBe("not-ready-to-deploy");
+    expect(outcome.assessment.verdict).toBe("critical-fix-needed");
     expect(outcome.assessment.findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -304,8 +309,8 @@ describe("runScan quick scan vertical slice", () => {
       ]),
     );
     expect(
-      outcome.assessment.staticHypotheses?.some(
-        (hypothesis) => hypothesis.status === "statically_supported",
+      outcome.assessment.staticHypotheses?.every(
+        (hypothesis) => hypothesis.status === "inconclusive",
       ),
     ).toBe(true);
     expect(outcome.assessment.rankedActions[0]?.remediation.title).toBe(
@@ -635,16 +640,16 @@ describe("runScan quick scan vertical slice", () => {
     });
 
     const markdown = await readFile(modelOn.reportPaths.markdown ?? "", "utf8");
-    expect(markdown).toContain("## Fix these first");
-    expect(markdown).toContain("## Likely attack paths");
-    expect(markdown).toContain("## What was checked");
-    expect(markdown).toContain("Model attack description");
+    expect(markdown).toContain("## Fix now");
+    expect(markdown).toContain("## Validate next");
+    expect(markdown).toContain("## Technical appendix");
+    expect(markdown).not.toContain("Model attack description");
 
     const html = await readFile(modelOn.reportPaths.html ?? "", "utf8");
-    expect(html).toContain("<h2>Fix these first</h2>");
-    expect(html).toContain("<h2>Likely attack paths</h2>");
-    expect(html).toContain("What was checked");
-    expect(html).toContain("Model attack description");
+    expect(html).toContain("<h2>Fix now</h2>");
+    expect(html).toContain("<h2>Validate next</h2>");
+    expect(html).toContain("Technical appendix");
+    expect(html).not.toContain("Model attack description");
   });
 
   it("falls back to deterministic hypothesis enrichment for invalid model output", async () => {
@@ -742,7 +747,7 @@ describe("runScan quick scan vertical slice", () => {
       deep: true,
     });
 
-    expect(outcome.assessment.verdict).toBe("not-ready-to-deploy");
+    expect(outcome.assessment.verdict).toBe("critical-fix-needed");
     expect(outcome.reportPaths.repositoryMap).toBeDefined();
     expect(
       sandbox.invocations.some(
@@ -786,8 +791,8 @@ describe("runScan quick scan vertical slice", () => {
     ).toBe(true);
 
     const markdown = await readFile(outcome.reportPaths.markdown ?? "", "utf8");
-    expect(markdown).toContain("## Fix these first");
-    expect(markdown).toContain("## What was checked");
+    expect(markdown).toContain("## Fix now");
+    expect(markdown).toContain("## Technical appendix");
   });
 
   it("rejects scanner evidence that is not inside the snapshot manifest", async () => {

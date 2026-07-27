@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 1,
+  "decision": "no_detection_winner",
+  "approachSelected": null,
+  "phase0Classification": "synthetic_contract_regression_only",
+  "tuningJava": {
+    "snapshot": "OWASP BenchmarkJava 1.2",
+    "commit": "79b9bd6177e07991a9c11dc19e457c840e229931",
+    "heldOutEvidence": false,
+    "vibeshieldStatus": "timeout_before_report_not_scoreable",
+    "cells": [
+      {
+        "tool": "codeql",
+        "language": "java",
+        "cwe": 22,
+        "tp": 133,
+        "fp": 66,
+        "fn": 0,
+        "precision": 0.6683,
+        "recall": 1,
+        "f0_5": 0.7158,
+        "coverageLossCount": 2
+      },
+      {
+        "tool": "codeql",
+        "language": "java",
+        "cwe": 78,
+        "tp": 126,
+        "fp": 64,
+        "fn": 0,
+        "precision": 0.6632,
+        "recall": 1,
+        "f0_5": 0.7111,
+        "coverageLossCount": 2
+      },
+      {
+        "tool": "codeql",
+        "language": "java",
+        "cwe": 79,
+        "tp": 246,
+        "fp": 1474,
+        "fn": 0,
+        "precision": 0.143,
+        "recall": 1,
+        "f0_5": 0.1726,
+        "coverageLossCount": 2
+      },
+      {
+        "tool": "codeql",
+        "language": "java",
+        "cwe": 89,
+        "tp": 272,
+        "fp": 207,
+        "fn": 0,
+        "precision": 0.5678,
+        "recall": 1,
+        "f0_5": 0.6215,
+        "coverageLossCount": 2
+      },
+      {
+        "tool": "semgrep",
+        "language": "java",
+        "cwe": 22,
+        "tp": 120,
+        "fp": 106,
+        "fn": 13,
+        "precision": 0.531,
+        "recall": 0.9023,
+        "f0_5": 0.5786,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "semgrep",
+        "language": "java",
+        "cwe": 78,
+        "tp": 117,
+        "fp": 109,
+        "fn": 9,
+        "precision": 0.5177,
+        "recall": 0.9286,
+        "f0_5": 0.568,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "semgrep",
+        "language": "java",
+        "cwe": 79,
+        "tp": 202,
+        "fp": 254,
+        "fn": 44,
+        "precision": 0.443,
+        "recall": 0.8211,
+        "f0_5": 0.4879,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "semgrep",
+        "language": "java",
+        "cwe": 89,
+        "tp": 253,
+        "fp": 170,
+        "fn": 19,
+        "precision": 0.5981,
+        "recall": 0.9301,
+        "f0_5": 0.6441,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "joern",
+        "language": "java",
+        "cwe": 22,
+        "tp": 68,
+        "fp": 52,
+        "fn": 65,
+        "precision": 0.5667,
+        "recall": 0.5113,
+        "f0_5": 0.5547,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "joern",
+        "language": "java",
+        "cwe": 78,
+        "tp": 113,
+        "fp": 79,
+        "fn": 13,
+        "precision": 0.5885,
+        "recall": 0.8968,
+        "f0_5": 0.632,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "joern",
+        "language": "java",
+        "cwe": 79,
+        "tp": 0,
+        "fp": 458,
+        "fn": 246,
+        "precision": 0,
+        "recall": 0,
+        "f0_5": 0,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "joern",
+        "language": "java",
+        "cwe": 89,
+        "tp": 174,
+        "fp": 106,
+        "fn": 98,
+        "precision": 0.6214,
+        "recall": 0.6397,
+        "f0_5": 0.625,
+        "coverageLossCount": 0
+      }
+    ]
+  },
+  "heldOut": {
+    "snapshot": "OWASP BenchmarkPython 0.1",
+    "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba",
+    "fullScansComplete": ["vibeshield", "codeql", "semgrep", "joern"],
+    "selectedCaseCount": 277,
+    "eligibleCellCount": 2,
+    "minimumEligibleCellCount": 3,
+    "accepted": false,
+    "cells": [
+      {
+        "tool": "vibeshield",
+        "language": "python",
+        "cwe": 22,
+        "eligible": true,
+        "tp": 0,
+        "fp": 0,
+        "fn": 65,
+        "precision": null,
+        "recall": 0,
+        "f0_5": null,
+        "falseBlockers": 0,
+        "coverageLossCount": 4
+      },
+      {
+        "tool": "vibeshield",
+        "language": "python",
+        "cwe": 78,
+        "eligible": false,
+        "tp": 0,
+        "fp": 0,
+        "fn": 13,
+        "precision": null,
+        "recall": 0,
+        "f0_5": null,
+        "falseBlockers": 0,
+        "coverageLossCount": 4
+      },
+      {
+        "tool": "vibeshield",
+        "language": "python",
+        "cwe": 79,
+        "eligible": true,
+        "tp": 0,
+        "fp": 0,
+        "fn": 31,
+        "precision": null,
+        "recall": 0,
+        "f0_5": null,
+        "falseBlockers": 0,
+        "coverageLossCount": 4
+      },
+      {
+        "tool": "codeql",
+        "language": "python",
+        "cwe": 22,
+        "eligible": true,
+        "tp": 45,
+        "fp": 65,
+        "fn": 20,
+        "precision": 0.4091,
+        "recall": 0.6923,
+        "f0_5": 0.4456,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "codeql",
+        "language": "python",
+        "cwe": 78,
+        "eligible": false,
+        "tp": 11,
+        "fp": 2,
+        "fn": 2,
+        "precision": 0.8462,
+        "recall": 0.8462,
+        "f0_5": 0.8462,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "codeql",
+        "language": "python",
+        "cwe": 79,
+        "eligible": true,
+        "tp": 0,
+        "fp": 7,
+        "fn": 31,
+        "precision": 0,
+        "recall": 0,
+        "f0_5": 0,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "semgrep",
+        "language": "python",
+        "cwe": 22,
+        "eligible": true,
+        "tp": 2,
+        "fp": 2,
+        "fn": 63,
+        "precision": 0.5,
+        "recall": 0.0308,
+        "f0_5": 0.1236,
+        "coverageLossCount": 122
+      },
+      {
+        "tool": "semgrep",
+        "language": "python",
+        "cwe": 78,
+        "eligible": false,
+        "tp": 11,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.6111,
+        "recall": 0.8462,
+        "f0_5": 0.6471,
+        "coverageLossCount": 122
+      },
+      {
+        "tool": "semgrep",
+        "language": "python",
+        "cwe": 79,
+        "eligible": true,
+        "tp": 0,
+        "fp": 62,
+        "fn": 31,
+        "precision": 0,
+        "recall": 0,
+        "f0_5": 0,
+        "coverageLossCount": 122
+      },
+      {
+        "tool": "joern",
+        "language": "python",
+        "cwe": 22,
+        "eligible": true,
+        "tp": 37,
+        "fp": 40,
+        "fn": 28,
+        "precision": 0.4805,
+        "recall": 0.5692,
+        "f0_5": 0.496,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "joern",
+        "language": "python",
+        "cwe": 78,
+        "eligible": false,
+        "tp": 11,
+        "fp": 23,
+        "fn": 2,
+        "precision": 0.3235,
+        "recall": 0.8462,
+        "f0_5": 0.3691,
+        "coverageLossCount": 0
+      },
+      {
+        "tool": "joern",
+        "language": "python",
+        "cwe": 79,
+        "eligible": true,
+        "tp": 0,
+        "fp": 36,
+        "fn": 31,
+        "precision": 0,
+        "recall": 0,
+        "f0_5": 0,
+        "coverageLossCount": 0
+      }
+    ]
+  },
+  "realPairs": [
+    {
+      "pair": "myfaces-cve-2011-4367",
+      "cwe": 22,
+      "targetAlerts": {
+        "codeql": { "vulnerable": 24, "fixed": 23 },
+        "semgrep": { "vulnerable": 1, "fixed": 1 },
+        "joern": { "vulnerable": 0, "fixed": 0 },
+        "vibeshield": { "vulnerable": 0, "fixed": 0 }
+      },
+      "verifiedFindings": 0
+    },
+    {
+      "pair": "undertow-cve-2014-7816",
+      "cwe": 22,
+      "targetAlerts": {
+        "codeql": { "vulnerable": 3, "fixed": 3 },
+        "semgrep": { "vulnerable": 0, "fixed": 0 },
+        "joern": { "vulnerable": 2, "fixed": 7 },
+        "vibeshield": { "vulnerable": 0, "fixed": 0 }
+      },
+      "verifiedFindings": 0
+    },
+    {
+      "pair": "xstream-cve-2013-7285",
+      "cwe": 78,
+      "targetAlerts": {
+        "codeql": { "vulnerable": 0, "fixed": 0 },
+        "semgrep": { "vulnerable": 0, "fixed": 0 },
+        "joern": { "vulnerable": 0, "fixed": 0 },
+        "vibeshield": { "vulnerable": 0, "fixed": 0 }
+      },
+      "verifiedFindings": 0
+    },
+    {
+      "pair": "activemq-cve-2014-3576",
+      "cwe": 78,
+      "targetAlerts": {
+        "codeql": { "vulnerable": 1, "fixed": 1 },
+        "semgrep": { "vulnerable": 0, "fixed": 0 },
+        "joern": { "vulnerable": 3, "fixed": 3 },
+        "vibeshield": { "vulnerable": 0, "fixed": 0 }
+      },
+      "verifiedFindings": 0
+    },
+    {
+      "pair": "keycloak-cve-2014-3656",
+      "cwe": 79,
+      "targetAlerts": {
+        "codeql": { "vulnerable": 1, "fixed": 1 },
+        "semgrep": { "vulnerable": 0, "fixed": 0 },
+        "joern": { "vulnerable": 0, "fixed": 0 },
+        "vibeshield": { "vulnerable": 0, "fixed": 0 }
+      },
+      "verifiedFindings": 0
+    },
+    {
+      "pair": "antisamy-cve-2016-10006",
+      "cwe": 79,
+      "targetAlerts": {
+        "codeql": { "vulnerable": 0, "fixed": 0 },
+        "semgrep": { "vulnerable": 0, "fixed": 0 },
+        "joern": { "vulnerable": 0, "fixed": 0 },
+        "vibeshield": { "vulnerable": 0, "fixed": 0 }
+      },
+      "verifiedFindings": 0
+    }
+  ],
+  "verifiedRealRepositoryFindings": [],
+  "vibeshieldOnlyVerifiedFindings": [],
+  "baselineOnlyVerifiedFindings": [],
+  "javascriptBreadth": {
+    "snapshot": "SecBench.js",
+    "commit": "bc315621913899dcaa7613cd60948514ae63bdfe",
+    "scoreableForPrecision": false,
+    "normalizedSelectedCweAlerts": {
+      "codeql": { "cwe78": 200, "cwe79": 1 },
+      "semgrep": { "cwe22": 4 },
+      "joern": {},
+      "vibeshield": {}
+    },
+    "vibeshieldRaw": {
+      "directFindings": 1098,
+      "staticHypotheses": 990,
+      "publishableStaticHypotheses": 0
+    }
+  },
+  "gateFailures": [
+    "VibeShield held-out precision is undefined because it emitted no selected-CWE detections.",
+    "VibeShield recall is 0 in every selected held-out CWE cell.",
+    "Only two held-out cells meet the preregistered denominator policy.",
+    "VibeShield F0.5 is not no-worse than the best open-source baseline.",
+    "No real-repository finding was independently verified on a vulnerable/fixed pair.",
+    "No VibeShield-only verified real-repository finding exists."
+  ],
+  "currentVibeshieldValue": ["orchestration", "triage", "evidence_provenance", "reporting"]
+}

@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import type { Evidence } from "../src/domain/evidence.js";
 import type { Finding, FindingCategory, Severity } from "../src/domain/finding.js";
 import type { Manifest } from "../src/domain/manifest.js";
 import type {
@@ -10,6 +12,7 @@ import type {
   SecurityGraphNode,
 } from "../src/domain/security-graph.js";
 import {
+  securityFlowId,
   securityGraphEdgeId,
   securityGraphId,
   securityGraphNodeId,
@@ -30,13 +33,23 @@ const SNAPSHOT_ID = "snapshot-gate3";
 const CREATED_AT = "2026-06-24T10:00:00.000Z";
 
 describe("Deep Static Gate 3 acceptance", () => {
-  it("supports all planned families from deterministic graph evidence", () => {
+  it("retains all planned candidate families but publishes only strict typed flows", () => {
     const first = gate3Result();
     const second = gate3Result();
     const candidatesById = new Map(first.candidates.map((candidate) => [candidate.id, candidate]));
     const supported = first.staticHypotheses.filter(
       (hypothesis) => hypothesis.status === "statically_supported",
     );
+    const candidateFamilySet = new Set(
+      first.candidates.flatMap((candidate) => {
+        const family = candidate.family;
+        return isStage2Family(family) ? [family] : [];
+      }),
+    );
+    expect(STAGE2_HYPOTHESIS_FAMILIES.filter((family) => candidateFamilySet.has(family))).toEqual([
+      ...STAGE2_HYPOTHESIS_FAMILIES,
+    ]);
+
     const supportedFamilySet = new Set(
       supported.flatMap((hypothesis) => {
         const family = candidatesById.get(hypothesis.candidateId)?.family;
@@ -47,25 +60,34 @@ describe("Deep Static Gate 3 acceptance", () => {
       supportedFamilySet.has(family),
     );
 
-    expect(supportedFamilies).toEqual([...STAGE2_HYPOTHESIS_FAMILIES]);
+    expect(supportedFamilies).toEqual(["external_input_to_dangerous_operation"]);
     expect(JSON.stringify(first.staticHypotheses)).toBe(JSON.stringify(second.staticHypotheses));
 
     for (const family of STAGE2_HYPOTHESIS_FAMILIES) {
-      const hypothesis = supported.find(
+      const familyHypotheses = first.staticHypotheses.filter(
         (item) => candidatesById.get(item.candidateId)?.family === family,
       );
+      const hypothesis = familyHypotheses[0];
       const candidate =
         hypothesis === undefined ? undefined : candidatesById.get(hypothesis.candidateId);
       expect(candidate, `candidate for ${family}`).toBeDefined();
-      expect(hypothesis, `hypothesis for ${family}`).toMatchObject({
-        status: "statically_supported",
-        runtimeValidationRequired: true,
-      });
+      expect(hypothesis, `hypothesis for ${family}`).toBeDefined();
+      if (family === "external_input_to_dangerous_operation") {
+        expect(familyHypotheses.some((record) => record.status === "statically_supported")).toBe(
+          true,
+        );
+      } else {
+        expect(familyHypotheses.every((record) => !record.promotion.publishable)).toBe(true);
+      }
       expect(candidate?.supportingNodeIds.length).toBeGreaterThan(0);
       expect(candidate?.supportingEdgeIds.length).toBeGreaterThan(0);
       expect(candidate?.coverageRefs.length).toBeGreaterThan(0);
       expect(candidate?.requiredValidation.length).toBeGreaterThan(0);
-      expect(hypothesis?.supportingEvidenceIds.length).toBeGreaterThan(0);
+      if (family === "external_input_to_dangerous_operation") {
+        expect(familyHypotheses.some((record) => record.supportingEvidenceIds.length > 0)).toBe(
+          true,
+        );
+      }
       if (
         family !== "external_input_to_dangerous_operation" &&
         family !== "content_resource_exposure_path" &&
@@ -116,10 +138,15 @@ describe("Deep Static Gate 3 acceptance", () => {
 
     expect(externalHypotheses.length).toBeGreaterThan(0);
     expect(
-      externalHypotheses.every((hypothesis) => hypothesis.status === "statically_contradicted"),
+      externalHypotheses.some((hypothesis) => hypothesis.status === "statically_contradicted"),
     ).toBe(true);
     expect(
-      externalHypotheses.every((hypothesis) => hypothesis.contradictingEvidenceIds.length > 0),
+      externalHypotheses.some((hypothesis) => hypothesis.status === "statically_supported"),
+    ).toBe(false);
+    expect(
+      externalHypotheses
+        .filter((hypothesis) => hypothesis.status === "statically_contradicted")
+        .every((hypothesis) => hypothesis.contradictingEvidenceIds.length > 0),
     ).toBe(true);
   });
 });
@@ -152,7 +179,12 @@ function gate3Result(options: Gate3Options = {}) {
     graph: reachability.graph,
     contexts,
     candidates,
-    staticHypotheses: validateStaticHypotheses({ graph: reachability.graph, candidates }),
+    staticHypotheses: validateStaticHypotheses({
+      graph: reachability.graph,
+      candidates,
+      evidence: gate3Evidence(reachability.graph),
+      manifestPaths: manifest.files.map((file) => file.path),
+    }),
   };
 }
 
@@ -172,9 +204,9 @@ function baseGraph(options: Gate3Options): SecurityGraph {
     properties: { fullName: "proxyHandler" },
     evidenceIds: ["ev-handler"],
   });
-  const sink = node("Sink", "Sink:fetch", "fetch", {
+  const sink = node("Sink", "Sink:readFile", "readFile", {
     repoPath: "src/app.ts",
-    properties: { sinkType: "outbound_http", callName: "fetch" },
+    properties: { sinkType: "file_system", callName: "readFile" },
     evidenceIds: ["ev-sink"],
   });
   const sastTarget = node("CodeEntity", "CodeEntity:unsafeLookup", "unsafeLookup", {
@@ -246,7 +278,11 @@ function baseGraph(options: Gate3Options): SecurityGraph {
     options.addExternalContradiction === true
       ? node("Control", "Control:destination-allowlist", "destination allowlist", {
           repoPath: "src/app.ts",
-          properties: { controlType: "destination_allowlist" },
+          properties: {
+            controlType: "destination_allowlist",
+            controlEffect: "blocks_untrusted",
+            protectsSinkType: "file_system",
+          },
           evidenceIds: ["ev-control"],
         })
       : undefined;
@@ -275,8 +311,18 @@ function baseGraph(options: Gate3Options): SecurityGraph {
     edge("flows_to", smartContract, smartContractSink, "flows_to:contract:risk", ["ev-contract"]),
     ...(control === undefined
       ? []
-      : [edge("protected_by", handler, control, "protected_by:handler:allowlist", ["ev-control"])]),
+      : [
+          edge("protected_by", sink, control, "protected_by:sink:allowlist", ["ev-control"], {
+            relation: "dominates_sink",
+          }),
+        ]),
   ];
+
+  const pathEdges = edges.filter((record) =>
+    ["receives:request:proxy", "registers:proxy:handler", "calls:handler:fetch"].includes(
+      record.stableKey,
+    ),
+  );
 
   return {
     id: securityGraphId(SNAPSHOT_ID, GRAPH_VERSION),
@@ -300,7 +346,18 @@ function baseGraph(options: Gate3Options): SecurityGraph {
       ...Object.values(findings),
     ],
     edges,
-    flows: [],
+    flows: [
+      {
+        id: securityFlowId(GRAPH_VERSION, "request-to-file-system"),
+        sourceNodeId: source.id,
+        sinkNodeId: sink.id,
+        pathEdgeIds: pathEdges.map((record) => record.id),
+        controlNodeIds: control === undefined ? [] : [control.id],
+        coverageState: "checked",
+        confidence: 1,
+        evidenceIds: ["ev-boundary", "ev-handler", "ev-sink"],
+      },
+    ],
     coverage: checkedCoverage(),
     createdAt: CREATED_AT,
   };
@@ -434,6 +491,7 @@ function edge(
   to: SecurityGraphNode,
   stableKey: string,
   evidenceIds: ReadonlyArray<string>,
+  properties: Readonly<Record<string, unknown>> = {},
 ): SecurityGraphEdge {
   return {
     id: securityGraphEdgeId(GRAPH_VERSION, stableKey),
@@ -441,7 +499,7 @@ function edge(
     stableKey,
     fromNodeId: from.id,
     toNodeId: to.id,
-    properties: {},
+    properties,
     evidenceIds,
     producer: "gate3-fixture",
     producerVersion: GRAPH_VERSION,
@@ -450,11 +508,58 @@ function edge(
   };
 }
 
+function gate3Evidence(graph: SecurityGraph): Evidence[] {
+  const locations = new Map<string, { readonly filePath: string; readonly line: number }>();
+  for (const node of graph.nodes) {
+    if (node.repoPath === undefined || node.lineRange === undefined) {
+      continue;
+    }
+    for (const evidenceId of node.evidenceIds) {
+      locations.set(evidenceId, { filePath: node.repoPath, line: node.lineRange.startLine });
+    }
+  }
+  const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
+  for (const edgeRecord of graph.edges) {
+    const endpoint = nodesById.get(edgeRecord.toNodeId) ?? nodesById.get(edgeRecord.fromNodeId);
+    if (endpoint?.repoPath === undefined || endpoint.lineRange === undefined) {
+      continue;
+    }
+    for (const evidenceId of edgeRecord.evidenceIds) {
+      if (!locations.has(evidenceId)) {
+        locations.set(evidenceId, {
+          filePath: endpoint.repoPath,
+          line: endpoint.lineRange.startLine,
+        });
+      }
+    }
+  }
+  return [...locations]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([id, location]) => {
+      const snippet = `${id} fixture evidence`;
+      return {
+        id,
+        rawArtifactBlobSha256: sha256(`raw:${id}`),
+        filePath: location.filePath,
+        startLine: location.line,
+        endLine: location.line,
+        snippet,
+        snippetHash: sha256(snippet),
+        tool: "gate3-fixture",
+      };
+    });
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
 function checkedCoverage(): GraphCoverage[] {
   return [
     "boundaries",
     "call_graph",
     "data_flow",
+    "control_flow",
     "dependency_usage",
     "ci_iac",
     "content_assets",

@@ -145,8 +145,9 @@ Deep Static keeps direct findings and attack hypotheses separate:
   avoids duplicate work for the owner.
 
 Deep Static can strengthen the verdict to `not-ready-to-deploy` when at least
-one hypothesis is `statically_supported`. It does not rewrite Quick Scan
-findings, severities, fingerprints, or direct evidence.
+one hypothesis is both `statically_supported` and publishable under the
+precision-first promotion contract. It does not rewrite Quick Scan findings,
+severities, fingerprints, or direct evidence.
 
 ## Program Analysis Backend
 
@@ -220,6 +221,18 @@ Static hypothesis statuses are intentionally limited:
 must say "not observed on the analyzed path" rather than claiming a control is
 globally absent.
 
+Promotion is stricter than candidate correlation. A publishable supported
+hypothesis requires an external source, a security-typed sink, a matching
+`SecurityFlow`, current line-pinned path evidence, checked candidate/path
+coverage, checked `control_flow` coverage, an exact-sink guard assessment, and
+a stable root-cause key. Structural reachability, generic sinks, stale evidence,
+partial coverage, ambiguous controls, or missing control-flow coverage remain
+`inconclusive` in the machine record and cannot affect the verdict.
+
+An effective control contradicts a hypothesis only when it is value/sink
+matched, dominates the exact sink, and has current evidence. A nearby or
+different-sink control is not treated as proof of safety.
+
 ## Model Calls
 
 Model calls are enhancement-only and batch-bounded:
@@ -273,11 +286,18 @@ is complete. Other completed checks still produce a useful Fix Pack.
 The terminal ends with a short receipt: repository, verdict, report path, and the
 static-scan limitation. Full details live in `report.html` and `report.md`.
 
-`report.json` is the machine-readable `SecurityAssessment`. It includes the
-manifest summary, repository identity, toolchain summary, Quick Scan coverage,
+`report.json` contains the run id, the complete machine-readable
+`SecurityAssessment`, and the deterministic owner projection. The assessment
+includes the manifest summary, repository identity, toolchain summary, Quick Scan coverage,
 Deep Static coverage when present, evidence, findings, clusters, ranked actions,
 static hypotheses, validation recipes, hypothesis enrichments, deep action
 groups, verdict, and limitations.
+
+The owner projection renders `Fix now`, `Validate next`, and `Technical
+appendix`. It folds supported traces into an owning direct action, groups
+remaining publishable traces by typed root cause, ranks groups without model
+input, expands at most five fix groups and three validation groups, and retains
+every raw candidate and trace in the assessment.
 
 Raw scanner outputs are redacted before entering blob storage. The scanned
 source tree itself is not stored as a run artifact. The manifest is the
@@ -315,6 +335,15 @@ should expose systemic gaps in Joern extraction, graph construction, rule
 taxonomy, validation logic, or reporting.
 
 Do not add repository-specific detector behavior to make benchmark runs pass.
+
+`pnpm benchmark:report-v1` is a Phase 0 promotion/report unit-regression gate.
+Its constructed TypeScript/Java development cases and Python/Go synthetic
+holdback cases start from fixture-built normalized graphs. They do not measure
+detection precision, recall, tool competitiveness, or held-out generalization.
+The boundary is documented in `docs/report-v1-research.md`; the end-to-end
+detection comparison is preregistered in `docs/phase-1-capability-research.md`.
+The completed results in `docs/phase-1-capability-results.md` select no detection
+winner and do not promote Approach B or any other candidate-generation approach.
 
 ## Retired Surfaces
 

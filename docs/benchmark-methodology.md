@@ -1,5 +1,12 @@
 # Benchmark Methodology
 
+> **Current decision surface:** this document describes the broader benchmark
+> program. For the completed Report v1 detection decision, the frozen protocol
+> in [phase-1-capability-research.md](phase-1-capability-research.md) and its
+> [results](phase-1-capability-results.md) are authoritative. Phase 1 selected no
+> detection winner; the synthetic Report v1 benchmark remains a Phase 0
+> unit/regression harness only.
+
 This document is the measurement contract for improving VibeShield detection
 quality. The Phase 1 target is a family-based product benchmark, not recall
 over every challenge in WebGoat, Juice Shop, or another intentionally
@@ -398,8 +405,11 @@ repository-specific detector behavior.
 | --- | --- | --- |
 | Direct findings | Precision | >= 0.90 on published Fix Pack findings |
 | Direct findings | Recall | >= 0.85 of in-static-scope curated truth |
-| Static hypotheses | Support precision | >= 0.80 |
+| Static hypotheses | Support precision | >= 0.85 |
 | Static hypotheses | Candidate recall | >= 0.80 of curated attack paths in coverage |
+| Static hypotheses | Candidate recall loss from baseline | <= 0.05 |
+| Owner report | Unique validation-group precision | >= 0.90 |
+| Owner report | False deploy blockers on clean/guarded controls | 0 |
 | Coverage | Deep Static | No `failed`; complete dependency usage where dependencies exist |
 | Coverage | Mixed language | Accurate `language_support` partial/degraded reporting |
 | Verdict | Deploy-blocking repos | 100% `not-ready-to-deploy` |
@@ -429,3 +439,14 @@ Deep Static training matrix. `pnpm benchmark:score` is the scored Phase 1
 measurement surface. It must fail target gates while curated truth or FP/support
 review is incomplete; passing it is meaningful only after the scored truth file
 is complete enough to make every target metric scoreable.
+
+`pnpm benchmark:report-v1` is a Phase 0 production-contract unit/regression gate
+for static promotion and owner publication. Its fixture expectations construct
+the graph inputs, including sources, sinks, routes, and controls. The command
+tests guarded, stale, structural, duplicate, and direct-overlap behavior across
+TypeScript, Java, Python, and Go, but none of its ratios are evidence of
+detection precision, recall, competitiveness, or held-out generalization. See
+[report-v1-research.md](report-v1-research.md) for the boundary and
+[phase-1-capability-research.md](phase-1-capability-research.md) for the
+end-to-end preregistration. The completed comparison and no-winner decision are
+recorded in [phase-1-capability-results.md](phase-1-capability-results.md).

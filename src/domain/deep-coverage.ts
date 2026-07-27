@@ -24,6 +24,7 @@ export type DeepCoverageArea =
   | "boundaries"
   | "call_graph"
   | "data_flow"
+  | "control_flow"
   | "component_usage"
   | "dependency_usage"
   | "ci_iac"
@@ -39,6 +40,7 @@ const COVERAGE_AREAS = new Set<DeepCoverageArea>([
   "boundaries",
   "call_graph",
   "data_flow",
+  "control_flow",
   "component_usage",
   "dependency_usage",
   "ci_iac",

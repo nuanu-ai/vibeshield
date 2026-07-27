@@ -105,6 +105,7 @@ describe("terminal reporting", () => {
             contradictingEvidenceIds: [],
             coverageState: "checked",
             runtimeValidationRequired: true,
+            promotion: terminalPromotion("root:input-sql"),
           },
           {
             id: "hypothesis_dep",
@@ -117,6 +118,7 @@ describe("terminal reporting", () => {
             contradictingEvidenceIds: [],
             coverageState: "checked",
             runtimeValidationRequired: true,
+            promotion: terminalPromotion("root:dependency"),
           },
         ],
       },
@@ -125,8 +127,7 @@ describe("terminal reporting", () => {
     const text = renderScanOutcome(outcome);
 
     expect(text).toContain("Deep Static");
-    expect(text).toContain("2 likely attack paths traced");
-    expect(text).toContain("2 with static support");
+    expect(text).toContain("2 validation paths with static support");
     expect(text).toContain("input-to-danger 1");
     expect(text).toContain("dependency usage 1");
     expect(text).toContain("/api/users reaches query");
@@ -197,6 +198,7 @@ describe("terminal reporting", () => {
             contradictingEvidenceIds: [],
             coverageState: "checked",
             runtimeValidationRequired: true,
+            promotion: terminalPromotion("root:credential-trust"),
           },
           {
             id: "hypothesis_b",
@@ -209,6 +211,7 @@ describe("terminal reporting", () => {
             contradictingEvidenceIds: [],
             coverageState: "checked",
             runtimeValidationRequired: true,
+            promotion: terminalPromotion("root:credential-trust"),
           },
         ],
       },
@@ -216,7 +219,7 @@ describe("terminal reporting", () => {
 
     const text = renderScanOutcome(outcome);
 
-    expect(text).toContain("1 unique likely attack path traced from 2 static traces");
+    expect(text).toContain("1 unique validation path grouped from 2 supported static traces");
     expect(text).toContain("req (routes/login.ts:58) reaches Credential trust");
   });
 
@@ -407,5 +410,20 @@ function sampleOutcome(opts: { readonly fromCatalog: boolean }): ScanOutcome {
       markdown: "/tmp/run/report.md",
       html: "/tmp/run/report.html",
     },
+  };
+}
+
+function terminalPromotion(
+  rootCauseKey: string,
+): NonNullable<SecurityAssessment["staticHypotheses"]>[number]["promotion"] {
+  return {
+    publishable: true,
+    source: "external_input",
+    sink: "typed_security_sink",
+    path: "connected_security_flow",
+    control: "absent",
+    evidence: "current_line_pinned",
+    rootCauseKey,
+    reasons: ["external_source_observed"],
   };
 }

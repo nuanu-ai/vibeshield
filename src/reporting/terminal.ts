@@ -345,18 +345,12 @@ function appendDeepStaticSummary(
   }
 
   const rawAttackPathCount = (assessment.staticHypotheses ?? []).filter(
-    (hypothesis) => hypothesis.status !== "statically_contradicted",
+    (hypothesis) =>
+      hypothesis.status === "statically_supported" && hypothesis.promotion.publishable,
   ).length;
   const attackPaths = terminalAttackPaths(assessment);
-  const supported = (assessment.staticHypotheses ?? []).filter(
-    (hypothesis) => hypothesis.status === "statically_supported",
-  ).length;
   lines.push(`  ${palette.bold("Deep Static")}`);
-  lines.push(
-    `    ${attackPathCountLabel(attackPaths.length, rawAttackPathCount)}${
-      supported > 0 ? ` · ${supported} with static support` : ""
-    }`,
-  );
+  lines.push(`    ${attackPathCountLabel(attackPaths.length, rawAttackPathCount)}`);
 
   const families = familyCounts(attackPaths);
   if (families.length > 0) {
@@ -397,13 +391,14 @@ function terminalAttackPaths(assessment: SecurityAssessment): TerminalAttackPath
       a.title.localeCompare(b.title) ||
       a.id.localeCompare(b.id),
   )) {
-    if (hypothesis.status === "statically_contradicted") {
+    if (hypothesis.status !== "statically_supported" || !hypothesis.promotion.publishable) {
       continue;
     }
     const candidate = candidates.get(hypothesis.candidateId);
     const family = candidate?.family ?? "static_analysis";
     const reason = candidate?.candidateReason ?? hypothesis.pathSummary;
-    const key = `${family}\0${terminalAttackPathDedupReason(reason)}`;
+    const key =
+      hypothesis.promotion.rootCauseKey ?? `${family}\0${terminalAttackPathDedupReason(reason)}`;
     if (seen.has(key)) {
       continue;
     }
@@ -419,11 +414,11 @@ function terminalAttackPathDedupReason(reason: string): string {
 }
 
 function attackPathCountLabel(uniqueCount: number, rawCount: number): string {
-  const noun = uniqueCount === 1 ? "attack path" : "attack paths";
+  const noun = uniqueCount === 1 ? "validation path" : "validation paths";
   if (rawCount > uniqueCount) {
-    return `${uniqueCount} unique likely ${noun} traced from ${rawCount} static traces`;
+    return `${uniqueCount} unique ${noun} grouped from ${rawCount} supported static traces`;
   }
-  return `${uniqueCount} likely ${noun} traced`;
+  return `${uniqueCount} ${noun} with static support`;
 }
 
 function familyCounts(
@@ -517,6 +512,8 @@ function coverageLabel(area: string): string {
       return "languages";
     case "data_flow":
       return "data flow";
+    case "control_flow":
+      return "control flow";
     case "dependency_usage":
       return "dependency usage";
     case "ci_iac":

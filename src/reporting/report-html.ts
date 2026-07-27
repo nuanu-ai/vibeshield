@@ -14,6 +14,11 @@ import type { DeepCoverageEntry } from "../domain/deep-coverage.js";
 import type { HypothesisEnrichment } from "../domain/hypothesis-enrichment.js";
 import type { RankedAction, SecurityAssessment } from "../domain/security-assessment.js";
 import type { StaticHypothesis } from "../domain/static-hypothesis.js";
+import type {
+  OwnerHypothesisTrace,
+  OwnerReportBanner,
+  OwnerValidationGroup,
+} from "./owner-report-projection.js";
 
 export function escapeHtml(value: string): string {
   return value
@@ -71,6 +76,15 @@ export function verdictBannerHtml(assessment: SecurityAssessment): string {
   ].join("");
 }
 
+export function ownerVerdictBannerHtml(banner: OwnerReportBanner): string {
+  return [
+    `<section class="verdict verdict--${banner.tone}">`,
+    `<div class="verdict-label">${escapeHtml(banner.label)}</div>`,
+    `<div class="verdict-sub">${escapeHtml(banner.subline)}</div>`,
+    "</section>",
+  ].join("");
+}
+
 export function statsHtml(
   items: ReadonlyArray<{ readonly value: string; readonly label: string }>,
 ): string {
@@ -111,6 +125,7 @@ export function actionCardHtml(
   rank: number,
   ranked: RankedAction,
   assessment: SecurityAssessment,
+  relatedStaticEvidence: ReadonlyArray<OwnerHypothesisTrace> = [],
 ): string {
   const { remediation } = ranked;
   const severity = actionSeverity(ranked, assessment);
@@ -130,6 +145,7 @@ export function actionCardHtml(
     renderHtmlList("Or change it by hand", remediation.fixSteps),
     renderHtmlList("Check it worked", remediation.verifySteps),
   ].join("");
+  const relatedEvidence = relatedStaticEvidenceHtml(relatedStaticEvidence);
   return [
     '<article class="action">',
     '<div class="action-head">',
@@ -141,9 +157,42 @@ export function actionCardHtml(
     "</div>",
     `<p class="risk">${escapeHtml(remediation.risk)}</p>`,
     `<p class="why"><strong>Why now:</strong> ${escapeHtml(remediation.whyFixNow)}</p>`,
+    relatedEvidence,
     promptBlockHtml(remediation.agentPrompt),
     ops,
     `<details class="more"><summary>Technical details</summary>${details}</details>`,
+    "</article>",
+  ].join("");
+}
+
+export function validationGroupCardHtml(rank: number, group: OwnerValidationGroup): string {
+  const pathEvidence = uniqueStrings([
+    ...group.traces.slice(0, 3).map((trace) => trace.reason),
+    ...group.evidenceLocations.slice(0, 8),
+  ]);
+  const moreEvidence =
+    group.traces.length > 3 || group.evidenceLocations.length > 8
+      ? `<p class="muted-line">Additional traces and locations are listed in the Technical appendix.</p>`
+      : "";
+  return [
+    '<article class="action">',
+    '<div class="action-head">',
+    `<span class="rank">${rank}</span>`,
+    `<h3>${escapeHtml(group.title)}</h3>`,
+    '<span class="pill pill--check">Unconfirmed</span>',
+    "</div>",
+    `<p class="risk"><strong>Possible attack scenario:</strong> ${escapeHtml(
+      group.traces[0]?.reason ?? group.title,
+    )}</p>`,
+    `<p class="why"><strong>If confirmed:</strong> ${escapeHtml(group.impact)}</p>`,
+    `<p class="why"><strong>Why validate next:</strong> ${escapeHtml(group.reasonToValidate)}</p>`,
+    renderHtmlList("Line-pinned evidence and path to sink", pathEvidence),
+    moreEvidence,
+    '<div class="ops"><strong>Validation recipe</strong>',
+    htmlList(group.validationSteps),
+    `<p><strong>Expected result:</strong> ${escapeHtml(group.expectedResult)}</p></div>`,
+    promptBlockHtml(group.agentPrompt),
+    `<details class="more"><summary>Ranking details</summary><p class="muted-line">Deterministic actionability score: ${group.actionabilityScore}. Static confidence contributes only ${group.actionabilitySignals.staticConfidence} points.</p></details>`,
     "</article>",
   ].join("");
 }
@@ -213,7 +262,7 @@ function technicalDetailsHtml(
   return `<details class="more"><summary>Technical details</summary>${parts.join("")}</details>`;
 }
 
-function promptBlockHtml(prompt: string): string {
+export function promptBlockHtml(prompt: string): string {
   return [
     '<div class="prompt">',
     '<div class="prompt-head"><span>Prompt for your coding agent</span><button class="copy" type="button">Copy</button></div>',
@@ -221,6 +270,26 @@ function promptBlockHtml(prompt: string): string {
     `<pre>${escapeHtml(prompt)}</pre>`,
     "</div>",
   ].join("");
+}
+
+function relatedStaticEvidenceHtml(traces: ReadonlyArray<OwnerHypothesisTrace>): string {
+  if (traces.length === 0) {
+    return "";
+  }
+  const evidence = uniqueStrings([
+    ...traces.slice(0, 3).map((trace) => trace.reason),
+    ...traces.flatMap((trace) => trace.evidenceLocations).slice(0, 8),
+  ]);
+  const more = traces.length > 3 ? " Additional linked traces are in the Technical appendix." : "";
+  return `<div class="ops"><strong>Related static evidence:</strong>${htmlList(
+    evidence,
+  )}<p class="muted-line">These traces support this direct fix; they are not separate confirmed issues.${escapeHtml(
+    more,
+  )}</p></div>`;
+}
+
+function uniqueStrings(values: ReadonlyArray<string>): string[] {
+  return [...new Set(values)];
 }
 
 // Collapsed "what was checked" with friendly check names and status pills. Quick
@@ -453,6 +522,8 @@ export function deepCoverageAreaLabel(area: string): string {
       return "Call graph";
     case "data_flow":
       return "Data flows";
+    case "control_flow":
+      return "Control flow";
     case "component_usage":
     case "dependency_usage":
       return "Dependency usage";

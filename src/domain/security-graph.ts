@@ -110,6 +110,7 @@ export type GraphCoverageArea =
   | "boundaries"
   | "call_graph"
   | "data_flow"
+  | "control_flow"
   | "dependency_usage"
   | "ci_iac"
   | "content_assets"
@@ -169,6 +170,7 @@ const COVERAGE_AREAS = new Set<GraphCoverageArea>([
   "boundaries",
   "call_graph",
   "data_flow",
+  "control_flow",
   "dependency_usage",
   "ci_iac",
   "content_assets",

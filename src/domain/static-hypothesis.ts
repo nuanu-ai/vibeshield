@@ -11,7 +11,37 @@ export interface StaticHypothesis {
   readonly contradictingEvidenceIds: ReadonlyArray<string>;
   readonly coverageState: StaticHypothesisCoverageState;
   readonly runtimeValidationRequired: boolean;
+  /** Deterministic promotion decision. Only publishable records may become owner cards. */
+  readonly promotion: StaticHypothesisPromotion;
 }
+
+export interface StaticHypothesisPromotion {
+  readonly publishable: boolean;
+  readonly source: "external_input" | "missing_or_untyped";
+  readonly sink: "typed_security_sink" | "generic_or_untyped" | "missing";
+  readonly path: "connected_security_flow" | "structural_only" | "missing";
+  readonly control: "absent" | "effective" | "irrelevant" | "ambiguous";
+  readonly evidence: "current_line_pinned" | "missing_or_stale";
+  readonly rootCauseKey?: string;
+  readonly reasons: ReadonlyArray<StaticHypothesisPromotionReason>;
+}
+
+export type StaticHypothesisPromotionReason =
+  | "candidate_coverage_incomplete"
+  | "connected_security_flow_observed"
+  | "control_coverage_incomplete"
+  | "current_line_pinned_evidence_observed"
+  | "effective_control_dominates_sink"
+  | "external_source_observed"
+  | "generic_or_untyped_sink"
+  | "matching_control_not_observed"
+  | "missing_current_line_pinned_evidence"
+  | "missing_external_source"
+  | "missing_security_flow"
+  | "security_flow_coverage_incomplete"
+  | "structural_path_only"
+  | "typed_security_sink_observed"
+  | "control_effect_ambiguous";
 
 export type StaticHypothesisStatus =
   | "candidate"
@@ -82,6 +112,15 @@ export function validateStaticHypothesisRecords(
     if (record.status === "statically_supported" && record.supportingEvidenceIds.length === 0) {
       fail(`staticHypothesis ${record.id} statically_supported requires supporting evidence`);
     }
+    if (record.status === "statically_supported" && !record.promotion.publishable) {
+      fail(`staticHypothesis ${record.id} statically_supported must be publishable`);
+    }
+    if (record.status === "statically_supported" && record.promotion.rootCauseKey === undefined) {
+      fail(`staticHypothesis ${record.id} statically_supported requires a rootCauseKey`);
+    }
+    if (record.status !== "statically_supported" && record.promotion.publishable) {
+      fail(`staticHypothesis ${record.id} non-supported status cannot be publishable`);
+    }
     if (
       record.status === "statically_contradicted" &&
       record.contradictingEvidenceIds.length === 0
@@ -93,6 +132,12 @@ export function validateStaticHypothesisRecords(
       ...record.contradictingEvidenceIds,
     ]) {
       assertNonEmpty(evidenceId, `staticHypothesis ${record.id} evidenceId`);
+    }
+    if (record.promotion.reasons.length === 0) {
+      fail(`staticHypothesis ${record.id} promotion reasons are required`);
+    }
+    if (record.promotion.rootCauseKey !== undefined) {
+      assertNonEmpty(record.promotion.rootCauseKey, `staticHypothesis ${record.id} rootCauseKey`);
     }
   }
 

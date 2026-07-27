@@ -714,5 +714,15 @@ function hypothesis(
       input.status === "statically_contradicted" ? ["evidence.fixture"] : [],
     coverageState: "checked",
     runtimeValidationRequired: true,
+    promotion: {
+      publishable: input.status === "statically_supported",
+      source: "external_input",
+      sink: "typed_security_sink",
+      path: "connected_security_flow",
+      control: input.status === "statically_contradicted" ? "effective" : "absent",
+      evidence: "current_line_pinned",
+      ...(input.status === "statically_supported" ? { rootCauseKey: candidateId } : {}),
+      reasons: ["external_source_observed"],
+    },
   };
 }

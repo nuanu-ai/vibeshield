@@ -30,31 +30,54 @@ describe("deep report renderers", () => {
   it("renders owner-facing deep Markdown sections", () => {
     const markdown = renderDeepMarkdownReport("run-1", deepAssessment());
 
-    expect(markdown).toContain("## Fix these first");
+    expect(markdown).toContain("## Fix now");
     expect(markdown).toContain("Rotate leaked key");
-    expect(markdown).toContain("## Likely attack paths");
-    expect(markdown).toContain("External input reaches fetch");
-    expect(markdown).toContain("High confidence");
-    expect(markdown).toContain("## What was checked");
+    expect(markdown).toContain("Related static evidence (not a separate confirmed issue)");
+    expect(markdown).toContain("## Validate next");
+    expect(markdown).toContain("SQL injection path");
+    expect(markdown).toContain("**Validation recipe**");
+    expect(markdown).toContain("First confirm or disprove this static hypothesis");
+    expect(markdown).not.toContain("Patch the SQL path before checking it.");
+    expect(markdown).toContain("## Technical appendix");
     expect(markdown).toContain("| Call graph | Checked |");
-    expect(markdown).toContain("Signal: gitleaks - src/config.ts:3");
-    expect(markdown).not.toContain("statically_supported");
-    expect(markdown).not.toContain("candidate-1");
-    expect(markdown).not.toContain("hypothesis-1");
+    expect(markdown).toContain("`statically_supported`");
     expect(markdown).not.toContain("repo-map-sha");
   });
 
   it("deduplicates owner-facing attack paths without changing JSON", () => {
     const assessment = deepAssessment();
-    const baseHypothesis = firstRecord(assessment.staticHypotheses, "static hypothesis");
-    const baseRecipe = firstRecord(assessment.validationRecipes, "validation recipe");
-    const baseEnrichment = firstRecord(assessment.hypothesisEnrichments, "hypothesis enrichment");
+    const baseHypothesis = requiredById(
+      assessment.staticHypotheses,
+      "hypothesis-validation",
+      "static hypothesis",
+    );
+    const baseCandidate = requiredById(
+      assessment.hypothesisCandidates,
+      "candidate-validation",
+      "hypothesis candidate",
+    );
+    const baseRecipe = requiredByHypothesisId(
+      assessment.validationRecipes,
+      "hypothesis-validation",
+      "validation recipe",
+    );
+    const baseEnrichment = requiredByHypothesisId(
+      assessment.hypothesisEnrichments,
+      "hypothesis-validation",
+      "hypothesis enrichment",
+    );
     const duplicateHypothesis: NonNullable<SecurityAssessment["staticHypotheses"]>[number] = {
       ...baseHypothesis,
       id: "hypothesis-duplicate",
       candidateId: "candidate-duplicate",
       staticConfidence: 0.78,
       pathSummary: "Alternate static path reaches the same fetch.",
+    };
+    const duplicateCandidate = {
+      ...baseCandidate,
+      id: "candidate-duplicate",
+      candidateReason:
+        "SQL injection path: request (src/other.ts:10) reaches query (src/db.ts:22) across 3 graph edges",
     };
     const duplicateRecipe: NonNullable<SecurityAssessment["validationRecipes"]>[number] = {
       ...baseRecipe,
@@ -69,6 +92,7 @@ describe("deep report renderers", () => {
     };
     const withDuplicate: SecurityAssessment = {
       ...assessment,
+      hypothesisCandidates: [...(assessment.hypothesisCandidates ?? []), duplicateCandidate],
       staticHypotheses: [...(assessment.staticHypotheses ?? []), duplicateHypothesis],
       validationRecipes: [...(assessment.validationRecipes ?? []), duplicateRecipe],
       hypothesisEnrichments: [...(assessment.hypothesisEnrichments ?? []), duplicateEnrichment],
@@ -81,23 +105,48 @@ describe("deep report renderers", () => {
     expect(json.assessment.staticHypotheses?.map((hypothesis) => hypothesis.id)).toContain(
       "hypothesis-duplicate",
     );
-    expect(markdown.match(/^### \d+\. External input reaches <fetch>$/gm)).toHaveLength(1);
-    expect(html.match(/<h3>External input reaches &lt;fetch&gt;<\/h3>/g)).toHaveLength(1);
+    expect(markdown.match(/^### \d+\. SQL injection path.*Unconfirmed$/gm)).toHaveLength(1);
+    expect(
+      html.match(/<h3>SQL injection path: external input reaches SQL execution<\/h3>/g),
+    ).toHaveLength(1);
     expect(markdown).not.toContain("Replay the lower-confidence duplicate path.");
-    expect(html).not.toContain("Alternate static path reaches the same fetch.");
+    expect(html).toContain("src/other.ts:10");
   });
 
-  it("keeps same-title attack paths when the owner-facing location differs", () => {
+  it("groups same-root-cause paths while retaining multiple evidence locations", () => {
     const assessment = deepAssessment();
-    const baseHypothesis = firstRecord(assessment.staticHypotheses, "static hypothesis");
-    const baseRecipe = firstRecord(assessment.validationRecipes, "validation recipe");
-    const baseEnrichment = firstRecord(assessment.hypothesisEnrichments, "hypothesis enrichment");
+    const baseHypothesis = requiredById(
+      assessment.staticHypotheses,
+      "hypothesis-validation",
+      "static hypothesis",
+    );
+    const baseCandidate = requiredById(
+      assessment.hypothesisCandidates,
+      "candidate-validation",
+      "hypothesis candidate",
+    );
+    const baseRecipe = requiredByHypothesisId(
+      assessment.validationRecipes,
+      "hypothesis-validation",
+      "validation recipe",
+    );
+    const baseEnrichment = requiredByHypothesisId(
+      assessment.hypothesisEnrichments,
+      "hypothesis-validation",
+      "hypothesis enrichment",
+    );
     const distinctHypothesis: NonNullable<SecurityAssessment["staticHypotheses"]>[number] = {
       ...baseHypothesis,
       id: "hypothesis-distinct",
       candidateId: "candidate-distinct",
       staticConfidence: 0.78,
       pathSummary: "External input from another handler reaches fetch.",
+    };
+    const distinctCandidate = {
+      ...baseCandidate,
+      id: "candidate-distinct",
+      candidateReason:
+        "SQL injection path: request (src/other-handler.ts:20) reaches query (src/db.ts:22) across 4 graph edges",
     };
     const distinctRecipe: NonNullable<SecurityAssessment["validationRecipes"]>[number] = {
       ...baseRecipe,
@@ -113,6 +162,7 @@ describe("deep report renderers", () => {
     };
     const withDistinctPath: SecurityAssessment = {
       ...assessment,
+      hypothesisCandidates: [...(assessment.hypothesisCandidates ?? []), distinctCandidate],
       staticHypotheses: [...(assessment.staticHypotheses ?? []), distinctHypothesis],
       validationRecipes: [...(assessment.validationRecipes ?? []), distinctRecipe],
       hypothesisEnrichments: [...(assessment.hypothesisEnrichments ?? []), distinctEnrichment],
@@ -120,21 +170,21 @@ describe("deep report renderers", () => {
 
     const markdown = renderDeepMarkdownReport("run-1", withDistinctPath);
 
-    expect(markdown.match(/^### \d+\. External input reaches <fetch>$/gm)).toHaveLength(2);
-    expect(markdown).toContain("External input reaches fetch through the handler.");
-    expect(markdown).toContain("External input reaches fetch through another handler.");
+    expect(markdown.match(/^### \d+\. SQL injection path.*Unconfirmed$/gm)).toHaveLength(1);
+    expect(markdown).toContain("src/routes.ts:12");
+    expect(markdown).toContain("src/other-handler.ts:20");
   });
 
   it("renders equivalent escaped deep HTML sections", () => {
     const html = renderDeepHtmlReport("run-1", deepAssessment());
 
-    expect(html).toContain("<h2>Fix these first</h2>");
-    expect(html).toContain("<h2>Likely attack paths</h2>");
-    expect(html).toContain("What was checked");
+    expect(html).toContain("<h2>Fix now</h2>");
+    expect(html).toContain("<h2>Validate next</h2>");
+    expect(html).toContain('<h2 id="technical-appendix">Technical appendix</h2>');
     expect(html).toContain("External input reaches &lt;fetch&gt;");
     expect(html).not.toContain("<fetch>");
     expect(html).not.toContain("repo-map-sha");
-    expect(html).not.toContain("statically_supported");
+    expect(html).toContain("statically_supported");
   });
 
   it("keeps Quick Scan assessments valid when deep fields are absent", () => {
@@ -143,9 +193,9 @@ describe("deep report renderers", () => {
     const markdown = renderDeepMarkdownReport("run-quick", assessment);
     const html = renderDeepHtmlReport("run-quick", assessment);
 
-    expect(markdown).toContain("The deep analysis didn't trace any likely attack paths.");
-    expect(markdown).toContain("## What was checked");
-    expect(html).toContain("The deep analysis didn't trace any likely attack paths.");
+    expect(markdown).toContain("No unlinked, statically supported hypotheses");
+    expect(markdown).toContain("## Technical appendix");
+    expect(html).toContain("No unlinked, statically supported hypotheses");
   });
 });
 
@@ -186,6 +236,21 @@ function deepAssessment(): SecurityAssessment {
         requiredValidation: ["dangerous_operation_repro"],
         candidateReason: "External input reaches fetch across one graph edge.",
       },
+      {
+        id: "candidate-validation",
+        ruleId: "stage2.external-input-dangerous-operation",
+        family: "external_input_to_dangerous_operation",
+        title: "SQL injection path: external input reaches SQL execution",
+        findingIds: [],
+        supportingNodeIds: ["node-source", "node-sink"],
+        supportingEdgeIds: ["edge-sql"],
+        contradictingNodeIds: [],
+        contradictingEdgeIds: [],
+        coverageRefs: ["stage2:data_flow:checked"],
+        requiredValidation: ["dangerous_operation_repro"],
+        candidateReason:
+          "SQL injection path: request (src/routes.ts:12) reaches query (src/db.ts:22) across 3 graph edges",
+      },
     ],
     staticHypotheses: [
       {
@@ -199,6 +264,20 @@ function deepAssessment(): SecurityAssessment {
         contradictingEvidenceIds: [],
         coverageState: "checked",
         runtimeValidationRequired: true,
+        promotion: supportedPromotion("root:direct-fetch"),
+      },
+      {
+        id: "hypothesis-validation",
+        candidateId: "candidate-validation",
+        status: "statically_supported",
+        staticConfidence: 0.88,
+        title: "SQL injection path: external input reaches SQL execution",
+        pathSummary: "Request input reaches a SQL query.",
+        supportingEvidenceIds: ["evidence-1"],
+        contradictingEvidenceIds: [],
+        coverageState: "checked",
+        runtimeValidationRequired: true,
+        promotion: supportedPromotion("root:sql-query"),
       },
       {
         id: "hypothesis-contradicted",
@@ -211,6 +290,15 @@ function deepAssessment(): SecurityAssessment {
         contradictingEvidenceIds: ["evidence-2"],
         coverageState: "checked",
         runtimeValidationRequired: false,
+        promotion: {
+          publishable: false,
+          source: "external_input",
+          sink: "typed_security_sink",
+          path: "connected_security_flow",
+          control: "effective",
+          evidence: "current_line_pinned",
+          reasons: ["effective_control_dominates_sink"],
+        },
       },
     ],
     validationRecipes: [
@@ -222,6 +310,16 @@ function deepAssessment(): SecurityAssessment {
         expectedResult: "Runtime validation should gather evidence later.",
         safetyNotes: ["Do not run against production."],
         materializationHints: ["factory:tenant"],
+        knownGaps: [],
+      },
+      {
+        id: "recipe-validation",
+        hypothesisId: "hypothesis-validation",
+        requiredFixtures: ["disposable_database"],
+        steps: ["Send a harmless SQL metacharacter through the observed route."],
+        expectedResult: "The query remains parameterized and no injected expression executes.",
+        safetyNotes: ["Use a disposable local database."],
+        materializationHints: ["fixture:local-database"],
         knownGaps: [],
       },
     ],
@@ -237,6 +335,18 @@ function deepAssessment(): SecurityAssessment {
         agentPrompt: "Patch the handler.",
         acceptanceCriteria: ["Path is blocked by a deterministic control."],
         validationRecipeText: "Use disposable fixtures later.",
+      },
+      {
+        id: "enrichment-validation",
+        hypothesisId: "hypothesis-validation",
+        source: "model",
+        attackDescription: "Model-authored attack description.",
+        assumptions: ["Static graph evidence only."],
+        impact: "Model-authored impact.",
+        remediation: "Patch before validating.",
+        agentPrompt: "Patch the SQL path before checking it.",
+        acceptanceCriteria: ["Model-authored acceptance."],
+        validationRecipeText: "Model-authored recipe.",
       },
     ],
     deepActionGroups: [
@@ -338,10 +448,41 @@ function quickAssessment(): SecurityAssessment {
   };
 }
 
-function firstRecord<T>(values: ReadonlyArray<T> | undefined, label: string): T {
-  const value = values?.[0];
+function supportedPromotion(
+  rootCauseKey: string,
+): NonNullable<SecurityAssessment["staticHypotheses"]>[number]["promotion"] {
+  return {
+    publishable: true,
+    source: "external_input",
+    sink: "typed_security_sink",
+    path: "connected_security_flow",
+    control: "absent",
+    evidence: "current_line_pinned",
+    rootCauseKey,
+    reasons: ["external_source_observed"],
+  };
+}
+
+function requiredById<T extends { readonly id: string }>(
+  values: ReadonlyArray<T> | undefined,
+  id: string,
+  label: string,
+): T {
+  const value = values?.find((record) => record.id === id);
   if (value === undefined) {
-    throw new Error(`missing ${label}`);
+    throw new Error(`missing ${label}: ${id}`);
+  }
+  return value;
+}
+
+function requiredByHypothesisId<T extends { readonly hypothesisId: string }>(
+  values: ReadonlyArray<T> | undefined,
+  hypothesisId: string,
+  label: string,
+): T {
+  const value = values?.find((record) => record.hypothesisId === hypothesisId);
+  if (value === undefined) {
+    throw new Error(`missing ${label}: ${hypothesisId}`);
   }
   return value;
 }

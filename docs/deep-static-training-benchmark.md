@@ -286,6 +286,17 @@ documented static-analysis limitation.
 
 ## Next Methodology Gate
 
+The focused Report v1 promotion/publication gate now exists as
+`pnpm benchmark:report-v1`. It uses constructed TypeScript/Java development
+cases and a Python/Go synthetic holdback to protect promotion, root-cause
+grouping, direct-action suppression, and false-blocker contract behavior. See
+[report-v1-research.md](report-v1-research.md).
+
+This is a Phase 0 unit/regression harness, not a detection benchmark. Its
+fixture builder receives expected sources, sinks, routes, and controls and
+constructs normalized graphs. It therefore cannot prove extraction or candidate
+generation, detection precision/recall, competitiveness, or generalization.
+
 The next Deep Static quality gate should turn the current regression slice into
 the first scored taint/static-hypothesis lane described in
 [benchmark-methodology.md](benchmark-methodology.md). It should not be treated as

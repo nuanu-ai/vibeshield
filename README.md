@@ -148,8 +148,11 @@ The terminal output is a short receipt, not the whole report:
   This scan did not run your app; authorization logic and runtime behavior were not checked.
 ```
 
-The HTML report is the human-readable Fix Pack. Each fix has a clearly marked
-**Prompt for your coding agent** block to copy and paste.
+The HTML report is the human-readable Report v1 view: direct scanner-backed
+items under **Fix now**, grouped and still-unconfirmed static paths under
+**Validate next**, and complete raw traces and coverage in the **Technical
+appendix**. Each action has a clearly marked **Prompt for your coding agent**
+block to copy and paste.
 
 The inspectable run artifacts live under `~/.vibeshield/runs/<run-id>/`:
 
@@ -207,6 +210,9 @@ pnpm exec vitest run tests/microsandbox-runtime.smoke.test.ts
 | [docs/architecture.md](docs/architecture.md) | Architecture notes |
 | [docs/benchmark-methodology.md](docs/benchmark-methodology.md) | Quality measurement, R&D work order, ground truth, targets, and anti-overfit rules |
 | [docs/deep-static-training-benchmark.md](docs/deep-static-training-benchmark.md) | Current Deep Static regression benchmark and commands |
+| [docs/report-v1-research.md](docs/report-v1-research.md) | Phase 0 evidence-promotion, grouping, and Report v1 contract work; not a detection result |
+| [docs/phase-1-capability-research.md](docs/phase-1-capability-research.md) | Preregistered end-to-end capability and baseline comparison before detection selection |
+| [docs/phase-1-capability-results.md](docs/phase-1-capability-results.md) | Completed Phase 1 results: no detection winner and no Approach B selection |
 | [docs/stage-1-deterministic-security-core-plan.md](docs/stage-1-deterministic-security-core-plan.md) | Current Stage 1 implementation plan |
 | [AGENTS.md](AGENTS.md) | Repository conventions for humans and coding agents |
 

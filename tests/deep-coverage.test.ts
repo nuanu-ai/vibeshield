@@ -88,6 +88,7 @@ describe("composeDeepCoverage", () => {
       ["ci_iac", "skipped", "vibeshield"],
       ["component_usage", "skipped", "vibeshield"],
       ["content_assets", "skipped", "vibeshield"],
+      ["control_flow", "skipped", "vibeshield"],
       ["data_flow", "checked", "joern"],
       ["dependency_usage", "skipped", "vibeshield"],
       ["entities", "skipped", "vibeshield"],

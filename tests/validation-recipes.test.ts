@@ -259,6 +259,16 @@ function staticHypothesis(
     contradictingEvidenceIds: [],
     coverageState: "checked",
     runtimeValidationRequired: status !== "statically_contradicted",
+    promotion: {
+      publishable: status === "statically_supported",
+      source: "external_input",
+      sink: "typed_security_sink",
+      path: "connected_security_flow",
+      control: status === "statically_contradicted" ? "effective" : "absent",
+      evidence: "current_line_pinned",
+      ...(status === "statically_supported" ? { rootCauseKey: candidateRecord.id } : {}),
+      reasons: ["external_source_observed"],
+    },
     ...overrides,
   };
 }

@@ -102,7 +102,7 @@ describe("groupDeepActions direct grouping", () => {
 });
 
 describe("groupDeepActions hypothesis-only groups", () => {
-  it("creates hypothesis-led groups for non-contradicted hypotheses without direct actions", () => {
+  it("creates hypothesis-led groups only for publishable supported hypotheses", () => {
     const supportedCandidate = candidate({
       id: "candidate-supported",
       family: "external_input_to_dangerous_operation",
@@ -131,18 +131,11 @@ describe("groupDeepActions hypothesis-only groups", () => {
       staticHypotheses: [supported, candidateHypothesis],
     });
 
-    expect(result.map((group) => group.leadKind)).toEqual(["hypothesis", "hypothesis"]);
-    expect(result.map((group) => group.hypothesisIds)).toEqual([
-      ["hypothesis-supported"],
-      ["hypothesis-candidate"],
-    ]);
+    expect(result.map((group) => group.leadKind)).toEqual(["hypothesis"]);
+    expect(result.map((group) => group.hypothesisIds)).toEqual([["hypothesis-supported"]]);
     expect(result[0]).toMatchObject({
       remediationKey: "hypothesis:external_input_to_dangerous_operation",
       verdictImpact: "degrades",
-    });
-    expect(result[1]).toMatchObject({
-      remediationKey: "hypothesis:dependency_usage_path",
-      verdictImpact: "informational",
     });
   });
 
@@ -262,7 +255,28 @@ function staticHypothesis(
     contradictingEvidenceIds: [],
     coverageState: "checked",
     runtimeValidationRequired: status !== "statically_contradicted",
+    promotion: promotionFor(status, candidateRecord.id),
     ...overrides,
+  };
+}
+
+function promotionFor(
+  status: StaticHypothesis["status"],
+  root: string,
+): StaticHypothesis["promotion"] {
+  return {
+    publishable: status === "statically_supported",
+    source: "external_input",
+    sink: "typed_security_sink",
+    path: "connected_security_flow",
+    control: status === "statically_contradicted" ? "effective" : "absent",
+    evidence: "current_line_pinned",
+    ...(status === "statically_supported" ? { rootCauseKey: root } : {}),
+    reasons: [
+      status === "statically_contradicted"
+        ? "effective_control_dominates_sink"
+        : "external_source_observed",
+    ],
   };
 }
 

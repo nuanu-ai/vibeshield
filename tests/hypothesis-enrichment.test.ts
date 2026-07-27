@@ -415,6 +415,16 @@ function enrichmentFixture(
     contradictingEvidenceIds: [],
     coverageState: "checked",
     runtimeValidationRequired: true,
+    promotion: {
+      publishable: true,
+      source: "external_input",
+      sink: "typed_security_sink",
+      path: "connected_security_flow",
+      control: "absent",
+      evidence: "current_line_pinned",
+      rootCauseKey: `root:${suffix}`,
+      reasons: ["external_source_observed"],
+    },
   };
   const recipe: ValidationRecipe = {
     id: validationRecipeId(hypothesis.id),

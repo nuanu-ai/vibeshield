@@ -1,0 +1,335 @@
+{
+  "version": 1,
+  "targets": {
+    "ownerGroupPrecision": 0.9,
+    "staticSupportPrecision": 0.85,
+    "candidateRecall": 0.8,
+    "falseDeployBlockers": 0
+  },
+  "cases": [
+    {
+      "id": "ts-ssrf-vulnerable",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/ssrf-vulnerable.ts",
+      "variant": "vulnerable",
+      "sinkType": "server_side_request",
+      "sources": [{ "name": "query.url", "line": 4 }],
+      "sinks": [{ "name": "proxy-fetch", "line": 5 }],
+      "routes": [{ "source": "query.url", "sink": "proxy-fetch" }],
+      "truth": {
+        "candidateRootCauses": ["proxy-fetch"],
+        "supportedRootCauses": ["proxy-fetch"],
+        "ownerValidationRootCauses": ["proxy-fetch"],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "ts-ssrf-guarded",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/ssrf-guarded.ts",
+      "variant": "guarded",
+      "sinkType": "server_side_request",
+      "sources": [{ "name": "query.url", "line": 6 }],
+      "sinks": [{ "name": "proxy-fetch", "line": 10 }],
+      "routes": [{ "source": "query.url", "sink": "proxy-fetch" }],
+      "control": {
+        "line": 7,
+        "effect": "blocks_untrusted",
+        "protectsSinkType": "server_side_request"
+      },
+      "truth": {
+        "candidateRootCauses": ["proxy-fetch"],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "ts-structural-only",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/structural-only.ts",
+      "variant": "structural_only",
+      "sinkType": "server_side_request",
+      "sources": [{ "name": "query.label", "line": 4 }],
+      "sinks": [{ "name": "fetch-symbol", "line": 5 }],
+      "routes": [{ "source": "query.label", "sink": "fetch-symbol" }],
+      "truth": {
+        "candidateRootCauses": ["fetch-symbol"],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "ts-generic-data-flow",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/generic-data-flow.ts",
+      "variant": "vulnerable",
+      "sinkType": "generic_operation",
+      "sources": [{ "name": "query.displayName", "line": 4 }],
+      "sinks": [{ "name": "audit-label", "line": 5 }],
+      "routes": [{ "source": "query.displayName", "sink": "audit-label" }],
+      "truth": {
+        "candidateRootCauses": [],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "ts-duplicate-root",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/duplicate-root.ts",
+      "variant": "duplicate",
+      "sinkType": "server_side_request",
+      "sources": [{ "name": "query.url", "line": 8 }, { "name": "body.url", "line": 12 }],
+      "sinks": [{ "name": "fetch-url", "line": 4 }],
+      "routes": [
+        { "source": "query.url", "sink": "fetch-url" },
+        { "source": "body.url", "sink": "fetch-url" }
+      ],
+      "truth": {
+        "candidateRootCauses": ["fetch-url"],
+        "supportedRootCauses": ["fetch-url"],
+        "ownerValidationRootCauses": ["fetch-url"],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "ts-distinct-sinks",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/distinct-sinks.ts",
+      "variant": "vulnerable",
+      "sinkType": "server_side_request",
+      "sources": [
+        { "name": "query.imageUrl", "line": 4 },
+        { "name": "query.webhookUrl", "line": 8 }
+      ],
+      "sinks": [{ "name": "image-fetch", "line": 4 }, { "name": "webhook-fetch", "line": 8 }],
+      "routes": [
+        { "source": "query.imageUrl", "sink": "image-fetch" },
+        { "source": "query.webhookUrl", "sink": "webhook-fetch" }
+      ],
+      "truth": {
+        "candidateRootCauses": ["image-fetch", "webhook-fetch"],
+        "supportedRootCauses": ["image-fetch", "webhook-fetch"],
+        "ownerValidationRootCauses": ["image-fetch", "webhook-fetch"],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "ts-irrelevant-guard",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/irrelevant-guard.ts",
+      "variant": "irrelevant_guard",
+      "sinkType": "server_side_request",
+      "sources": [{ "name": "query.url", "line": 4 }],
+      "sinks": [{ "name": "proxy-fetch", "line": 8 }],
+      "routes": [{ "source": "query.url", "sink": "proxy-fetch" }],
+      "control": { "line": 5, "effect": "blocks_untrusted", "protectsSinkType": "sql_execution" },
+      "truth": {
+        "candidateRootCauses": ["proxy-fetch"],
+        "supportedRootCauses": ["proxy-fetch"],
+        "ownerValidationRootCauses": ["proxy-fetch"],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "ts-direct-overlap",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/direct-overlap.ts",
+      "variant": "direct_overlap",
+      "sinkType": "code_execution",
+      "sources": [{ "name": "query.input", "line": 5 }],
+      "sinks": [{ "name": "convert-exec", "line": 5 }],
+      "routes": [{ "source": "query.input", "sink": "convert-exec" }],
+      "truth": {
+        "candidateRootCauses": ["convert-exec"],
+        "supportedRootCauses": ["convert-exec"],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": ["finding-ts-direct-overlap"]
+      }
+    },
+    {
+      "id": "ts-clean-control",
+      "split": "development",
+      "language": "TypeScript",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/typescript/clean-control.ts",
+      "variant": "clean",
+      "sinkType": "outbound_http",
+      "sources": [{ "name": "query.value", "line": 4 }],
+      "sinks": [{ "name": "echo-response", "line": 4 }],
+      "routes": [],
+      "truth": {
+        "candidateRootCauses": [],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "java-sql-vulnerable",
+      "split": "development",
+      "language": "Java",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/java/SqlInjection.java",
+      "variant": "vulnerable",
+      "sinkType": "sql_execution",
+      "sources": [{ "name": "requestId", "line": 5 }],
+      "sinks": [{ "name": "execute-query", "line": 6 }],
+      "routes": [{ "source": "requestId", "sink": "execute-query" }],
+      "truth": {
+        "candidateRootCauses": ["execute-query"],
+        "supportedRootCauses": ["execute-query"],
+        "ownerValidationRootCauses": ["execute-query"],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "java-sql-guarded",
+      "split": "development",
+      "language": "Java",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/java/SqlGuarded.java",
+      "variant": "guarded",
+      "sinkType": "sql_execution",
+      "sources": [{ "name": "requestId", "line": 6 }],
+      "sinks": [{ "name": "execute-query", "line": 9 }],
+      "routes": [{ "source": "requestId", "sink": "execute-query" }],
+      "control": { "line": 7, "effect": "blocks_untrusted", "protectsSinkType": "sql_execution" },
+      "truth": {
+        "candidateRootCauses": ["execute-query"],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "java-stale-evidence",
+      "split": "development",
+      "language": "Java",
+      "fixturePath": "benchmarks/report-v1/fixtures/tuning/java/SqlStaleEvidence.java",
+      "variant": "stale_evidence",
+      "sinkType": "sql_execution",
+      "sources": [{ "name": "requestId", "line": 5 }],
+      "sinks": [{ "name": "execute-query", "line": 6 }],
+      "routes": [{ "source": "requestId", "sink": "execute-query" }],
+      "truth": {
+        "candidateRootCauses": ["execute-query"],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "python-command-vulnerable",
+      "split": "synthetic-holdback",
+      "language": "Python",
+      "fixturePath": "benchmarks/report-v1/fixtures/held-out/python/command_injection.py",
+      "variant": "vulnerable",
+      "sinkType": "code_execution",
+      "sources": [{ "name": "args.source", "line": 5 }],
+      "sinks": [{ "name": "shell-command", "line": 6 }],
+      "routes": [{ "source": "args.source", "sink": "shell-command" }],
+      "truth": {
+        "candidateRootCauses": ["shell-command"],
+        "supportedRootCauses": ["shell-command"],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": ["finding-python-command-vulnerable"]
+      }
+    },
+    {
+      "id": "python-command-guarded",
+      "split": "synthetic-holdback",
+      "language": "Python",
+      "fixturePath": "benchmarks/report-v1/fixtures/held-out/python/command_guarded.py",
+      "variant": "guarded",
+      "sinkType": "code_execution",
+      "sources": [{ "name": "args.source", "line": 7 }],
+      "sinks": [{ "name": "convert-exec", "line": 10 }],
+      "routes": [{ "source": "args.source", "sink": "convert-exec" }],
+      "control": { "line": 8, "effect": "blocks_untrusted", "protectsSinkType": "code_execution" },
+      "truth": {
+        "candidateRootCauses": ["convert-exec"],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "python-structural-only",
+      "split": "synthetic-holdback",
+      "language": "Python",
+      "fixturePath": "benchmarks/report-v1/fixtures/held-out/python/structural_only.py",
+      "variant": "structural_only",
+      "sinkType": "code_execution",
+      "sources": [{ "name": "args.label", "line": 2 }],
+      "sinks": [{ "name": "subprocess-symbol", "line": 3 }],
+      "routes": [{ "source": "args.label", "sink": "subprocess-symbol" }],
+      "truth": {
+        "candidateRootCauses": ["subprocess-symbol"],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "go-path-vulnerable",
+      "split": "synthetic-holdback",
+      "language": "Go",
+      "fixturePath": "benchmarks/report-v1/fixtures/held-out/go/path_traversal.go",
+      "variant": "vulnerable",
+      "sinkType": "file_system",
+      "sources": [{ "name": "query.path", "line": 9 }],
+      "sinks": [{ "name": "read-file", "line": 9 }],
+      "routes": [{ "source": "query.path", "sink": "read-file" }],
+      "truth": {
+        "candidateRootCauses": ["read-file"],
+        "supportedRootCauses": ["read-file"],
+        "ownerValidationRootCauses": ["read-file"],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "go-path-guarded",
+      "split": "synthetic-holdback",
+      "language": "Go",
+      "fixturePath": "benchmarks/report-v1/fixtures/held-out/go/path_guarded.go",
+      "variant": "guarded",
+      "sinkType": "file_system",
+      "sources": [{ "name": "query.path", "line": 13 }],
+      "sinks": [{ "name": "read-file", "line": 18 }],
+      "routes": [{ "source": "query.path", "sink": "read-file" }],
+      "control": { "line": 14, "effect": "blocks_untrusted", "protectsSinkType": "file_system" },
+      "truth": {
+        "candidateRootCauses": ["read-file"],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    },
+    {
+      "id": "go-path-partial",
+      "split": "synthetic-holdback",
+      "language": "Go",
+      "fixturePath": "benchmarks/report-v1/fixtures/held-out/go/partial_path.go",
+      "variant": "partial",
+      "sinkType": "file_system",
+      "sources": [{ "name": "query.path", "line": 9 }],
+      "sinks": [{ "name": "read-file", "line": 9 }],
+      "routes": [{ "source": "query.path", "sink": "read-file" }],
+      "truth": {
+        "candidateRootCauses": ["read-file"],
+        "supportedRootCauses": [],
+        "ownerValidationRootCauses": [],
+        "directFindingIds": []
+      }
+    }
+  ]
+}

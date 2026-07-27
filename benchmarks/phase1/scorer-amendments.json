@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "amendments": [
+    {
+      "id": "heldout-scorer-v2",
+      "appliedAt": "2026-07-17T12:05:00.000Z",
+      "scope": "scorer_only_mechanical_correction",
+      "scannerOutputsChanged": false,
+      "previousScorerSha256": "101515178d1f6f1559ec23effc8bf871a24f236c91e7ebfc822c5b2f714a4812",
+      "correctedScorerSha256": "21bf759e7208fbb242770932e2fb92495c66ce5a39d0b0530cab3ae1197f0dc2",
+      "corrections": [
+        "Read quick coverage from check/status and deep coverage from area/state instead of treating both schemas as deep coverage.",
+        "Read the Semgrep start line from result.start rather than extra.start."
+      ],
+      "metricImpact": "VibeShield coverage-loss reasons changed from 9 to 4 per cell; TP, FP, FN, precision, recall, F0.5, blockers, baseline metrics, and the failed gate decision did not change.",
+      "rescoredTools": ["vibeshield", "codeql", "semgrep", "joern"],
+      "supersedes": ".local/research/report-v1/phase1/registry/heldout-python-v1.json",
+      "result": ".local/research/report-v1/phase1/registry/heldout-python-v2.json"
+    }
+  ],
+  "postExecutionMaintenance": [
+    {
+      "id": "biome-source-formatting",
+      "appliedAt": "2026-07-17T13:01:28Z",
+      "scope": "formatting_only_after_results_published",
+      "scannerOutputsChanged": false,
+      "metricsRescored": false,
+      "sourceHashes": {
+        "runner": {
+          "executedSha256": "b8ab3c6200d478e93fe82088e9fbceb7585afdd1de20781ec2b80a4ae90a312d",
+          "formattedSha256": "a6c3210be90f2fdcee1ff80166e62d15ede75dd38a17da7c63cd2fe8a4f743ee"
+        },
+        "owaspScorer": {
+          "executedSha256": "21bf759e7208fbb242770932e2fb92495c66ce5a39d0b0530cab3ae1197f0dc2",
+          "formattedSha256": "d6e9b1418e45d4a69e070a31bf6ca94d5a8d07b3f34709c7c0d80d808b97eecd"
+        },
+        "resultNormalizer": {
+          "executedSha256": "a89e1e654a22b5184fce8e0fff5af5ac6a9fbd9345dbc7d0a7184338fcb76d4d",
+          "formattedSha256": "24727e0f2b14c3abc8bc93605eef30295ca433b1bf77fe3dfc16c0c6626d7019"
+        },
+        "freezeGenerator": {
+          "executedSha256": "7f67b1a816fedf040233beb233ed92e8bd21782fed882d0db67dfd9342256fe7",
+          "formattedSha256": "8433315a8f5e13c56699c09e05d3bf65e80366ed5aa4706845e5d2df6fe7675a"
+        }
+      },
+      "note": "Biome changed whitespace and import order only after the immutable scans and result scoring; frozen execution hashes remain historical evidence."
+    }
+  ]
+}

@@ -1455,8 +1455,10 @@ function verdictFor(
 
 function verdictWithDeepStatic(verdict: Verdict, deepData: DeepStaticData | undefined): Verdict {
   const hasSupportedAttackPath =
-    deepData?.staticHypotheses.some((hypothesis) => hypothesis.status === "statically_supported") ??
-    false;
+    deepData?.staticHypotheses.some(
+      (hypothesis) =>
+        hypothesis.status === "statically_supported" && hypothesis.promotion.publishable,
+    ) ?? false;
   return hasSupportedAttackPath ? "not-ready-to-deploy" : verdict;
 }
 

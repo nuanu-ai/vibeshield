@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "registeredAt": "2026-07-17T11:10:00.000Z",
+  "status": "registered_before_phase1_scans",
+  "phase0EvidenceClass": "synthetic_contract_regression_only",
+  "candidateGenerators": [
+    "vibeshield_full_scan",
+    "codeql_security_extended",
+    "semgrep_ce_pinned_rules",
+    "direct_joern_cpgql"
+  ],
+  "isolation": {
+    "scannerInput": "raw_pinned_git_snapshot_only",
+    "groundTruthConsumer": "scorer_only",
+    "forbiddenScannerInputs": [
+      "expected_results",
+      "sources",
+      "sinks",
+      "routes",
+      "controls",
+      "graph_edges",
+      "flows",
+      "vulnerable_lines"
+    ]
+  },
+  "snapshots": {
+    "tuning": {
+      "repository": "https://github.com/OWASP-Benchmark/BenchmarkJava.git",
+      "commit": "79b9bd6177e07991a9c11dc19e457c840e229931",
+      "version": "1.2",
+      "cwes": [22, 78, 79, 89]
+    },
+    "heldOut": {
+      "repository": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
+      "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba",
+      "version": "0.1",
+      "cwes": [22, 78, 79]
+    },
+    "realPairRegistry": {
+      "repository": "https://github.com/iris-sast/cwe-bench-java.git",
+      "commit": "afe0ebd0adc237abb46255f9cd479b1d71819136",
+      "selection": "first_two_reproducible_entries_by_lexical_cve_for_each_selected_cwe",
+      "pairs": [
+        {
+          "cwe": 22,
+          "cve": "CVE-2011-4367",
+          "repository": "https://github.com/apache/myfaces.git",
+          "vulnerable": "bedac49daffc3cb792fa19884620af01ab5a01ab",
+          "fixed": "b9b2e00bb53d3eb435256c5a140b83f7d6251b55"
+        },
+        {
+          "cwe": 22,
+          "cve": "CVE-2014-7816",
+          "repository": "https://github.com/undertow-io/undertow.git",
+          "vulnerable": "4aa98c80fa9962235c94f8666c30793d0018f95d",
+          "fixed": "28f244e63f558ba99a197813cfd5eee461b52b4c"
+        },
+        {
+          "cwe": 78,
+          "cve": "CVE-2013-7285",
+          "repository": "https://github.com/x-stream/xstream.git",
+          "vulnerable": "768c6e417a75e7732fc591bee844e5e81af56a7d",
+          "fixed": "6344867dce6767af7d0fe34fb393271a6456672d"
+        },
+        {
+          "cwe": 78,
+          "cve": "CVE-2014-3576",
+          "repository": "https://github.com/apache/activemq.git",
+          "vulnerable": "8938d14d434447193b02ba635606aa0fb7a80353",
+          "fixed": "f07e6a53216f9388185ac2b39f366f3bfd6a8a55"
+        },
+        {
+          "cwe": 79,
+          "cve": "CVE-2014-3656",
+          "repository": "https://github.com/keycloak/keycloak.git",
+          "vulnerable": "3b071b83aa0444749eba851fdbe0f2ed47932410",
+          "fixed": "63b41e2548cbc20bd3758e34a82d880e177bf24c"
+        },
+        {
+          "cwe": 79,
+          "cve": "CVE-2016-10006",
+          "repository": "https://github.com/nahsra/antisamy.git",
+          "vulnerable": "8bebe1eb2ec1ac23e34111e9d06024d7dab7fa25",
+          "fixed": "5a783b4116a21a12ab10f57cd1c88616902af633"
+        }
+      ]
+    },
+    "javascriptBreadth": {
+      "repository": "https://github.com/cristianstaicu/SecBench.js.git",
+      "commit": "bc315621913899dcaa7613cd60948514ae63bdfe",
+      "scoreability": "vulnerable_only_not_precision_eligible"
+    }
+  },
+  "toolPins": {
+    "codeql": "2.26.1",
+    "semgrep": "1.151.0",
+    "semgrepRulesCommit": "e5b5a42ec061854378c11e0d01f19250b52bc2e9",
+    "joern": "4.0.565"
+  },
+  "resourceLimits": {
+    "commandTimeoutSeconds": 1800,
+    "codeqlRamMiB": 8192,
+    "directJoernRamMiB": 10240,
+    "directJoernCpus": 8,
+    "semgrepPerFileTimeoutSeconds": 30,
+    "semgrepMaxTargetBytes": 5000000,
+    "vibeshieldRuntime": "production_microsandbox_4096MiB_2vCPU"
+  },
+  "cellEligibility": {
+    "minimumCases": 20,
+    "minimumVulnerable": 10,
+    "minimumCleanOrGuarded": 10,
+    "minimumAggregateCases": 100,
+    "minimumAggregateCells": 3
+  },
+  "metrics": [
+    "tp",
+    "fp",
+    "fn",
+    "precision",
+    "recall",
+    "f0_5",
+    "false_blockers",
+    "coverage_loss",
+    "unique_verified_findings"
+  ],
+  "capabilityGate": {
+    "precisionAtLeast": 0.9,
+    "recallAtLeast": 0.8,
+    "falseDeployBlockers": 0,
+    "f0_5": "not_below_best_open_source_baseline",
+    "requiresFullSourceScans": true,
+    "minimumVerifiedRealFindings": 3,
+    "minimumVerifiedRealRepositories": 2,
+    "uniqueAdvantageRequiresVibeshieldOnlyRealFinding": true
+  },
+  "decisionWhenGateFails": "no_detection_winner; describe_current_value_as_orchestration_triage_reporting"
+}

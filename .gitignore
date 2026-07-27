@@ -28,6 +28,7 @@ runs/
 /artifacts/
 tmp/
 docs/ongoing-work/
+.local/research/
 
 # OS/editor
 .DS_Store

@@ -86,6 +86,12 @@ export function composeDeepCoverage(input: ComposeDeepCoverageInput): DeepCovera
   );
   addKnownGap(
     entries,
+    "control_flow",
+    "Control-flow guard coverage has not been produced yet.",
+    producerVersion,
+  );
+  addKnownGap(
+    entries,
     "component_usage",
     "Component usage projection is not wired into Deep Static yet.",
     producerVersion,

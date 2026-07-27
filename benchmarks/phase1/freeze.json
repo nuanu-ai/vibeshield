@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "state": "frozen_before_held_out_scans",
+  "frozenAt": "2026-07-17T12:00:54.710Z",
+  "scannerInputContract": "raw_clean_git_snapshot_only",
+  "snapshots": {
+    "tuning": "79b9bd6177e07991a9c11dc19e457c840e229931",
+    "heldOut": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba",
+    "realPairRegistry": "afe0ebd0adc237abb46255f9cd479b1d71819136",
+    "javascriptBreadth": "bc315621913899dcaa7613cd60948514ae63bdfe"
+  },
+  "vibeshield": {
+    "repositoryHead": "90f09895a920b00f19925db43162bf23202b72de",
+    "scannerSourceSha256": "0d0193932d23a953205cd587ec175d1f7bb9cfa7985534e3d19084380cc6a35b",
+    "toolchainImage": "sha256:fbcdbf01422719da419bc41e0911bfed6d995d437f92ef5bcdc37c19411d7913"
+  },
+  "codeql": {
+    "version": {
+      "productName": "CodeQL",
+      "vendor": "GitHub",
+      "version": "2.26.1",
+      "sha": "1ffdebae722922fb50a64b14a97789ed6161f4a7",
+      "branches": ["codeql-cli-2.26.1"],
+      "copyright": "Copyright (C) 2019-2026 GitHub, Inc.",
+      "unpackedLocation": "/Users/dmitry/Dev/vibeshield/.local/research/report-v1/phase1/tools/codeql",
+      "configFileLocation": "/Users/dmitry/.config/codeql/config",
+      "configFileFound": false,
+      "overlayVersion": 4,
+      "features": {
+        "analysisSummaryV2Default": true,
+        "buildModeOption": true,
+        "bundleSupportsIncludeDiagnostics": true,
+        "bundleSupportsIncludeLogs": true,
+        "bundleSupportsOverlay": true,
+        "databaseInterpretResultsSupportsSarifRunProperty": true,
+        "featuresInVersionResult": true,
+        "indirectTracingSupportsStaticBinaries": false,
+        "informsAboutUnsupportedPathFilters": true,
+        "supportsPython312": true,
+        "mrvaPackCreate": true,
+        "threatModelOption": true,
+        "traceCommandUseBuildMode": true,
+        "v2ramSizing": true,
+        "mrvaPackCreateMultipleQueries": true,
+        "setsCodeqlRunnerEnvVar": true,
+        "sarifMergeRunsFromEqualCategory": true,
+        "forceOverwrite": true,
+        "generateSummarySymbolMap": true,
+        "pythonDefaultIsToNotExtractStdlib": true,
+        "queryServerRunQueries": true,
+        "queryServerTrimCacheWithMode": true,
+        "builtinExtractorsSpecifyDefaultQueries": true,
+        "bqrsDiffResultSets": true,
+        "bundleSupportsIncludeOption": true,
+        "suppressesMissingFileBaselineWarning": true
+      }
+    },
+    "executableSha256": "5e459057abea0f2401d8f3a0eb7b4026571b17b8b5bb051ee66496386282dd27",
+    "suite": "security-extended"
+  },
+  "semgrep": {
+    "version": "1.151.0",
+    "executable": "/opt/homebrew/Cellar/semgrep/1.151.0/libexec/bin/semgrep",
+    "executableSha256": "aef0f7f03150f61be8a1d92e4b593e035be4cc69c6350630e6ddb933e211f3dd",
+    "rulesCommit": "e5b5a42ec061854378c11e0d01f19250b52bc2e9"
+  },
+  "joern": {
+    "version": "4.0.565",
+    "image": "sha256:fbcdbf01422719da419bc41e0911bfed6d995d437f92ef5bcdc37c19411d7913",
+    "querySha256": "d98519ed757af1c6ec6d8c68dcd3f723b0deb4047529c2f4ecb00c924cac3fe6"
+  },
+  "researchCode": {
+    "runner": "b8ab3c6200d478e93fe82088e9fbceb7585afdd1de20781ec2b80a4ae90a312d",
+    "owaspScorer": "101515178d1f6f1559ec23effc8bf871a24f236c91e7ebfc822c5b2f714a4812",
+    "resultNormalizer": "a89e1e654a22b5184fce8e0fff5af5ac6a9fbd9345dbc7d0a7184338fcb76d4d",
+    "joernQuery": "d98519ed757af1c6ec6d8c68dcd3f723b0deb4047529c2f4ecb00c924cac3fe6",
+    "preregistration": "a3d39fa200f0315ede7d50175e978f8afabb193a52ce59bd0fb94408b5f831fc"
+  },
+  "resourceContract": {
+    "commandTimeoutSeconds": 1800,
+    "codeqlRamMiB": 8192,
+    "directJoernRamMiB": 10240,
+    "directJoernCpus": 8,
+    "semgrepPerFileTimeoutSeconds": 30,
+    "semgrepMaxTargetBytes": 5000000,
+    "vibeshield": "production_microsandbox_4096MiB_2vCPU"
+  }
+}
