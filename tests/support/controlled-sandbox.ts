@@ -180,9 +180,9 @@ export class ControlledSandbox extends FakeSandboxRuntime {
   cleanupGate: ReturnType<typeof deferred> | undefined;
   beforeExport: ((key: string) => void) | undefined;
   beforeRead: ((path: string) => Promise<void>) | undefined;
-  constructor() {
+  constructor(guestClock?: Clock) {
     super({
-      exec: async (command, session) => {
+      exec: async (command, session, options) => {
         const bin = command[1];
         if (bin === "/usr/local/bin/vibeshield-acquire") {
           if (this.acquisitionFails)
@@ -201,7 +201,16 @@ export class ControlledSandbox extends FakeSandboxRuntime {
               : engines.find((id) => bin === `/usr/local/bin/vibeshield-${id}`);
           if (!engine) throw new Error("Unexpected command in controlled sandbox");
           if (this.started.at(-1) !== engine) this.started.push(engine);
-          await this.gates.get(engine)?.promise;
+          // Emulate only the existing guest process timeout. The actual timeout
+          // value comes from the production executor, not a scanner constant.
+          let cancel: (() => void) | undefined;
+          const timeout = new Promise<"timeout">((resolve) => {
+            if (guestClock && options.timeoutMs !== undefined)
+              cancel = guestClock.schedule(options.timeoutMs, () => resolve("timeout"));
+          });
+          const outcome = await Promise.race([this.gates.get(engine)?.promise, timeout]);
+          cancel?.();
+          if (outcome === "timeout") return { exitCode: 124, stdout: "", stderr: "" };
           if (this.failures.has(engine))
             return {
               exitCode: this.failures.get(engine) ?? 1,

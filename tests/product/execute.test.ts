@@ -1,11 +1,14 @@
+import { getEventListeners } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { createExecutor } from "../../src/scan/execute.js";
+import { createScanDeadline, createStageDeadline, deadlineFor } from "../../src/web/clock.js";
 import { CleanupError } from "../../src/web/jobs.js";
 import {
   ControlledSandbox,
   deferred,
   fixtureProvenance,
   fixtureSnapshot,
+  ManualClock,
   privateText,
 } from "../support/controlled-sandbox.js";
 
@@ -54,6 +57,28 @@ it("acquires once and sequentially composes all five real adapters into a normal
     new RegExp(`${privateText}|securityGraph|modelMetadata|rawCredential|codeFlows|snippet`),
   );
   expect(sandbox.sessions.size).toBe(0);
+});
+it("isolates stage cancellation and disposes its signal registration, timer and parent listener", () => {
+  const clock = new ManualClock();
+  const overall = createScanDeadline(clock);
+  const stage = createStageDeadline(overall);
+  expect(deadlineFor(stage.signal)).toBe(stage);
+  expect(getEventListeners(overall.signal, "abort")).toHaveLength(1);
+  clock.advance(119_999);
+  expect(stage.signal.aborted).toBe(false);
+  clock.advance(1);
+  expect(stage.signal.aborted).toBe(true);
+  expect(overall.signal.aborted).toBe(false);
+  stage.dispose();
+  expect(deadlineFor(stage.signal)).toBeUndefined();
+  expect(getEventListeners(overall.signal, "abort")).toHaveLength(0);
+  expect(clock.pending()).toBe(1);
+  const next = createStageDeadline(overall);
+  overall.abort();
+  expect(next.signal.aborted).toBe(true);
+  next.dispose();
+  overall.dispose();
+  expect(clock.pending()).toBe(0);
 });
 it("does not resolve a report until sandbox deletion is verified", async () => {
   const sandbox = new ControlledSandbox();

@@ -60,6 +60,21 @@ settles. Deadline or shutdown cancellation destroys the active sandbox; outstand
 creation must settle before cleanup can be verified. Checks that did not complete
 remain explicit failures beside any already completed findings.
 
+Each engine also has one cumulative two-minute budget, including all of its
+commands and export reads. Gitleaks current and history checks share this budget.
+The engine deadline is capped by the remaining overall deadline. Every guest
+command receives the smaller of its existing timeout and the engine's remaining
+time; the executor waits for the guest wrapper to terminate that process group
+before continuing in the same sandbox. Engine cancellation does not propagate
+to the overall job. Clock checks around each operation prevent further scanner
+work after the deadline even when timer delivery is delayed. Child timers,
+listeners and deadline registrations are removed after each engine.
+
+The engine signal is not sent to the runtime's cancellation path, which removes
+the whole VM. A stalled SDK transport or export read therefore remains governed
+by the overall abort/removal deadline; no next scanner starts while its operation
+is unsettled. This boundary preserves the existing runtime cancellation contract.
+
 Executor resolution follows verified cleanup. When cleanup fails, the coordinator
 keeps `cleanup-failed` visible and its slot reserved. A normalized report, if one
 was prepared, stays private until the operator calls `retryCleanup()` and its

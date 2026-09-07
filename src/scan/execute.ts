@@ -1,7 +1,14 @@
 import type { SandboxRuntime, SandboxSession } from "../ports/sandbox-runtime.js";
-import { createScanDeadline, deadlineFor, type ScanDeadline, systemClock } from "../web/clock.js";
+import {
+  createScanDeadline,
+  createStageDeadline,
+  deadlineFor,
+  type ScanDeadline,
+  systemClock,
+} from "../web/clock.js";
 import { CleanupError, type ExecuteScan } from "../web/jobs.js";
 import type { Progress, Provenance, Report, ScannerId, ScanResult, Stage } from "./contracts.js";
+import { LIMITS } from "./limits.js";
 import { defaultPolicy } from "./policy.js";
 import { buildReport } from "./report.js";
 import { scanGitleaks } from "./scanners/gitleaks.js";
@@ -78,15 +85,24 @@ export function createExecutor(runtime: SandboxRuntime, provenance: Provenance):
       const scanProvenance = structuredClone(provenance);
       for (const [id, scan] of scanners) {
         stage = id;
+        const stageDeadline = createStageDeadline(deadline);
+        const stageSession = scannerSession(session, stageDeadline, deadline);
         try {
           deadline.check();
+          stageDeadline.check();
           progress("running", `Running ${id}.`);
-          const result = await scan({ session, snapshot: repository, signal: deadline.signal });
+          const result = await scan({
+            session: stageSession,
+            snapshot: repository,
+            signal: stageDeadline.signal,
+          });
           deadline.check();
+          stageDeadline.check();
           results.push(result);
           if (id === "osv") {
-            const advisory = await readOsvAdvisoryData(session);
+            const advisory = await readOsvAdvisoryData(stageSession);
             deadline.check();
+            stageDeadline.check();
             if (advisory && new Date(advisory.retrievedAt).toISOString() === advisory.retrievedAt)
               scanProvenance.advisoryData.push(advisory);
           }
@@ -114,11 +130,15 @@ export function createExecutor(runtime: SandboxRuntime, provenance: Provenance):
                 applicable: true,
                 reason: deadline.signal.aborted
                   ? "Scan interrupted or overall deadline exceeded; this check did not complete."
-                  : "Scanner failed; this check did not complete.",
+                  : stageDeadline.signal.aborted
+                    ? "Scanner exceeded its two-minute budget; this check did not complete."
+                    : "Scanner failed; this check did not complete.",
               },
             ],
           });
           progress("failed", "Check did not complete.");
+        } finally {
+          stageDeadline.dispose();
         }
       }
       stage = "report";
@@ -156,6 +176,41 @@ export function createExecutor(runtime: SandboxRuntime, provenance: Provenance):
     if (failure) throw failure;
     if (!report) throw new Error("Scan failed before a report could be prepared");
     return report;
+  };
+}
+
+/** One stage budget includes every subcommand and export operation. Runtime
+ * cancellation remains attached to the overall signal: aborting that signal
+ * destroys the VM. The existing guest wrapper stops each command at the remaining
+ * stage budget; await its settlement before another scanner uses the sandbox. */
+function scannerSession(
+  session: SandboxSession,
+  stage: ScanDeadline,
+  overall: ScanDeadline,
+): SandboxSession {
+  const io = async <T>(operation: () => Promise<T>): Promise<T> => {
+    overall.check();
+    stage.check();
+    const result = await operation();
+    overall.check();
+    stage.check();
+    return result;
+  };
+  return {
+    id: session.id,
+    exec: (command, options) =>
+      io(() =>
+        session.exec(command, {
+          ...options,
+          signal: overall.signal,
+          timeoutMs: Math.min(options?.timeoutMs ?? LIMITS.scannerMs, stage.remainingMs()),
+        }),
+      ),
+    read: (path) => io(() => session.read(path)),
+    download: (path) => io(() => session.download(path)),
+    upload: (local, guest) => io(() => session.upload(local, guest)),
+    uploadBytes: (path, data) => io(() => session.uploadBytes(path, data)),
+    destroy: () => session.destroy(),
   };
 }
 

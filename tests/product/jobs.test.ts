@@ -12,9 +12,9 @@ import {
   privateText,
 } from "../support/controlled-sandbox.js";
 
-function setup() {
-  const sandbox = new ControlledSandbox();
+function setup(guestTimeouts = false) {
   const clock = new ManualClock();
+  const sandbox = new ControlledSandbox(guestTimeouts ? clock : undefined);
   const jobs = createJobs({
     execute: createExecutor(sandbox, fixtureProvenance),
     cleanup: () => sandbox.cleanup(),
@@ -57,6 +57,116 @@ it("waits for each scanner completion before starting the next and exposes real 
   }
   await completed(jobs, id);
   expect(jobs.busy()).toBe(false);
+  await jobs.shutdown();
+});
+it("limits both Gitleaks commands to one cumulative two-minute scanner budget", async () => {
+  const { jobs, sandbox, clock } = setup();
+  sandbox.beforeExport = (key) => {
+    if (key.startsWith("gitleaks-")) clock.jump(119_999);
+  };
+  sandbox.releaseAll();
+  const { id } = jobs.start(fixtureSnapshot.url);
+  const report = await completed(jobs, id);
+  expect(report.coverage).toContainEqual(
+    expect.objectContaining({ scanner: "gitleaks", status: "failed" }),
+  );
+  expect(report.issues).toHaveLength(4);
+  expect(
+    sandbox.invocations.find(
+      (call) => call.command[2] === "gitleaks" && call.command[3] === "history",
+    )?.timeoutMs,
+  ).toBe(1);
+  expect(sandbox.started).toEqual(["gitleaks", "opengrep", "osv", "trivy", "zizmor"]);
+  expect(sandbox.created[0]?.signal?.aborted).toBe(false);
+  await jobs.shutdown();
+  expect(clock.pending()).toBe(0);
+});
+it("stops the active guest command at the scanner deadline and continues in the same sandbox", async () => {
+  const { jobs, sandbox, clock } = setup(true);
+  for (const engine of ["gitleaks", "osv", "trivy", "zizmor"] as const) sandbox.release(engine);
+  const { id } = jobs.start(fixtureSnapshot.url);
+  await vi.waitFor(() => expect(sandbox.started.at(-1)).toBe("opengrep"));
+  clock.advance(119_999);
+  expect(jobs.get(id)?.status).toBe("running");
+  expect(sandbox.started).toEqual(["gitleaks", "opengrep"]);
+  clock.advance(1);
+  const report = await completed(jobs, id);
+  expect(report.issues).toHaveLength(4);
+  expect(report.coverage).toContainEqual(
+    expect.objectContaining({ scanner: "opengrep", status: "failed" }),
+  );
+  expect(sandbox.created).toHaveLength(1);
+  expect(sandbox.created[0]?.signal?.aborted).toBe(false);
+  expect(sandbox.started).toEqual(["gitleaks", "opengrep", "osv", "trivy", "zizmor"]);
+  expect(clock.pending()).toBe(1);
+  await jobs.shutdown();
+  expect(clock.pending()).toBe(0);
+});
+it("clips the last scanner budget to the remaining overall deadline", async () => {
+  const { jobs, sandbox, clock } = setup(true);
+  let acquisitionDelayed = false;
+  sandbox.beforeRead = async (path) => {
+    if (path.endsWith("snapshot.json") && !acquisitionDelayed) {
+      acquisitionDelayed = true;
+      clock.jump(119_999);
+    }
+  };
+  sandbox.beforeExport = (key) => {
+    if (["gitleaks-current", "opengrep", "osv", "trivy"].includes(key)) clock.jump(119_999);
+  };
+  for (const engine of ["gitleaks", "opengrep", "osv", "trivy"] as const) sandbox.release(engine);
+  const { id } = jobs.start(fixtureSnapshot.url);
+  await vi.waitFor(() => expect(sandbox.started.at(-1)).toBe("zizmor"));
+  expect(
+    sandbox.invocations.find((call) => call.command[1] === "/usr/local/bin/vibeshield-zizmor")
+      ?.timeoutMs,
+  ).toBe(5);
+  clock.advance(5);
+  const report = await completed(jobs, id);
+  expect(report.issues).toHaveLength(4);
+  expect(sandbox.created[0]?.signal?.aborted).toBe(true);
+  expect(sandbox.sessions.size).toBe(0);
+  await jobs.shutdown();
+  expect(clock.pending()).toBe(0);
+});
+it.each([
+  119_999, 120_000,
+])("uses the exact two-minute scanner boundary at %i ms", async (duration) => {
+  const { jobs, sandbox, clock } = setup();
+  sandbox.beforeExport = (key) => {
+    if (key === "opengrep") clock.jump(duration);
+  };
+  sandbox.releaseAll();
+  const { id } = jobs.start(fixtureSnapshot.url);
+  const report = await completed(jobs, id);
+  expect(report.coverage).toContainEqual(
+    expect.objectContaining({
+      scanner: "opengrep",
+      status: duration === 119_999 ? "checked" : "failed",
+    }),
+  );
+  expect(report.issues).toHaveLength(duration === 119_999 ? 5 : 4);
+  expect(sandbox.started).toEqual(["gitleaks", "opengrep", "osv", "trivy", "zizmor"]);
+  expect(sandbox.created[0]?.signal?.aborted).toBe(false);
+  await jobs.shutdown();
+});
+it("does not start the next Gitleaks subcommand after a delayed scanner deadline callback", async () => {
+  const { jobs, sandbox, clock } = setup();
+  sandbox.beforeRead = async (path) => {
+    if (path.endsWith("gitleaks-current.json")) clock.jump(120_000);
+  };
+  sandbox.releaseAll();
+  const { id } = jobs.start(fixtureSnapshot.url);
+  const report = await completed(jobs, id);
+  expect(
+    sandbox.invocations
+      .filter((call) => call.command[2] === "gitleaks")
+      .map((call) => call.command[3]),
+  ).toEqual(["current"]);
+  expect(report.coverage).toContainEqual(
+    expect.objectContaining({ scanner: "gitleaks", status: "failed" }),
+  );
+  expect(sandbox.started.at(-1)).toBe("zizmor");
   await jobs.shutdown();
 });
 it.each([

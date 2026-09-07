@@ -15,6 +15,7 @@ export const systemClock: Clock = {
 export interface ScanDeadline {
   clock: Clock;
   signal: AbortSignal;
+  remainingMs(): number;
   check(): void;
   abort(): void;
   dispose(): void;
@@ -27,15 +28,26 @@ export function deadlineFor(signal: AbortSignal): ScanDeadline | undefined {
   return deadlines.get(signal);
 }
 export function createScanDeadline(clock: Clock, parent?: AbortSignal): ScanDeadline {
+  return createDeadline(clock, LIMITS.totalMs, parent);
+}
+export function createStageDeadline(parent: ScanDeadline): ScanDeadline {
+  return createDeadline(
+    parent.clock,
+    Math.min(LIMITS.scannerMs, parent.remainingMs()),
+    parent.signal,
+  );
+}
+function createDeadline(clock: Clock, budgetMs: number, parent?: AbortSignal): ScanDeadline {
   const controller = new AbortController();
-  const expiresAt = clock.now() + LIMITS.totalMs;
+  const expiresAt = clock.now() + budgetMs;
   const abort = () => controller.abort(new Error("Scan interrupted or deadline exceeded"));
-  const cancel = clock.schedule(LIMITS.totalMs, abort);
+  const cancel = clock.schedule(budgetMs, abort);
   parent?.addEventListener("abort", abort, { once: true });
   if (parent?.aborted) abort();
   const deadline: ScanDeadline = {
     clock,
     signal: controller.signal,
+    remainingMs: () => Math.max(0, expiresAt - clock.now()),
     check() {
       if (clock.now() >= expiresAt) abort();
       controller.signal.throwIfAborted();
