@@ -490,6 +490,7 @@ it.each([
   "packages:\n  - 'packages/*'\n    nested: invalid\n",
   "packages:\n  - 'packages/*'\n\"packages\": []\n",
   "packages:\n  - 'packages/*'\n---\npackages: []\n",
+  "packages:#not-separated\n  - 'packages/*'\n",
 ])("keeps ambiguous or unsupported pnpm declarations uncovered %j", async (yaml) => {
   const result = await workspaceScan("pnpm-lock.yaml", {
     "package.json": {},
@@ -498,4 +499,60 @@ it.each([
   expect(result.coverage).toContainEqual(
     expect.objectContaining({ area: "packages/app/package.json", status: "skipped" }),
   );
+});
+it.each([
+  { scalar: "*", directory: "independent" },
+  { scalar: "**", directory: "independent" },
+  { scalar: "*independent", directory: "independent" },
+  { scalar: '" independent "', directory: "independent" },
+  { scalar: "' independent '", directory: "independent" },
+  { scalar: "true", directory: "true" },
+  { scalar: "FALSE", directory: "FALSE" },
+  { scalar: "null", directory: "null" },
+  { scalar: "Null", directory: "Null" },
+  { scalar: "123", directory: "123" },
+  { scalar: ".inf", directory: ".inf" },
+  { scalar: "yes", directory: "yes" },
+  { scalar: "on", directory: "on" },
+  { scalar: "independent#not-a-comment", directory: "independent" },
+  { scalar: '"independent"#not-separated', directory: "independent" },
+])("does not turn YAML scalar $scalar into false membership", async ({ scalar, directory }) => {
+  const result = await workspaceScan(
+    "pnpm-lock.yaml",
+    {
+      "package.json": {},
+      "pnpm-workspace.yaml": `packages:\n  - ${scalar}\n`,
+    },
+    [`${directory}/package.json`],
+  );
+  expect(result.coverage).toContainEqual(
+    expect.objectContaining({
+      area: `${directory}/package.json`,
+      status: "skipped",
+      applicable: true,
+    }),
+  );
+  expect(buildReport({ ...makeReportInput([result]), policy: defaultPolicy }).incomplete).toBe(
+    true,
+  );
+});
+it.each([
+  '"*"',
+  "'*'",
+  "independent",
+  '"independent" # separated comment',
+  "independent   # separated comment",
+  '"true"',
+])("retains legitimate pnpm string scalar %s", async (scalar) => {
+  const result = await workspaceScan(
+    "pnpm-lock.yaml",
+    {
+      "package.json": {},
+      "pnpm-workspace.yaml": `packages:\n  - ${scalar}\n`,
+    },
+    [scalar === '"true"' ? "true/package.json" : "independent/package.json"],
+  );
+  expect(result.coverage).toEqual([
+    expect.objectContaining({ area: "pnpm-lock.yaml", status: "checked" }),
+  ]);
 });

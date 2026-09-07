@@ -31,6 +31,12 @@ workspace arrays (including the `packages` object form) and a standalone pnpm
 inline/anchored/merged/multi-document YAML and YAML containing other configuration
 sections are not interpreted; unmatched manifests retain missing-lockfile
 coverage. No package-manager command runs and no dependency range is resolved.
+For pnpm, quoted strings retain their exact content; surrounding spaces inside
+quotes are never removed to match another directory. Unquoted values use a narrow
+ASCII letter/underscore-led path subset; aliases, tags, numbers, boolean/null-like
+scalars and ambiguous forms require quoting or remain uncovered. In particular,
+unquoted `*`/`**` are not globs, while quoted `"*"` is. Comments require separating
+spaces. Unsupported quoted escapes and whitespace-bearing paths stay uncovered.
 See [Yarn workspace declarations](https://yarnpkg.com/features/workspaces),
 [npm workspace mapping](https://github.com/npm/map-workspaces/blob/main/lib/index.js),
 [pnpm workspace configuration](https://pnpm.io/pnpm-workspace_yaml), and
@@ -107,3 +113,6 @@ fixtures establish those examples, not general dependency detection accuracy.
 The live Yarn fixture also proves shared-root coverage for a declared
 `packages/app` workspace and missing-lockfile coverage for a separate
 `independent` package despite the same scanned ancestor lockfile.
+The pnpm v9 live fixture verifies that YAML aliases and quoted-space declarations
+cannot hide a separate axios manifest behind a clean lodash lockfile; a quoted
+wildcard control still establishes membership for the declared lodash workspace.

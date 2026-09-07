@@ -22,7 +22,7 @@ function pnpmPatterns(value) {
   if (typeof value !== "string" || value.includes("\t")) return [];
   const lines = value.split(/\r?\n/);
   if (lines.filter((line) => /^packages\s*:/.test(line)).length !== 1) return [];
-  const start = lines.findIndex((line) => /^packages:\s*(?:#.*)?$/.test(line));
+  const start = lines.findIndex((line) => /^packages:(?: +#.*| *)$/.test(line));
   if (start < 0) return [];
   // Only this standalone block is interpreted. Other YAML structure (including
   // quoted duplicate keys, anchors, and multiple documents) stays uncovered.
@@ -32,10 +32,16 @@ function pnpmPatterns(value) {
   for (const line of lines.slice(start + 1)) {
     if (/^\s*(?:#.*)?$/.test(line)) continue;
     if (/^\S/.test(line)) return [];
-    const match = /^( +)- +(?:'([^']*)'|"([^"\\]*)"|([^#'"\s][^#]*?))\s*(?:#.*)?$/.exec(line);
+    // Plain values are a narrow string-only subset, not YAML aliases, tags,
+    // numbers or implicit booleans/null. A leading wildcard must be quoted.
+    const match =
+      /^( +)- +(?:'([^']*)'|"([^"\\]*)"|([A-Za-z_][A-Za-z0-9_./*-]*))(?: +#.*| *)$/.exec(line);
     if (!match || (indent !== undefined && match[1].length !== indent)) return [];
     indent = match[1].length;
-    patterns.push((match[2] ?? match[3] ?? match[4]).trim());
+    if (match[4] !== undefined && /^(?:null|true|false|yes|no|on|off|y|n)$/i.test(match[4]))
+      return [];
+    // Quoted whitespace is part of the value; never reinterpret another path.
+    patterns.push(match[2] ?? match[3] ?? match[4]);
   }
   return patterns;
 }

@@ -317,6 +317,121 @@ live(
           independent: independent.coverage,
         }),
       );
+      expect(
+        (
+          await session.exec([
+            "mv",
+            "/work/.vibeshield/exports/osv.json",
+            "/work/.vibeshield/yarn-independent-osv.json",
+          ])
+        ).exitCode,
+      ).toBe(0);
+      expect(
+        (await session.exec(["mv", "/work/snapshot", "/work/.vibeshield/yarn-snapshot"])).exitCode,
+      ).toBe(0);
+      expect((await session.exec(["mkdir", "-p", "/work/snapshot/independent"])).exitCode).toBe(0);
+      await session.uploadBytes(
+        "/work/snapshot/package.json",
+        Buffer.from(
+          JSON.stringify({
+            name: "pnpm-root",
+            private: true,
+            dependencies: { lodash: "^4.17.0" },
+          }),
+        ),
+      );
+      await session.uploadBytes(
+        "/work/snapshot/pnpm-lock.yaml",
+        Buffer.from(
+          "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      lodash:\n        specifier: ^4.17.0\n        version: 4.18.0\npackages:\n  lodash@4.18.0:\n    resolution: {}\nsnapshots:\n  lodash@4.18.0: {}\n",
+        ),
+      );
+      const pnpmSnapshot: Snapshot = {
+        ...snapshot,
+        files: [
+          "package.json",
+          "independent/package.json",
+          "pnpm-lock.yaml",
+          "pnpm-workspace.yaml",
+        ],
+      };
+      await session.uploadBytes(
+        "/work/.vibeshield/exports/snapshot.json",
+        Buffer.from(JSON.stringify({ snapshot: pnpmSnapshot })),
+      );
+      for (const [label, scalar, covered] of [
+        ["alias", "*", false],
+        ["double-alias", "**", false],
+        ["quoted-space", '" independent "', false],
+        ["quoted-glob", '"*"', true],
+      ] as const) {
+        await session.uploadBytes(
+          "/work/snapshot/independent/package.json",
+          Buffer.from(
+            JSON.stringify({
+              name: "independent",
+              dependencies: covered ? { lodash: "^4.17.0" } : { axios: "^0.21.0" },
+            }),
+          ),
+        );
+        await session.uploadBytes(
+          "/work/snapshot/pnpm-workspace.yaml",
+          Buffer.from(`packages:\n  - ${scalar}\n`),
+        );
+        const result = await scanOsv({
+          session,
+          snapshot: pnpmSnapshot,
+          signal: new AbortController().signal,
+        });
+        const raw = await readScannerJson(session, "/work/.vibeshield/exports/osv.json");
+        expect(raw).toMatchObject({
+          exitCode: 0,
+          diagnostics: false,
+          output: {
+            results: [
+              {
+                source: { path: "/work/snapshot/pnpm-lock.yaml" },
+                packages: [{ package: { name: "lodash", version: "4.18.0" } }],
+              },
+            ],
+          },
+        });
+        expect.soft(raw).toMatchObject({
+          workspaceMembers: covered
+            ? [{ manifest: "independent/package.json", lockfile: "pnpm-lock.yaml" }]
+            : [],
+        });
+        expect.soft(result.coverage).toEqual([
+          expect.objectContaining({ area: "pnpm-lock.yaml", status: "checked" }),
+          ...(covered
+            ? []
+            : [
+                expect.objectContaining({
+                  area: "independent/package.json",
+                  status: "skipped",
+                  applicable: true,
+                }),
+              ]),
+        ]);
+        const report = buildReport({ ...makeReportInput([result]), policy: defaultPolicy });
+        expect.soft(report.incomplete).toBe(!covered);
+        console.log(
+          JSON.stringify({
+            fixture: `pnpm-${label}`,
+            coverage: result.coverage,
+            incomplete: report.incomplete,
+          }),
+        );
+        expect(
+          (
+            await session.exec([
+              "mv",
+              "/work/.vibeshield/exports/osv.json",
+              `/work/.vibeshield/pnpm-${label}-osv.json`,
+            ])
+          ).exitCode,
+        ).toBe(0);
+      }
     } finally {
       await runtime.destroy(name);
       expect((await Sandbox.list()).filter((x) => x.name === name)).toHaveLength(0);
