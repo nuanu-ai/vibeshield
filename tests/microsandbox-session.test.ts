@@ -274,6 +274,21 @@ describe("bounded guest wrapper", () => {
     await mkdir(workspace);
     const pidPath = join(workspace, "pids");
     const config = join(directory, "config.json");
+    const kernelRace = join(directory, "kernel-race.mjs");
+    // XNU may return EPERM when a duplicate signal finds only exiting group members.
+    // Deliver the first real signal; make that observed kernel race deterministic.
+    await writeFile(
+      kernelRace,
+      `const kill = process.kill.bind(process); let termSent = false;
+process.kill = (pid, signal) => {
+  if (pid < 0 && signal === "SIGTERM") {
+    if (termSent) throw Object.assign(new Error("Group already exiting"), { code: "EPERM" });
+    termSent = true;
+  }
+  return kill(pid, signal);
+};`,
+      { mode: 0o600 },
+    );
     await writeFile(
       config,
       JSON.stringify({
@@ -289,15 +304,21 @@ describe("bounded guest wrapper", () => {
       }),
       { mode: 0o600 },
     );
-    const wrapper = spawn(process.execPath, ["toolchain/run-check.mjs", config], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const wrapper = spawn(
+      process.execPath,
+      ["--import", kernelRace, "toolchain/run-check.mjs", config],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const diagnostic: Buffer[] = [];
+    wrapper.stderr.on("data", (data) => diagnostic.push(data));
     const code = await Promise.race([
-      once(wrapper, "exit").then(([value]) => value),
+      once(wrapper, "close").then(([value]) => value),
       new Promise((resolve) => setTimeout(() => resolve("hanging"), 1000)),
     ]);
     try {
-      expect(code).toBe(124);
+      expect(code, Buffer.concat(diagnostic).toString("utf8")).toBe(124);
       const pids = (await readFile(pidPath, "utf8")).split(" ").map(Number);
       for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
     } finally {

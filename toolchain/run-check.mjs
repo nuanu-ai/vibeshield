@@ -112,10 +112,14 @@ async function main() {
       }
     }
   }
+  function stopGroup() {
+    if (killTimer !== undefined) return;
+    killGroup("SIGTERM");
+    killTimer = setTimeout(() => killGroup("SIGKILL"), 100);
+  }
   function terminate(code) {
     forcedCode ??= code;
-    killGroup("SIGTERM");
-    killTimer ??= setTimeout(() => killGroup("SIGKILL"), 100);
+    stopGroup();
   }
   const term = () => terminate(143);
   process.on("SIGTERM", term);
@@ -151,10 +155,7 @@ async function main() {
   });
   // A parent can exit while descendants keep inherited pipes open. Terminate
   // that group on parent exit as well, before waiting for pipe closure.
-  child.on("exit", () => {
-    killGroup("SIGTERM");
-    killTimer ??= setTimeout(() => killGroup("SIGKILL"), 100);
-  });
+  child.on("exit", stopGroup);
   const code = await new Promise((resolveCode) =>
     child.on("close", (exitCode) => resolveCode(exitCode)),
   );
