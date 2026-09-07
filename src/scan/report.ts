@@ -42,16 +42,10 @@ function policyMatches(policy: RulePolicy, finding: Finding): boolean {
   if (policy.scanner !== finding.scanner) {
     return false;
   }
-  if (policy.ruleId === finding.ruleId) {
-    return true;
+  if (policy.ruleId === "*") {
+    return finding.scanner === "osv" && isOsvAdvisoryFinding(finding);
   }
-  if (policy.ruleId !== "*") {
-    return false;
-  }
-  if (finding.scanner === "osv") {
-    return isOsvAdvisoryFinding(finding);
-  }
-  return false;
+  return policy.ruleId === finding.ruleId;
 }
 
 function isOsvAdvisoryFinding(finding: Finding): boolean {

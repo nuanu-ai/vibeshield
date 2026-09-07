@@ -50,8 +50,24 @@ describe("deterministic report publication", () => {
     expect(report.issues).toEqual([]);
   });
 
+  it("does not let a finding wildcard bypass malformed OSV advisory validation", () => {
+    const { dependency: _dependency, ...malformed } = dependencyFinding({ ruleId: "*" });
+    const report = buildReport(makeReportInput([{ findings: [malformed], coverage: [] }]));
+    expect(report.issues).toEqual([]);
+  });
+
   it("does not publish an arbitrary Gitleaks rule through a wildcard policy", () => {
     const finding = makeFinding({ ruleId: "unvalidated-secret-rule" });
+    const input = makeReportInput([{ findings: [finding], coverage: [] }]);
+    const report = buildReport({
+      ...input,
+      policy: [wildcardPolicy("gitleaks", "secret-rotation")],
+    });
+    expect(report.issues).toEqual([]);
+  });
+
+  it("does not let a finding wildcard bypass Gitleaks wildcard rejection", () => {
+    const finding = makeFinding({ ruleId: "*" });
     const input = makeReportInput([{ findings: [finding], coverage: [] }]);
     const report = buildReport({
       ...input,
