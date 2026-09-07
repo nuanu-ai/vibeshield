@@ -43,3 +43,34 @@ sleep child was terminated. This guest image can retain the child as a zombie
 until VM removal; it is not executing. Cancellation and final removal confirmed
 the entire disposable VM absent. The broader final scanner acceptance task
 remains separate from these lifecycle probes.
+
+The private web scan coordinator in `src/web/jobs.ts` reserves one slot before
+starting asynchronous work. Its executor acquires one snapshot, runs Gitleaks,
+OpenGrep, OSV, Trivy and zizmor sequentially, and builds the deterministic report.
+Scanner failures preserve the other engines' findings and appear in coverage;
+failure before a validated snapshot produces a failed job without a report.
+
+The coordinator starts a cumulative ten-minute deadline using its injected
+`Clock`. An internal signal-to-deadline registration in `src/web/clock.ts` lets
+`createExecutor(runtime, provenance)` recheck the same wall-clock deadline before
+and after sandbox I/O, including export reads. Scheduled abort also works for
+executors that emit no progress. A standalone executor registers its own
+`systemClock` deadline. The owner disposes timers and registration when execution
+settles. Deadline or shutdown cancellation destroys the active sandbox; outstanding
+creation must settle before cleanup can be verified. Checks that did not complete
+remain explicit failures beside any already completed findings.
+
+Executor resolution follows verified cleanup. When cleanup fails, the coordinator
+keeps `cleanup-failed` visible and its slot reserved. A normalized report, if one
+was prepared, stays private until the operator calls `retryCleanup()` and its
+injected ownership-aware cleanup succeeds. Failed creation never authorizes
+deleting an unrelated resource by name. Shutdown closes admission, aborts active
+work, waits for cleanup, cancels retention timers and rejects cleanup failures.
+
+Jobs live only in memory. Completed reports expire exactly one hour after verified
+completion; the 21st report evicts the oldest completed report. Failed jobs also
+expire after one hour. A new store does not restore old URLs. Cleanup failures
+have no expiry while their slot is reserved. Base provenance is supplied by the
+composition root; only validated OSV advisory provenance is appended before
+cleanup. Raw scanner output, credentials, graphs and model metadata are not stored
+in jobs or reports. These modules do not use the legacy persistent scan service.
