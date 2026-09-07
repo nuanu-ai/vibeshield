@@ -14,6 +14,28 @@ degraded: an empty lockfile cannot be distinguished reliably from an omitted
 parse in official JSON. Other detected lockfiles and manifests without a supported
 lockfile are explicit limitations. This policy does not claim other ecosystems.
 
+A nested `package.json` can share a scanned workspace-root lockfile only when
+its exact snapshot path matches that root's workspace declaration. npm, Yarn,
+and Bun read `package.json` workspaces; pnpm requires `pnpm-workspace.yaml`.
+The guest reads only acquisition-listed root configs with bounded, no-symlink
+file access and exports only `{manifest, lockfile}` membership pairs. The host
+cross-checks both paths against the snapshot and requires actual non-degraded
+OSV inventory for the root lockfile. An ancestor lockfile or a declaration alone
+does not cover a child; omitted lockfiles and independent nested projects remain
+explicit coverage gaps. Canonical finding/provenance contracts are unchanged.
+
+Membership recognition is intentionally conservative: exact relative directory
+paths and whole-segment `*`/`**` globs, with exclusions taking precedence. JSON
+workspace arrays (including the `packages` object form) and a standalone pnpm
+`packages:` block list are recognized. Complex globs, re-inclusion overrides,
+inline/anchored/merged/multi-document YAML and YAML containing other configuration
+sections are not interpreted; unmatched manifests retain missing-lockfile
+coverage. No package-manager command runs and no dependency range is resolved.
+See [Yarn workspace declarations](https://yarnpkg.com/features/workspaces),
+[npm workspace mapping](https://github.com/npm/map-workspaces/blob/main/lib/index.js),
+[pnpm workspace configuration](https://pnpm.io/pnpm-workspace_yaml), and
+[Bun workspaces](https://bun.com/docs/pm/workspaces).
+
 The service selects only the four JavaScript lockfile extractors, supplies an
 empty `/opt/vibeshield/osv.toml`, and uses `--no-ignore`, `--all-vulns`,
 `--no-call-analysis=all`, and `--no-resolve`. The last two flags are essential:
@@ -82,3 +104,6 @@ Three medium records were suppressed; the two high records share aliases and
 became one public issue. The live test also verifies repository ignore resistance,
 malformed-lockfile coverage, no package-script marker, and VM cleanup. These
 fixtures establish those examples, not general dependency detection accuracy.
+The live Yarn fixture also proves shared-root coverage for a declared
+`packages/app` workspace and missing-lockfile coverage for a separate
+`independent` package despite the same scanned ancestor lockfile.

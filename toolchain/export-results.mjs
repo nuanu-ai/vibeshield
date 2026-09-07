@@ -79,7 +79,7 @@ export function gitEnvironment() {
   });
   return env;
 }
-export function readBoundedJson(path) {
+export function readBoundedText(path) {
   let fd;
   try {
     if (resolve(path) !== path || realpathSync(dirname(path)) !== dirname(path)) throw new Error();
@@ -107,11 +107,18 @@ export function readBoundedJson(path) {
       throw new Error();
     const bytes = readFileSync(fd);
     if (bytes.length > MAX_EXPORT_BYTES) throw new Error();
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     throw new Error("Invalid scanner export");
   } finally {
     if (fd !== undefined) closeSync(fd);
+  }
+}
+export function readBoundedJson(path) {
+  try {
+    return JSON.parse(readBoundedText(path));
+  } catch {
+    throw new Error("Invalid scanner export");
   }
 }
 export function writeExport(path, value) {

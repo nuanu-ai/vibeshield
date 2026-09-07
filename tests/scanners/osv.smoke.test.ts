@@ -122,6 +122,10 @@ live(
       };
       for (const fixture of ["vulnerable", "fixed"] as const) {
         await session.uploadBytes(
+          "/work/.vibeshield/exports/snapshot.json",
+          Buffer.from(JSON.stringify({ snapshot })),
+        );
+        await session.uploadBytes(
           "/work/snapshot/package-lock.json",
           await readFile(`tests/fixtures/scanners/dependencies/${fixture}/package-lock.json`),
         );
@@ -186,9 +190,17 @@ live(
       );
       expect((await session.exec(["mkdir", "-p", "/work/snapshot/broken"])).exitCode).toBe(0);
       await session.uploadBytes("/work/snapshot/broken/package-lock.json", Buffer.from("{"));
+      const partialSnapshot = {
+        ...snapshot,
+        files: [...snapshot.files, "broken/package-lock.json"],
+      };
+      await session.uploadBytes(
+        "/work/.vibeshield/exports/snapshot.json",
+        Buffer.from(JSON.stringify({ snapshot: partialSnapshot })),
+      );
       const partial = await scanOsv({
         session,
-        snapshot: { ...snapshot, files: [...snapshot.files, "broken/package-lock.json"] },
+        snapshot: partialSnapshot,
         signal: new AbortController().signal,
       });
       expect(partial.findings.length).toBeGreaterThan(0);
@@ -200,6 +212,111 @@ live(
         exitCode: 1,
         diagnostics: true,
       });
+      expect(
+        (
+          await session.exec([
+            "mv",
+            "/work/.vibeshield/exports/osv.json",
+            "/work/.vibeshield/partial-osv.json",
+          ])
+        ).exitCode,
+      ).toBe(0);
+      expect(
+        (await session.exec(["mv", "/work/snapshot", "/work/.vibeshield/npm-snapshot"])).exitCode,
+      ).toBe(0);
+      expect((await session.exec(["mkdir", "-p", "/work/snapshot/packages/app"])).exitCode).toBe(0);
+      await session.uploadBytes(
+        "/work/snapshot/package.json",
+        Buffer.from(
+          JSON.stringify({ name: "workspace-root", private: true, workspaces: ["packages/*"] }),
+        ),
+      );
+      await session.uploadBytes(
+        "/work/snapshot/packages/app/package.json",
+        Buffer.from(JSON.stringify({ name: "workspace-app", dependencies: { lodash: "^4.17.0" } })),
+      );
+      await session.uploadBytes(
+        "/work/snapshot/yarn.lock",
+        Buffer.from('# yarn lockfile v1\n\nlodash@^4.17.0:\n  version "4.18.0"\n'),
+      );
+      const workspaceSnapshot: Snapshot = {
+        ...snapshot,
+        files: ["package.json", "packages/app/package.json", "yarn.lock"],
+      };
+      await session.uploadBytes(
+        "/work/.vibeshield/exports/snapshot.json",
+        Buffer.from(JSON.stringify({ snapshot: workspaceSnapshot })),
+      );
+      const workspace = await scanOsv({
+        session,
+        snapshot: workspaceSnapshot,
+        signal: new AbortController().signal,
+      });
+      expect(await readScannerJson(session, "/work/.vibeshield/exports/osv.json")).toMatchObject({
+        exitCode: 0,
+        diagnostics: false,
+        workspaceMembers: [{ manifest: "packages/app/package.json", lockfile: "yarn.lock" }],
+        output: {
+          results: [
+            {
+              source: { path: "/work/snapshot/yarn.lock" },
+              packages: [{ package: { name: "lodash", version: "4.18.0" } }],
+            },
+          ],
+        },
+      });
+      expect(workspace.coverage).toEqual([
+        expect.objectContaining({ area: "yarn.lock", status: "checked" }),
+      ]);
+      expect(
+        buildReport({ ...makeReportInput([workspace]), policy: defaultPolicy }).incomplete,
+      ).toBe(false);
+      expect(
+        (
+          await session.exec([
+            "mv",
+            "/work/.vibeshield/exports/osv.json",
+            "/work/.vibeshield/workspace-osv.json",
+          ])
+        ).exitCode,
+      ).toBe(0);
+      expect((await session.exec(["mkdir", "-p", "/work/snapshot/independent"])).exitCode).toBe(0);
+      await session.uploadBytes(
+        "/work/snapshot/independent/package.json",
+        Buffer.from(JSON.stringify({ name: "independent", dependencies: { lodash: "^4.17.0" } })),
+      );
+      workspaceSnapshot.files.push("independent/package.json");
+      await session.uploadBytes(
+        "/work/.vibeshield/exports/snapshot.json",
+        Buffer.from(JSON.stringify({ snapshot: workspaceSnapshot })),
+      );
+      const independent = await scanOsv({
+        session,
+        snapshot: workspaceSnapshot,
+        signal: new AbortController().signal,
+      });
+      expect(independent.coverage).toContainEqual(
+        expect.objectContaining({
+          area: "independent/package.json",
+          status: "skipped",
+          applicable: true,
+        }),
+      );
+      expect(
+        buildReport({ ...makeReportInput([independent]), policy: defaultPolicy }).incomplete,
+      ).toBe(true);
+      expect(await readScannerJson(session, "/work/.vibeshield/exports/osv.json")).toMatchObject({
+        exitCode: 0,
+        diagnostics: false,
+        workspaceMembers: [{ manifest: "packages/app/package.json", lockfile: "yarn.lock" }],
+      });
+      console.log(
+        JSON.stringify({
+          fixture: "yarn-workspace",
+          workspace: workspace.coverage,
+          independent: independent.coverage,
+        }),
+      );
     } finally {
       await runtime.destroy(name);
       expect((await Sandbox.list()).filter((x) => x.name === name)).toHaveLength(0);

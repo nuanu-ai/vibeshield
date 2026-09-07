@@ -68,6 +68,7 @@ function envelope(output: unknown = official(), exitCode = 1) {
     scannerVersion: "2.3.8",
     exitCode,
     diagnostics: false,
+    workspaceMembers: [] as { manifest: string; lockfile: string }[],
     advisoryData: { source: "OSV", retrievedAt: "2026-09-07T12:00:00.000Z", stale: false },
     output,
   };
@@ -351,4 +352,150 @@ it("does not call an exit-1 report clean when official advisory records are miss
 it("does not report advisory retrieval from a malformed official result", async () => {
   const ctx = await context(envelope(null, 0));
   expect(await readOsvAdvisoryData(ctx.session)).toBeUndefined();
+});
+
+async function workspaceScan(
+  lockfile: string,
+  configs: Record<string, unknown>,
+  members = ["packages/app/package.json"],
+) {
+  const files = [...new Set([lockfile, ...Object.keys(configs), ...members])];
+  const raw = official();
+  member(raw.results).source.path = `/work/snapshot/${lockfile}`;
+  member(member(raw.results).packages).package.version = "4.18.0";
+  member(member(raw.results).packages).vulnerabilities = [];
+  const data = envelope(raw, 0);
+  data.workspaceMembers = guest.workspaceMembers(files, configs);
+  return scanOsv(await context(data, files));
+}
+it.each([
+  { lockfile: "yarn.lock", configs: { "package.json": { workspaces: ["packages/app"] } } },
+  { lockfile: "package-lock.json", configs: { "package.json": { workspaces: ["packages/*"] } } },
+  { lockfile: "bun.lock", configs: { "package.json": { workspaces: ["packages/**/app"] } } },
+  {
+    lockfile: "yarn.lock",
+    configs: { "package.json": { workspaces: { packages: ["packages/*"] } } },
+  },
+  {
+    lockfile: "pnpm-lock.yaml",
+    configs: { "package.json": {}, "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n" },
+  },
+])("uses $lockfile only for declared workspace members", async ({ lockfile, configs }) => {
+  const result = await workspaceScan(lockfile, configs);
+  expect(result.coverage).toEqual([expect.objectContaining({ area: lockfile, status: "checked" })]);
+  expect(buildReport({ ...makeReportInput([result]), policy: defaultPolicy }).incomplete).toBe(
+    false,
+  );
+});
+it("keeps an undeclared nested project uncovered despite a scanned ancestor lockfile", async () => {
+  const result = await workspaceScan(
+    "yarn.lock",
+    { "package.json": { workspaces: ["packages/*"] } },
+    ["packages/app/package.json", "independent/package.json", "packages/app/example/package.json"],
+  );
+  expect(result.coverage.filter((x) => x.status === "skipped").map((x) => x.area)).toEqual([
+    "independent/package.json",
+    "packages/app/example/package.json",
+  ]);
+  expect(buildReport({ ...makeReportInput([result]), policy: defaultPolicy }).incomplete).toBe(
+    true,
+  );
+});
+it.each([
+  {},
+  { workspaces: [] },
+  { workspaces: ["elsewhere/*"] },
+  { workspaces: ["/packages/*"] },
+  { workspaces: ["../packages/*"] },
+  { workspaces: ["packages/{app,other}"] },
+  { workspaces: ["packages/*", null] },
+  { workspaces: ["packages/**", "!packages/app"] },
+])("does not infer workspace membership from an ancestor lockfile or unsupported declarations %j", async (config) => {
+  const result = await workspaceScan("yarn.lock", { "package.json": config });
+  expect(result.coverage).toContainEqual(
+    expect.objectContaining({
+      area: "packages/app/package.json",
+      status: "skipped",
+      applicable: true,
+    }),
+  );
+});
+it("requires pnpm workspace config rather than package.json workspaces", async () => {
+  const result = await workspaceScan("pnpm-lock.yaml", {
+    "package.json": { workspaces: ["packages/*"] },
+  });
+  expect(result.coverage).toContainEqual(
+    expect.objectContaining({ area: "packages/app/package.json", status: "skipped" }),
+  );
+});
+it("matches relative workspace globs within their own root and honors pnpm exclusions", async () => {
+  const result = await workspaceScan(
+    "frontend/pnpm-lock.yaml",
+    {
+      "frontend/package.json": {},
+      "frontend/pnpm-workspace.yaml": "packages:\n  - 'packages/**'\n  - '!packages/private/**'\n",
+    },
+    [
+      "frontend/packages/app/package.json",
+      "frontend/packages/private/app/package.json",
+      "packages/app/package.json",
+    ],
+  );
+  expect(result.coverage.filter((x) => x.status === "skipped").map((x) => x.area)).toEqual([
+    "frontend/packages/private/app/package.json",
+    "packages/app/package.json",
+  ]);
+});
+it("does not let unlisted, sibling or unscanned workspace claims hide missing lockfiles", async () => {
+  for (const pair of [
+    { manifest: "packages/app/package.json", lockfile: "unlisted/yarn.lock" },
+    { manifest: "packages/app/package.json", lockfile: "other/yarn.lock" },
+    { manifest: "../package.json", lockfile: "yarn.lock" },
+  ]) {
+    const data = envelope(official(), 0);
+    data.workspaceMembers = [pair];
+    const result = await scanOsv(
+      await context(data, [
+        "yarn.lock",
+        "other/yarn.lock",
+        "package.json",
+        "packages/app/package.json",
+      ]),
+    );
+    expect(
+      result.coverage.some(
+        (x) =>
+          x.status === "failed" ||
+          (x.area === "packages/app/package.json" && x.status === "skipped"),
+      ),
+    ).toBe(true);
+  }
+});
+it("keeps a declared member uncovered when its enumerated root lockfile is omitted", async () => {
+  const files = ["yarn.lock", "package.json", "packages/app/package.json"];
+  const data = envelope({ results: [] }, 0);
+  data.workspaceMembers = guest.workspaceMembers(files, {
+    "package.json": { workspaces: ["packages/*"] },
+  });
+  const result = await scanOsv(await context(data, files));
+  expect(result.coverage).toEqual([
+    expect.objectContaining({ area: "yarn.lock", status: "degraded" }),
+    expect.objectContaining({ area: "packages/app/package.json", status: "skipped" }),
+  ]);
+});
+it.each([
+  "packages: ['packages/*']\n",
+  "packages:\n  - 'packages/*'\npackages:\n  - elsewhere/*\n",
+  "packages:\n  - 'packages/*'\n  - *unknown\n",
+  "packages:\n  - 'packages/*'\n    nested: invalid\n",
+  "packages:\n  - 'packages/*'\n\"packages\": []\n",
+  "packages:\n  - 'packages/*'\n---\npackages: []\n",
+])("keeps ambiguous or unsupported pnpm declarations uncovered %j", async (yaml) => {
+  const result = await workspaceScan("pnpm-lock.yaml", {
+    "package.json": {},
+    "pnpm-workspace.yaml": yaml,
+  });
+  expect(result.coverage).toContainEqual(
+    expect.objectContaining({ area: "packages/app/package.json", status: "skipped" }),
+  );
 });

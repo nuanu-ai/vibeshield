@@ -32,7 +32,8 @@ function entry(
 ): Coverage {
   return { scanner: "osv", area, status, reason, applicable };
 }
-function inventory(snapshot: Snapshot) {
+type WorkspaceMember = { manifest: string; lockfile: string };
+function inventory(snapshot: Snapshot, workspaceMembers: WorkspaceMember[] = []) {
   const supported = snapshot.files.filter((path) =>
     osvPolicy.lockfiles.some((name) => basename(path) === name),
   );
@@ -40,7 +41,10 @@ function inventory(snapshot: Snapshot) {
     .filter((path) => {
       if (supported.includes(path)) return false;
       if (basename(path) === "package.json")
-        return !supported.some((lock) => dirname(lock) === dirname(path));
+        return (
+          !supported.some((lock) => dirname(lock) === dirname(path)) &&
+          !workspaceMembers.some((member) => member.manifest === path)
+        );
       return (
         /(?:\.lockb?|\.lock\.json|\.lock\.ya?ml|\.lockfile|\.locked)$/.test(path) ||
         [
@@ -82,10 +86,44 @@ function parseEnvelope(value: unknown) {
   if (
     data.scannerVersion !== osvPolicy.version ||
     !Number.isInteger(data.exitCode) ||
-    typeof data.diagnostics !== "boolean"
+    typeof data.diagnostics !== "boolean" ||
+    !Array.isArray(data.workspaceMembers)
   )
     throw new Error();
   return data;
+}
+function confirmedMembers(
+  data: Record<string, unknown>,
+  snapshot: Snapshot,
+  checked: Map<string, boolean>,
+) {
+  const result: WorkspaceMember[] = [];
+  for (const value of data.workspaceMembers as unknown[]) {
+    const { manifest, lockfile } = record(value);
+    if (
+      !isSafeRepositoryPath(manifest) ||
+      !isSafeRepositoryPath(lockfile) ||
+      !snapshot.files.includes(manifest) ||
+      !snapshot.files.includes(lockfile) ||
+      basename(manifest) !== "package.json" ||
+      !osvPolicy.lockfiles.some((name) => basename(lockfile) === name)
+    )
+      throw new Error();
+    const root = dirname(lockfile);
+    const prefix = root === "." ? "" : `${root}/`;
+    if (
+      !manifest.startsWith(prefix) ||
+      dirname(manifest) === root ||
+      !snapshot.files.includes(`${prefix}package.json`) ||
+      (basename(lockfile) === "pnpm-lock.yaml" &&
+        !snapshot.files.includes(`${prefix}pnpm-workspace.yaml`))
+    )
+      throw new Error();
+    // Declaration alone is not scan evidence: omitted or degraded root inventory
+    // cannot cover a child. All root lockfiles retain their own coverage entry.
+    if (checked.get(lockfile) === false) result.push({ manifest, lockfile });
+  }
+  return result;
 }
 function parseOutput(data: Record<string, unknown>, snapshot: Snapshot): ScanResult {
   const { supported, unsupported } = inventory(snapshot);
@@ -270,7 +308,7 @@ function parseOutput(data: Record<string, unknown>, snapshot: Snapshot): ScanRes
               : "OSV checked installed package versions from this lockfile; no target execution or reachability analysis.",
         );
       }),
-      ...unsupported,
+      ...inventory(snapshot, confirmedMembers(data, snapshot, checked)).unsupported,
     ],
   };
 }
