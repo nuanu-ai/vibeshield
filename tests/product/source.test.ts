@@ -37,6 +37,16 @@ it.each([
   "https://evil.test/a/b",
   "https://user:pass@github.com/a/b",
   "https://github.com:444/a/b",
+  "https://github.com:443/a/b",
+  "https://github.com:/a/b",
+  "https://@github.com/a/b",
+  "https://:@github.com/a/b",
+  "https://user:@github.com/a/b",
+  "https://:password@github.com/a/b",
+  "https://github.com./a/b",
+  "https://github。com/a/b",
+  "https://ｇｉｔｈｕｂ.com/a/b",
+  "https://gіthub.com/a/b",
   "https://github.com/a/..",
   "https://github.com/a/%2e%2e",
   "https://github.com/a%2fb/c",
@@ -54,6 +64,10 @@ it("normalizes the optional git suffix and preserves case", () => {
     "https://github.com/Owner/Repo",
   );
   expect(guest.parseRepositoryUrl("https://github.com/Owner/Repo.git/")).toBe(
+    "https://github.com/Owner/Repo",
+  );
+  expect(parseRepositoryUrl("https://GitHub.COM/Owner/Repo")).toBe("https://github.com/Owner/Repo");
+  expect(guest.parseRepositoryUrl("https://GitHub.COM/Owner/Repo")).toBe(
     "https://github.com/Owner/Repo",
   );
 });

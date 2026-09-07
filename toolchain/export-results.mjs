@@ -5,17 +5,21 @@ import {
   closeSync,
   constants,
   fstatSync,
+  linkSync,
   lstatSync,
+  mkdirSync,
   openSync,
   readFileSync,
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const MAX_EXPORT_BYTES = 8 * 1024 * 1024;
 export const SERVICE = "/work/.vibeshield";
+const CURRENT_ROOT = `${SERVICE}/current`;
+const CURRENT_TREE = `${CURRENT_ROOT}/tree`;
 export const ignored = new Set([
   ".git",
   "node_modules",
@@ -130,10 +134,11 @@ export function sanitizeGitleaks(value, metadata, mode) {
       typeof item.File !== "string"
     )
       throw new Error("Invalid scanner export");
-    const path =
-      mode === "current" && item.File.startsWith("/work/snapshot/")
-        ? item.File.slice("/work/snapshot/".length)
-        : item.File;
+    let path = item.File;
+    if (mode === "current") {
+      if (path.startsWith(`${CURRENT_TREE}/`)) path = path.slice(CURRENT_TREE.length + 1);
+      else if (path.startsWith("tree/")) path = path.slice("tree/".length);
+    }
     if (!safePath(path)) {
       // Generated files are excluded by service policy. Traversal is always failure.
       if (
@@ -167,6 +172,21 @@ export function sanitizeGitleaks(value, metadata, mode) {
   }
   return result;
 }
+function prepareCurrentSource(files) {
+  // Gitleaks also loads <source>/.gitleaksignore despite its explicit ignore flag.
+  // Keep that root empty and hard-link all snapshot content one level below it.
+  mkdirSync(CURRENT_ROOT, { mode: 0o700 });
+  mkdirSync(CURRENT_TREE, { mode: 0o700 });
+  for (const path of files) {
+    if (!safePath(path)) throw new Error("Invalid snapshot");
+    const source = join("/work/snapshot", path);
+    if (!lstatSync(source).isFile() || realpathSync(source) !== source)
+      throw new Error("Invalid snapshot");
+    const target = join(CURRENT_TREE, path);
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    linkSync(source, target);
+  }
+}
 function main() {
   const [command, argument] = process.argv.slice(2);
   if (command === "verify") {
@@ -176,10 +196,11 @@ function main() {
   }
   if (command !== "gitleaks" || !["current", "history"].includes(argument)) throw new Error();
   const acquisition = readBoundedJson(`${SERVICE}/exports/snapshot.json`);
+  if (argument === "current") prepareCurrentSource(acquisition.snapshot.files);
   const raw = `${SERVICE}/gitleaks-${argument}-raw.json`;
   const args = [
     argument === "current" ? "dir" : "git",
-    argument === "current" ? "/work/snapshot" : "/work/repository",
+    argument === "current" ? CURRENT_ROOT : "/work/repository",
     "--config=/opt/vibeshield/gitleaks.toml",
     "--gitleaks-ignore-path=/opt/vibeshield/gitleaks.ignore",
     "--ignore-gitleaks-allow",
@@ -189,7 +210,8 @@ function main() {
     "--report-format=json",
     `--report-path=${raw}`,
   ];
-  if (argument === "history") args.push("--log-opts=--max-count=100 HEAD");
+  if (argument === "history")
+    args.push("--log-opts=--max-count=100 --diff-merges=first-parent HEAD");
   // Neither raw output nor diagnostics leave the guest, including error branches.
   const child = spawnSync("gitleaks", args, {
     cwd: SERVICE,

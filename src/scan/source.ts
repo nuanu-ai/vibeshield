@@ -7,6 +7,8 @@ import { readScannerJson } from "./scanners/shared.js";
 export function parseRepositoryUrl(value: string): string {
   try {
     if (/[\\\s%]/.test(value)) throw new Error();
+    const authority = /^https:\/\/([^/]+)\//.exec(value)?.[1];
+    if (!authority || !/^github\.com$/i.test(authority)) throw new Error();
     const parsed = new URL(value);
     const rawPath = value.replace(/^https:\/\/[^/]+/, "");
     if (
