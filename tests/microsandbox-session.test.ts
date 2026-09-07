@@ -58,6 +58,43 @@ describe("MicrosandboxSession", () => {
     expect(commands.at(-1)).toMatch(/node .*run-check.mjs .*\.json/);
   });
 
+  it("transfers the scanner output ceiling into the actual guest command configuration", async () => {
+    const configurations: Record<string, unknown>[] = [];
+    const sandbox = streamingSandbox();
+    sandbox.fs = () =>
+      ({
+        write: async (path: string, bytes: Buffer) => {
+          if (path.endsWith(".json")) configurations.push(JSON.parse(bytes.toString()));
+        },
+      }) as ReturnType<Sandbox["fs"]>;
+    await new MicrosandboxSession(sandbox, "bounded-client").exec(
+      ["node", "/usr/local/bin/vibeshield-osv"],
+      { maxFileBytes: 10485760 },
+    );
+    expect(configurations).toHaveLength(1);
+    expect(configurations[0]).toMatchObject({
+      maxFileBytes: 10485760,
+      maxWorkspaceBytes: 2147483648,
+    });
+  });
+
+  it("executes the frozen image wrapper instead of uploading mutable host helper bytes", async () => {
+    const commands: string[] = [];
+    const uploaded: string[] = [];
+    const sandbox = streamingSandbox(commands);
+    sandbox.fs = () =>
+      ({
+        write: async (path: string) => {
+          uploaded.push(path);
+        },
+      }) as unknown as ReturnType<Sandbox["fs"]>;
+    await new MicrosandboxSession(sandbox, "frozen-wrapper").exec(["node", "--version"]);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain("exec node /opt/vibeshield/build-input/run-check.mjs ");
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0]).toMatch(/^\/run\/vibeshield-[a-f0-9-]+\.json$/);
+  });
+
   it("aborts a hanging command and its child before reporting cancellation", async () => {
     const child = spawn(
       process.execPath,

@@ -231,7 +231,7 @@ it.each([
   {},
   "{",
   "[]",
-  `{}${" ".repeat(8 * 1024 * 1024)}`,
+  `{}${" ".repeat(10 * 1024 * 1024)}`,
 ])("fails malformed or oversized exports without stdout fallback", async (value) => {
   const result = await scanOsv(await context(value));
   expect(result.findings).toEqual([]);

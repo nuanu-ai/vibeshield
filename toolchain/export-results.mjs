@@ -16,7 +16,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const MAX_EXPORT_BYTES = 8 * 1024 * 1024;
+export const MAX_EXPORT_BYTES = 10 * 1024 * 1024;
 export const SERVICE = "/work/.vibeshield";
 const CURRENT_ROOT = `${SERVICE}/current`;
 const CURRENT_TREE = `${CURRENT_ROOT}/tree`;

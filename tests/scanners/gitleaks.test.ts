@@ -121,7 +121,7 @@ it.each([
   "{",
   "{}",
   "",
-  `[]${" ".repeat(8 * 1024 * 1024)}`,
+  `[]${" ".repeat(10 * 1024 * 1024)}`,
 ])("reports malformed, missing or oversized export as failed", async (data) => {
   const result = await scanGitleaks(await context(data, []));
   expect(result.coverage).toContainEqual(
@@ -225,7 +225,7 @@ it("guest rejects symlink exports and bounds size before reading raw reports", a
   await writeFile(join(dir, "raw.json"), "[]", { mode: 0o600 });
   await symlink(join(dir, "raw.json"), join(dir, "link.json"));
   expect(() => guest.readBoundedJson(join(dir, "link.json"))).toThrow(/Invalid scanner export/);
-  await writeFile(join(dir, "big.json"), `[]${" ".repeat(8 * 1024 * 1024)}`, { mode: 0o600 });
+  await writeFile(join(dir, "big.json"), `[]${" ".repeat(10 * 1024 * 1024)}`, { mode: 0o600 });
   expect(() => guest.readBoundedJson(join(dir, "big.json"))).toThrow(/Invalid scanner export/);
   expect(guest.readBoundedJson(join(dir, "raw.json"))).toEqual([]);
 });

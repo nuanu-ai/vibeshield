@@ -1,0 +1,9 @@
+{
+  "name": "vibeshield-toolchain-astgen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frozen retained astgen dependency tree for the scanner image.",
+  "dependencies": {
+    "@appthreat/astgen": "1.0.14"
+  }
+}

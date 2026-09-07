@@ -29,7 +29,9 @@
     "toolchain:prepare": "tsx scripts/prepare-toolchain.ts",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:live": "tsx scripts/live-acceptance.ts",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.5",

@@ -1,14 +1,12 @@
-import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { MicrosandboxRuntime } from "./adapters/microsandbox/runtime.js";
 import { reconcileOwnedRuntime } from "./adapters/runtime-ownership.js";
-import type { Provenance } from "./scan/contracts.js";
+import { toolchainProvenance } from "./adapters/toolchain.js";
 import { createExecutor } from "./scan/execute.js";
 import { LIMITS } from "./scan/limits.js";
-import { osvPolicy, trivyPolicy, zizmorPolicy } from "./scan/policy.js";
 import { systemClock } from "./web/clock.js";
 import { createJobs, type JobStore } from "./web/jobs.js";
 import { createWebServer } from "./web/server.js";
@@ -55,37 +53,14 @@ async function main() {
   const ownerDir =
     process.env.VIBESHIELD_OWNER_DIR ??
     join(homedir(), ".local", "state", "vibeshield", "runtime-ownership");
-  const image = process.env.VIBESHIELD_TOOLCHAIN_TAG ?? "vibeshield-toolchain:latest";
+  const provenance = toolchainProvenance();
+  const image = provenance.image;
   const runtime = new MicrosandboxRuntime({
     ownerDir,
     imageTag: image,
     cpus: LIMITS.cpus,
     memoryMib: LIMITS.memoryMib,
   });
-  const rules = JSON.parse(
-    await readFile(new URL("../toolchain/rules/manifest.json", import.meta.url), "utf8"),
-  ) as { revision: string };
-  const provenance: Provenance = {
-    image,
-    tools: {
-      gitleaks: "8.30.1",
-      opengrep: "1.25.0",
-      osv: osvPolicy.version,
-      trivy: trivyPolicy.version,
-      zizmor: zizmorPolicy.version,
-    },
-    rulesRevision: rules.revision,
-    advisoryData: [
-      {
-        source: "Trivy checks",
-        retrievedAt: new Date(trivyPolicy.bundle.reviewedAt).toISOString(),
-        revision: trivyPolicy.bundle.revision,
-        stale:
-          Date.now() - Date.parse(trivyPolicy.bundle.reviewedAt) > 30 * 86400_000 ||
-          Date.now() < Date.parse(trivyPolicy.bundle.reviewedAt),
-      },
-    ],
-  };
   const cleanup = () => reconcileOwnedRuntime(runtime, ownerDir);
   const jobs = createJobs({
     execute: createExecutor(runtime, provenance),

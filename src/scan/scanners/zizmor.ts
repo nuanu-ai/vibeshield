@@ -4,7 +4,7 @@ import type { Coverage, Finding, ScanResult } from "../contracts.js";
 import { LIMITS } from "../limits.js";
 import { isRecord, isSafeRepositoryPath } from "../manifest.js";
 import { zizmorPolicy } from "../policy.js";
-import { readScannerJson, type ScannerContext } from "./shared.js";
+import { MAX_EXPORT_BYTES, readScannerJson, type ScannerContext } from "./shared.js";
 
 const object = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -47,6 +47,7 @@ export async function scanZizmor({
     const status = await session.exec(["node", "/usr/local/bin/vibeshield-zizmor"], {
       signal,
       timeoutMs: LIMITS.scannerMs,
+      maxFileBytes: MAX_EXPORT_BYTES,
     });
     signal.throwIfAborted();
     if (status.exitCode !== 0) return failed();

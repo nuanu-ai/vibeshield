@@ -6,9 +6,8 @@ agent prompts. The first five issues start open; every remaining issue is on the
 same page. Incomplete coverage stays visible beside findings.
 
 This implementation is part of the private web transition. The existing CLI and
-its documentation remain until the final removal task. Full real-engine browser
-acceptance and a content-derived toolchain image are still required before the
-web MVP is declared delivered.
+its documentation remain until the final removal task. Real-engine acceptance
+uses the pinned image; an external browser check completes delivery acceptance.
 
 ## Run
 
@@ -30,10 +29,13 @@ IPv4-mapped receiving addresses also accept their equivalent dotted IPv4 Host.
 This address equivalence does not make different browser origins interchangeable.
 There is no application authentication or public multi-user hosting in this slice.
 
-`VIBESHIELD_TOOLCHAIN_TAG` selects the prepared image, defaulting to
-`vibeshield-toolchain:latest`. The expected five versions and rules provenance
-match the current image recipe/policies; final image verification belongs to the
-separate live acceptance task. `VIBESHIELD_OWNER_DIR` optionally sets the absolute
+The image tag is `vibeshield-toolchain:sha256-<content hash>`, derived from every
+toolchain build-input path, executable mode and content hash. Re-run preparation
+after any toolchain change. An explicit `VIBESHIELD_TOOLCHAIN_TAG` must match that
+identity; there is no `latest` alias. Preparation verifies installed engine/base
+versions, package inventory, licensed rule/check files and service scripts before
+loading the image. `toolchain/versions.json` records exact upstream versions,
+architecture-specific artifact digests and license sources. `VIBESHIELD_OWNER_DIR` optionally sets the absolute
 private ownership-marker directory; its default is
 `~/.local/state/vibeshield/runtime-ownership`. Markers contain no repository data.
 Startup reconciles owned resources before listening. Shutdown closes admission,
@@ -66,6 +68,7 @@ pnpm exec vitest run tests/product/web-server.test.ts tests/product/web-pages.te
 pnpm typecheck
 pnpm lint
 pnpm build
+pnpm test:live
 ```
 
 These checks exercise real HTTP routing, jobs, execution, scanner normalization,
@@ -73,6 +76,35 @@ report rendering, and the shipped browser script. The sandbox boundary supplies
 controlled raw outputs. Script tests use a minimal DOM boundary; external browser
 acceptance verifies actual rendering, navigation, selection and clipboard access.
 No Playwright package or browser suite is installed in the repository.
+
+`pnpm check` runs lint, typecheck, fast tests and the build. `pnpm test:live` is a
+separate mandatory serial check: missing runtime, image, binary, rule or version
+prerequisites fail. It runs all five actual engines on guest-owned vulnerable,
+fixed, clean and malformed controls, checks historical-secret redaction and
+lockfile versions, and submits a public URL through the real web/executor/runtime
+composition. Scanner JSON is limited to 10 MiB; overflow fails the check. Timeout
+and cleanup checks verify that task-owned process trees and VMs do not remain.
+The frozen image's Bash wrapper applies the same byte ceiling to direct files
+and streamed output; a complete 10 MiB control must succeed.
+
+The public target defaults to `https://github.com/juice-shop/juice-shop`;
+`VIBESHIELD_ACCEPTANCE_REPO` accepts an explicitly selected public alternative.
+The resulting commit, findings, actual coverage, warnings and available advisory
+freshness are written under ignored `artifacts/acceptance/`. Moving public HEAD
+does not have a fixed expected issue count. A target exceeding the acquisition
+limits fails truthfully; preserve its evidence before running a smaller target.
+For an explicit smaller-target run:
+
+```sh
+VIBESHIELD_ACCEPTANCE_REPO=https://github.com/expressjs/express pnpm test:live
+```
+
+Fixture success establishes only those examples, not general detection accuracy.
+
+The final external browser acceptance uses the production `pnpm start` flow to
+submit the public URL, reload progress, reach the report and copy its displayed
+prompt when there is a finding. The live command does not claim to replace that
+browser check.
 
 For that external browser check, run
 `pnpm exec tsx tests/support/browser-server.ts` on `127.0.0.1:4317`.

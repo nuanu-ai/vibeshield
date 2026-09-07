@@ -93,13 +93,6 @@ export class MicrosandboxSession implements SandboxSession {
     options.signal?.throwIfAborted();
     const control = `/run/vibeshield-${randomUUID()}`;
     const configPath = `${control}.json`;
-    await this.sb
-      .fs()
-      .write(
-        `${control}-run-check.mjs`,
-        await readFile(new URL("../../../toolchain/run-check.mjs", import.meta.url)),
-      );
-    options.signal?.throwIfAborted();
     await this.sb.fs().write(
       configPath,
       Buffer.from(
@@ -108,13 +101,14 @@ export class MicrosandboxSession implements SandboxSession {
           timeoutMs: options.timeoutMs ?? 600_000,
           workspace: "/work",
           maxWorkspaceBytes: 2 * 1024 ** 3,
+          ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
           stdoutPath: options.stdoutPath ?? null,
         }),
       ),
     );
     options.signal?.throwIfAborted();
     const shellCommand = withEnvPrefix(
-      `exec node ${shellQuote(`${control}-run-check.mjs`)} ${shellQuote(configPath)}`,
+      `exec node /opt/vibeshield/build-input/run-check.mjs ${shellQuote(configPath)}`,
       options.env,
     );
     const onEvent = options.onEvent;

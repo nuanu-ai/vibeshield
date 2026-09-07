@@ -5,13 +5,15 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { toolchainImage } from "../src/adapters/toolchain.js";
 
 const execFileP = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const defaultTag = "vibeshield-toolchain:latest";
 
 async function main(): Promise<void> {
-  const tag = readTag();
+  if (process.argv.length > 2)
+    throw new Error("Toolchain tags are derived from content; no tag override is accepted.");
+  const tag = toolchainImage();
   const imageBuilder = await firstAvailable(["docker", "podman"]);
   if (imageBuilder === null) {
     throw new Error("Docker or Podman is required to build the VibeShield toolchain image.");
@@ -29,21 +31,22 @@ async function main(): Promise<void> {
       path.join(repoRoot, "toolchain", "Dockerfile"),
       path.join(repoRoot, "toolchain"),
     ]);
+    await run(imageBuilder, [
+      "run",
+      "--rm",
+      tag,
+      "node",
+      "/opt/vibeshield/build-input/verify.mjs",
+      tag,
+    ]);
+    if (toolchainImage() !== tag)
+      throw new Error("Toolchain inputs changed during the build; prepare again.");
     await run(imageBuilder, ["save", tag, "-o", tarPath]);
     await run(msb, ["load", "-t", tag, "-i", tarPath]);
     process.stdout.write(`VibeShield toolchain is ready: ${tag}\n`);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
-}
-
-function readTag(): string {
-  const index = process.argv.indexOf("--tag");
-  const value = index >= 0 ? process.argv[index + 1] : undefined;
-  if (value !== undefined && value.length > 0) {
-    return value;
-  }
-  return defaultTag;
 }
 
 async function resolveMsb(): Promise<string> {

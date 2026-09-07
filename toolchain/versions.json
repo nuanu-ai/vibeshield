@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "base": {
+    "image": "node:24.20.0-trixie@sha256:f7d34e58713740f9eef9092c0bd6ff10369d132f7238399a4b270f16d47fa608",
+    "version": "24.20.0",
+    "digest": "sha256:f7d34e58713740f9eef9092c0bd6ff10369d132f7238399a4b270f16d47fa608",
+    "platforms": {
+      "amd64": "sha256:499ac30d42645e5c2227c0f8ff2439499da08b8893326a991f192dfe8e6b1d98",
+      "arm64": "sha256:542da2a8b61fa3bb6bb8382a212d7849eccdea9dbf3372e30b8ab24e6cd68dc8"
+    },
+    "license": "MIT AND bundled third-party licenses",
+    "licenseFile": "licenses/node.LICENSE",
+    "licenseSha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+    "licenseUrl": "https://raw.githubusercontent.com/nodejs/node/71b8b174857e25106d39b61a9e6f30d927da8b01/LICENSE"
+  },
+  "apt": {
+    "snapshot": "20260901T000000Z",
+    "sources": [
+      {
+        "url": "https://snapshot.debian.org/archive/debian/20260901T000000Z/",
+        "suites": ["trixie", "trixie-updates"]
+      },
+      {
+        "url": "https://snapshot.debian.org/archive/debian-security/20260901T000000Z/",
+        "suites": ["trixie-security"]
+      }
+    ],
+    "packages": {
+      "bash": "5.2.37-2+b9",
+      "ca-certificates": "20250419",
+      "curl": "8.14.1-2+deb13u4",
+      "git": "1:2.47.3-0+deb13u1",
+      "openjdk-21-jre-headless": "21.0.12.1+1-1~deb13u1",
+      "python3": "3.13.5-1",
+      "python3-pip": "25.1.1+dfsg-1",
+      "tar": "1.35+dfsg-3.1",
+      "unzip": "6.0-29+deb13u1"
+    }
+  },
+  "engines": {
+    "gitleaks": {
+      "version": "8.30.1",
+      "command": ["gitleaks", "version"],
+      "versionLine": "8.30.1",
+      "license": "MIT",
+      "licenseFile": "licenses/gitleaks.LICENSE",
+      "licenseSha256": "e3884b252b3bfc045e55be43a34d1e80da070bc6f804ac95bf4660e97d62ebc6",
+      "licenseUrl": "https://raw.githubusercontent.com/gitleaks/gitleaks/83d9cd684c87d95d656c1458ef04895a7f1cbd8e/LICENSE",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+          "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        },
+        "arm64": {
+          "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz",
+          "sha256": "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080"
+        }
+      }
+    },
+    "opengrep": {
+      "version": "1.25.0",
+      "command": ["opengrep", "--version"],
+      "versionLine": "1.25.0",
+      "license": "LGPL-2.1",
+      "licenseFile": "licenses/opengrep.LICENSE",
+      "licenseSha256": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",
+      "licenseUrl": "https://raw.githubusercontent.com/opengrep/opengrep/27b5fba1b315fbc63d0fd474d01f5d8235cc86e2/LICENSE",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/opengrep/opengrep/releases/download/v1.25.0/opengrep_manylinux_x86",
+          "sha256": "9ac4aebb47ba3f7b0d8fc641ac8749cb6c2f253f616131a67d9631e00d4bea33"
+        },
+        "arm64": {
+          "url": "https://github.com/opengrep/opengrep/releases/download/v1.25.0/opengrep_manylinux_aarch64",
+          "sha256": "fd40124272d006082a5594b19aecee07b01dd50933d8add7a4fd5c557d2be5f6"
+        }
+      }
+    },
+    "osv": {
+      "version": "2.3.8",
+      "command": ["osv-scanner", "--version"],
+      "versionLine": "osv-scanner version: 2.3.8",
+      "license": "Apache-2.0",
+      "licenseFile": "licenses/osv.LICENSE",
+      "licenseSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "licenseUrl": "https://raw.githubusercontent.com/google/osv-scanner/408fcd6f8707999a29e7ba45e15809764cf24f67/LICENSE",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64",
+          "sha256": "bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc"
+        },
+        "arm64": {
+          "url": "https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_arm64",
+          "sha256": "8158b18edd2d03b1a30d905ca91b032bc62262167be8f206c27114f08823e27c"
+        }
+      }
+    },
+    "trivy": {
+      "version": "0.72.0",
+      "command": ["trivy", "--version"],
+      "versionLine": "Version: 0.72.0",
+      "license": "Apache-2.0",
+      "licenseFile": "licenses/trivy.LICENSE",
+      "licenseSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "licenseUrl": "https://raw.githubusercontent.com/aquasecurity/trivy/8a32853686209a428179bb3a1688802b25691564/LICENSE",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/aquasecurity/trivy/releases/download/v0.72.0/trivy_0.72.0_Linux-64bit.tar.gz",
+          "sha256": "bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea"
+        },
+        "arm64": {
+          "url": "https://github.com/aquasecurity/trivy/releases/download/v0.72.0/trivy_0.72.0_Linux-ARM64.tar.gz",
+          "sha256": "2ca2c023109c2db6b2b77366b6717291452d4531167377d95c79547f0c8e3467"
+        }
+      }
+    },
+    "zizmor": {
+      "version": "1.30.0",
+      "command": ["zizmor", "--version"],
+      "versionLine": "zizmor 1.30.0",
+      "license": "MIT",
+      "licenseFile": "licenses/zizmor.LICENSE",
+      "licenseSha256": "a6fd1bd18da7cec8284639d5b0d351b90934317be1b9f9ea94a077621c6f35af",
+      "licenseUrl": "https://raw.githubusercontent.com/zizmorcore/zizmor/fb814d6687450fc8e0b0fba8d958b1ac40c0647f/LICENSE",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/zizmorcore/zizmor/releases/download/v1.30.0/zizmor-x86_64-unknown-linux-gnu.tar.gz",
+          "sha256": "ec8c95cd800845abb9bbc5f377ec7c57d2eb8e2386a00a201d3a74ee4092e5ed"
+        },
+        "arm64": {
+          "url": "https://github.com/zizmorcore/zizmor/releases/download/v1.30.0/zizmor-aarch64-unknown-linux-gnu.tar.gz",
+          "sha256": "018a024d6b6d09733b07f6ef42838d984c23ec04bc9b2acd55f7d67826aeafe5"
+        }
+      }
+    }
+  },
+  "supportingTools": {
+    "joern": {
+      "version": "4.0.565",
+      "license": "Apache-2.0",
+      "licenseFile": "licenses/joern.LICENSE",
+      "licenseSha256": "2e50a6169977b8c7bb3c3fb39e13b4502c0a5f00c79716647bee12731f50c4ce",
+      "licenseUrl": "https://raw.githubusercontent.com/joernio/joern/e8514fd33f2d3db8771a1d000842c182a0b9fea8/LICENSE",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/joernio/joern/releases/download/v4.0.565/joern-cli.zip",
+          "sha256": "26f3016f749ec810434c8ccb72962eb22fec8654b72c3f4acedf962fddc634de"
+        },
+        "arm64": {
+          "url": "https://github.com/joernio/joern/releases/download/v4.0.565/joern-cli.zip",
+          "sha256": "26f3016f749ec810434c8ccb72962eb22fec8654b72c3f4acedf962fddc634de"
+        }
+      }
+    },
+    "astgen": {
+      "version": "1.0.14",
+      "command": ["astgen", "--version"],
+      "versionLine": "1.0.14",
+      "license": "Apache-2.0",
+      "licenseFile": "licenses/astgen.LICENSE",
+      "licenseSha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+      "licenseUrl": "https://registry.npmjs.org/@appthreat/astgen/-/astgen-1.0.14.tgz",
+      "licenseArchivePath": "package/LICENSE",
+      "packageFile": "astgen/package.json",
+      "lockFile": "astgen/package-lock.json",
+      "integrity": "sha512-7piXVxcrnlCGXP1Ww1jip0tLSNmDe0uC3ueDWPtAwUyo3cV2U39b4r35kC6zsdbdFrtf4GETQrVmBtAEwg5HCw==",
+      "artifacts": {
+        "amd64": {
+          "url": "https://registry.npmjs.org/@appthreat/astgen/-/astgen-1.0.14.tgz",
+          "sha256": "32a749ff7b77e7d8ef000ee550b0047066b344db4da43d1ff1f66d0b1dc66f20"
+        },
+        "arm64": {
+          "url": "https://registry.npmjs.org/@appthreat/astgen/-/astgen-1.0.14.tgz",
+          "sha256": "32a749ff7b77e7d8ef000ee550b0047066b344db4da43d1ff1f66d0b1dc66f20"
+        }
+      }
+    },
+    "syft": {
+      "version": "1.51.1",
+      "license": "Apache-2.0",
+      "licenseFile": "licenses/syft.LICENSE",
+      "licenseSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "licenseUrl": "https://raw.githubusercontent.com/anchore/syft/91a0032987d91b7411b52f6f5c185c5e7f775495/LICENSE",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/anchore/syft/releases/download/v1.51.1/syft_1.51.1_linux_amd64.tar.gz",
+          "sha256": "8fcb33017a0dc1058298c923c436d19dfa68ae93968e0b423248542e3afb9fc3"
+        },
+        "arm64": {
+          "url": "https://github.com/anchore/syft/releases/download/v1.51.1/syft_1.51.1_linux_arm64.tar.gz",
+          "sha256": "a7fd2b784e6664acd44719270574f6cd8c6864fc2b1700bf9099bd1cccda7d7f"
+        }
+      }
+    },
+    "actionlint": {
+      "version": "1.7.12",
+      "command": ["actionlint", "-version"],
+      "versionLine": "1.7.12",
+      "license": "MIT",
+      "licenseFile": "licenses/actionlint.LICENSE",
+      "licenseSha256": "03a26b06d224380a02bf100e05fff3b2dfc71b14d4e2fa685ec9963a87563c22",
+      "licenseUrl": "https://raw.githubusercontent.com/rhysd/actionlint/914e7df21a07ef503a81201c76d2b11c789d3fca/LICENSE.txt",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
+          "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        },
+        "arm64": {
+          "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz",
+          "sha256": "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6"
+        }
+      }
+    },
+    "shfmt": {
+      "version": "3.2.1",
+      "command": ["shfmt", "-version"],
+      "versionLine": "v3.2.1",
+      "license": "BSD-3-Clause",
+      "licenseFile": "licenses/shfmt.LICENSE",
+      "licenseSha256": "ce63850f77649f00d1394045e2794ffb09a5596beabac51c9548edd958845d7c",
+      "licenseUrl": "https://raw.githubusercontent.com/mvdan/sh/c4d426aa5b4eb921b728d5e665c6455f1a1d32b7/LICENSE",
+      "artifacts": {
+        "amd64": {
+          "url": "https://github.com/mvdan/sh/releases/download/v3.2.1/shfmt_v3.2.1_linux_amd64",
+          "sha256": "43439b996942b53dfafa9b6ff084f394555d049c98fb7ec37978f7668b43e1be"
+        },
+        "arm64": {
+          "url": "https://github.com/mvdan/sh/releases/download/v3.2.1/shfmt_v3.2.1_linux_arm64",
+          "sha256": "1cb7fc0ace531b907977827a0fe31f6e2595afcafe554e6d7f9d6f4470e37336"
+        }
+      }
+    }
+  },
+  "rules": {
+    "opengrep": {
+      "manifest": "rules/manifest.json",
+      "sha256": "d8e44ef0ed075980b370f0b3000b49de57da78955921737da1e34ecd2262b859",
+      "revision": "7051ea7602a210dfb0793916afedc9a0555addb7"
+    },
+    "trivy": {
+      "manifest": "trivy-manifest.json",
+      "sha256": "48db284ce5be58e6acce6af9a7b8ad58d331ddc5efa24dddd96c84e390e2f76f",
+      "version": "2.2.0",
+      "revision": "d7c9302130a9b7e614a5c5d32854f6a08b4bc52e",
+      "digest": "sha256:1583562f8b90ed2a071b99f0e5ffff6b57e4ceb6ca3e4796577b4e6a339eb74c",
+      "artifact": {
+        "url": "https://mirror.gcr.io/v2/aquasec/trivy-checks/blobs/sha256:40a47ef8eb262c8e41d44f25c266463fff4dba9adcba12d33b93da88cbc7c80f",
+        "sha256": "40a47ef8eb262c8e41d44f25c266463fff4dba9adcba12d33b93da88cbc7c80f"
+      },
+      "license": "MIT",
+      "licenseFile": "licenses/trivy-checks.LICENSE",
+      "licenseSha256": "2c3ff37f4059f312fb60fd567b2fc44ecf8603c6fb9a663f513e52c6ffd74022",
+      "licenseUrl": "https://raw.githubusercontent.com/aquasecurity/trivy-checks/d7c9302130a9b7e614a5c5d32854f6a08b4bc52e/LICENSE"
+    }
+  }
+}

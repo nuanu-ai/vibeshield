@@ -2,7 +2,7 @@
  * MicrosandboxRuntime — production SandboxRuntime adapter.
  *
  * Boots one microsandbox per create(), reusing the locally-built toolchain
- * image (e.g. "vibeshield-toolchain:latest") that was loaded into
+ * content-derived toolchain image that was loaded into
  * microsandbox's image cache. Network is on.
  *
  * The toolchain image is produced outside the runtime: `docker build` then
@@ -25,6 +25,7 @@ import {
   OWNER_LABEL,
   recordRuntimeOwnership,
 } from "../runtime-ownership.js";
+import { toolchainImage } from "../toolchain.js";
 import { MicrosandboxSession } from "./session.js";
 
 const execFileP = promisify(execFile);
@@ -60,7 +61,7 @@ async function listCachedImages(): Promise<string[] | null> {
 
 export interface MicrosandboxRuntimeOptions {
   readonly ownerDir?: string;
-  /** Toolchain image tag; defaults to "vibeshield-toolchain:latest". */
+  /** Toolchain image tag; defaults to the current build-content identity. */
   readonly imageTag?: string;
   /** vCPUs per sandbox; default 2. */
   readonly cpus?: number;
@@ -76,7 +77,7 @@ export class MicrosandboxRuntime implements SandboxRuntime {
   private readonly live = new Map<string, Sandbox>();
 
   constructor(opts: MicrosandboxRuntimeOptions = {}) {
-    this.imageTag = opts.imageTag ?? "vibeshield-toolchain:latest";
+    this.imageTag = opts.imageTag ?? toolchainImage();
     this.cpus = opts.cpus ?? 2;
     this.memoryMib = opts.memoryMib ?? 4096;
     this.ownerDir =

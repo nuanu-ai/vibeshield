@@ -160,7 +160,7 @@ it.each([
   "{",
   "null",
   "{}",
-  " ".repeat(8 * 1024 * 1024 + 1),
+  " ".repeat(10 * 1024 * 1024 + 1),
 ])("rejects malformed or oversized bounded export %#", async (value) => {
   const result = await scanZizmor(await context(value));
   expect(result).toMatchObject({
@@ -180,7 +180,7 @@ it("rejects a failed guest file ownership, symlink, or bounds verification", asy
   expect((await scanZizmor(await context(output(), 0, 1))).coverage[0]?.status).toBe("failed");
 });
 it("rejects an oversized otherwise-valid JSON export before normalization", async () => {
-  const value = { ...output(), padding: "x".repeat(8 * 1024 * 1024) };
+  const value = { ...output(), padding: "x".repeat(10 * 1024 * 1024) };
   const result = await scanZizmor(await context(value));
   expect(result.findings).toEqual([]);
   expect(result.coverage[0]?.status).toBe("failed");

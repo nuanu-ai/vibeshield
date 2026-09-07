@@ -13,7 +13,7 @@ import type {
 import { LIMITS } from "../limits.js";
 import { isRecord, isSafeRepositoryPath } from "../manifest.js";
 import { osvPolicy } from "../policy.js";
-import { readScannerJson, type ScannerContext } from "./shared.js";
+import { MAX_EXPORT_BYTES, readScannerJson, type ScannerContext } from "./shared.js";
 
 const EXPORT = "/work/.vibeshield/exports/osv.json";
 const record = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
@@ -343,6 +343,7 @@ export async function scanOsv({ session, snapshot, signal }: ScannerContext): Pr
     const status = await session.exec(["node", "/usr/local/bin/vibeshield-osv"], {
       signal,
       timeoutMs: LIMITS.scannerMs,
+      maxFileBytes: MAX_EXPORT_BYTES,
     });
     if (status.exitCode !== 0) throw new Error();
     signal.throwIfAborted();

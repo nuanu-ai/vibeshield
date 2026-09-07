@@ -52,7 +52,14 @@ async function main() {
   } finally {
     closeSync(configFd);
   }
-  const { argv, timeoutMs, workspace, maxWorkspaceBytes, stdoutPath } = config;
+  const {
+    argv,
+    timeoutMs,
+    workspace,
+    maxWorkspaceBytes,
+    stdoutPath,
+    maxFileBytes = FILE_BYTES,
+  } = config;
   ownedPath(workspace, true);
   if (
     !Array.isArray(argv) ||
@@ -63,7 +70,10 @@ async function main() {
     timeoutMs > 600000 ||
     !Number.isSafeInteger(maxWorkspaceBytes) ||
     maxWorkspaceBytes <= 0 ||
-    maxWorkspaceBytes > 2 * 1024 ** 3
+    maxWorkspaceBytes > 2 * 1024 ** 3 ||
+    !Number.isSafeInteger(maxFileBytes) ||
+    maxFileBytes <= 0 ||
+    maxFileBytes > FILE_BYTES
   )
     throw new Error("Invalid command limits");
   let outputFd;
@@ -88,15 +98,15 @@ async function main() {
     stderr = Buffer.alloc(0),
     outputBytes = 0;
   let forcedCode, killTimer, failure;
-  // POSIX sh applies an inherited per-file rlimit before exec. 1024 is
-  // conservative across shells using either 512-byte or 1024-byte units.
+  // Pinned Bash uses 1024-byte file-limit units; /bin/sh differs across hosts.
+  // The inherited rlimit permits exactly maxFileBytes, never an oversized file.
   const child = spawn(
-    "/bin/sh",
+    "/bin/bash",
     [
       "-c",
       'ulimit -f "$1" || exit 125; shift; exec "$@"',
       "run-check",
-      String(Math.floor(Math.min(FILE_BYTES, maxWorkspaceBytes) / 1024)),
+      String(Math.floor(Math.min(maxFileBytes, maxWorkspaceBytes) / 1024)),
       ...argv,
     ],
     { cwd: workspace, detached: true, stdio: ["ignore", "pipe", "pipe"] },
@@ -137,7 +147,7 @@ async function main() {
     stdout = Buffer.concat([stdout, data]).subarray(-TAIL_BYTES);
     if (outputFd !== undefined) {
       outputBytes += data.length;
-      if (outputBytes > Math.min(FILE_BYTES, maxWorkspaceBytes)) return terminate(125);
+      if (outputBytes > Math.min(maxFileBytes, maxWorkspaceBytes)) return terminate(125);
       try {
         writeSync(outputFd, data);
       } catch (error) {

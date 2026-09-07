@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { Finding, Location, ScanResult } from "../contracts.js";
 import { LIMITS } from "../limits.js";
 import { isRecord, isSafeRepositoryPath, validateAcquisition } from "../manifest.js";
-import { readScannerJson, type ScannerContext } from "./shared.js";
+import { MAX_EXPORT_BYTES, readScannerJson, type ScannerContext } from "./shared.js";
 
 export async function scanGitleaks({
   session,
@@ -20,7 +20,7 @@ export async function scanGitleaks({
       if (!isDeepStrictEqual(metadata.snapshot, snapshot)) throw new Error();
       const status = await session.exec(
         ["node", "/usr/local/bin/vibeshield-export-results", "gitleaks", mode],
-        { signal, timeoutMs: LIMITS.scannerMs },
+        { signal, timeoutMs: LIMITS.scannerMs, maxFileBytes: MAX_EXPORT_BYTES },
       );
       if (status.exitCode !== 0) throw new Error();
       signal.throwIfAborted();

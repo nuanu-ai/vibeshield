@@ -320,7 +320,7 @@ it("uses bounded service exports and refuses nonzero exits without reflecting st
   for (const ctx of [
     await context(sarif(), 2),
     await context("{"),
-    await context(`{}${" ".repeat(8 * 1024 * 1024)}`),
+    await context(`{}${" ".repeat(10 * 1024 * 1024)}`),
   ]) {
     const parsed = await scanOpengrep(ctx);
     expect(parsed.findings).toEqual([]);

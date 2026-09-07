@@ -3,7 +3,7 @@ import type { Coverage, Finding, Location, ScanResult, Severity, Snapshot } from
 import { LIMITS } from "../limits.js";
 import { isRecord, isSafeRepositoryPath } from "../manifest.js";
 import { opengrepRules } from "../policy.js";
-import { readScannerJson, type ScannerContext } from "./shared.js";
+import { MAX_EXPORT_BYTES, readScannerJson, type ScannerContext } from "./shared.js";
 
 function coverage(status: Coverage["status"]): Coverage {
   return {
@@ -200,6 +200,7 @@ export async function scanOpengrep({
     const result = await session.exec(["node", "/usr/local/bin/vibeshield-opengrep"], {
       signal,
       timeoutMs: LIMITS.scannerMs,
+      maxFileBytes: MAX_EXPORT_BYTES,
     });
     if (result.exitCode !== 0) return failed();
     signal.throwIfAborted();

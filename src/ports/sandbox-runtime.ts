@@ -39,6 +39,8 @@ export interface SandboxExecOptions {
   readonly signal?: AbortSignal;
   /** Optional bounded scanner output file under /work. */
   readonly stdoutPath?: string;
+  /** Inherited per-file ceiling, including scanner-owned JSON output. */
+  readonly maxFileBytes?: number;
   /** Environment overrides for this command only. */
   readonly env?: Readonly<Record<string, string>>;
   readonly onEvent?: (event: SandboxExecEvent) => void;
@@ -50,7 +52,7 @@ export interface SandboxCreateOptions {
   readonly signal?: AbortSignal;
   /** Run-local name; sandboxes for the same run share it. */
   readonly name: string;
-  /** OCI image tag to boot (e.g. "vibeshield-toolchain:latest"). */
+  /** Explicit OCI image tag to boot. Production uses the build-content identity. */
   readonly imageTag: string;
 }
 

@@ -5,7 +5,7 @@ export interface ScannerContext {
   snapshot: Snapshot;
   signal: AbortSignal;
 }
-export const MAX_EXPORT_BYTES = 8 * 1024 * 1024;
+export const MAX_EXPORT_BYTES = 10 * 1024 * 1024;
 export async function readScannerJson(
   session: SandboxSession,
   guestPath: string,
