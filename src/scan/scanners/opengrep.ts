@@ -10,14 +10,24 @@ function coverage(status: Coverage["status"]): Coverage {
     scanner: "opengrep",
     area: "javascript-typescript",
     status,
-    applicable: true,
+    applicable: status !== "skipped",
     reason:
       status === "checked"
         ? "Selected published JavaScript/TypeScript rules scanned the snapshot; tested source and sink shapes only, with no cross-file guarantee."
         : status === "degraded"
           ? "Selected code scan lost coverage: scanner warnings, unsupported results, or missing current locations/flow evidence."
-          : "Code scan failed or its bounded SARIF export was invalid.",
+          : status === "skipped"
+            ? "No JavaScript/TypeScript source paths recognized by acquisition are present; selected code rules are not applicable."
+            : "Code scan failed or its bounded SARIF export was invalid.",
   };
+}
+function applicable(snapshot: Snapshot): boolean {
+  // Match the source extensions classified by acquisition, not a repository's
+  // config or an aggregate language label without a corresponding source path.
+  return snapshot.files.some((path) => /\.(?:js|jsx|mjs|ts|tsx)$/.test(path));
+}
+function skipped(): ScanResult {
+  return { findings: [], coverage: [coverage("skipped")] };
 }
 function failed(): ScanResult {
   return { findings: [], coverage: [coverage("failed")] };
@@ -48,6 +58,7 @@ function securitySeverity(value: unknown): Severity {
   return score >= 9 ? "critical" : score >= 7 ? "high" : score >= 4 ? "medium" : "low";
 }
 export function parseOpengrepSarif(value: unknown, snapshot: Snapshot): ScanResult {
+  if (!applicable(snapshot)) return skipped();
   try {
     const document = record(value);
     if (document.version !== "2.1.0" || !Array.isArray(document.runs) || document.runs.length !== 1)
@@ -185,6 +196,7 @@ export async function scanOpengrep({
 }: ScannerContext): Promise<ScanResult> {
   try {
     signal.throwIfAborted();
+    if (!applicable(snapshot)) return skipped();
     const result = await session.exec(["node", "/usr/local/bin/vibeshield-opengrep"], {
       signal,
       timeoutMs: LIMITS.scannerMs,

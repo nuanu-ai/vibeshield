@@ -5,6 +5,12 @@ a bounded, service-owned SARIF file. The Dockerfile pins the Linux amd64 and arm
 release asset hashes. Repository code is parsed, never executed. Runtime pipeline
 wiring is a separate step from this adapter.
 
+Applicability follows the trusted acquisition snapshot's source paths (`.js`,
+`.jsx`, `.mjs`, `.ts`, `.tsx`), not repository settings or a language label alone.
+An unsupported-only snapshot is `skipped`, not applicable, without invoking the
+scanner. A mixed snapshot remains applicable for its JavaScript/TypeScript files;
+this does not claim coverage for its other languages or other extensions.
+
 Six existing GitLab SAST rules are frozen at
 `7051ea7602a210dfb0793916afedc9a0555addb7`; the exact IDs, modes, paths, hashes,
 licenses and remediation keys are in [the manifest](../toolchain/rules/manifest.json).
@@ -49,17 +55,26 @@ Run `pnpm exec tsx scripts/prepare-rules.ts --verify` to recheck integrity.
 Verification commands:
 
 ```bash
-pnpm exec vitest run tests/scanners/opengrep.test.ts tests/product/report.test.ts
+pnpm exec vitest run tests/scanners/opengrep.test.ts tests/scanners/opengrep-image.test.ts tests/product/report.test.ts
 VIBESHIELD_LIVE_OPENGREP=1 pnpm exec vitest run tests/scanners/opengrep.smoke.test.ts
 ```
 
 OpenGrep extracts a 162 MB engine into its home cache on first use. Image building
 prepares a dedicated service home before the runtime file-size limit applies.
-The live test reuses the identical image-owned extracted cache through a symlink
-inside the disposable VM; it does not relax the file-size limit.
+The default live test validates the installed image artifacts against the current
+checkout, checks its export link and prewarmed service cache, and initializes only
+disposable work directories. Missing or stale image files fail acceptance; they
+are never silently replaced. It checks the pinned binary hash/version, runs the
+upstream annotation tests, and scans synthetic Python-only and mixed
+vulnerable/fixed/clean inputs. It destroys its owned sandbox and verifies absence,
+including failure branches.
 
-The live test injects the exact guest files/rules into the existing image, checks
-the engine version, runs the upstream annotation tests, and scans the synthetic
-vulnerable/fixed/clean files. It destroys its owned sandbox and verifies absence,
-including failure branches. A normal runtime deployment requires rebuilding the
-toolchain image with these files; the live test does not replace that image.
+For development against an older image only, explicitly add
+`VIBESHIELD_OPENGREP_TEST_LAYOUT=inject` to the live command. This installs missing
+service files in the disposable VM and links the existing image-owned extracted
+cache. Existing files are validated, never overwritten. `VIBESHIELD_OPENGREP_TEST_LAYOUT=rebuilt`
+instead models pre-existing rebuilt-image service/cache directories and export
+link, using file-level symlinks to the identical old-image cache to avoid overlay
+copy-up under the runtime file-size limit. Both run acceptance setup twice to
+catch directory/link recreation. Neither mode rebuilds or replaces the persistent
+image, relaxes runtime limits, or substitutes for native image-build acceptance.

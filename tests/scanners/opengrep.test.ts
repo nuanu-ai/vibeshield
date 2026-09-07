@@ -133,6 +133,48 @@ async function context(value: unknown, exitCode = 0) {
   return { session, snapshot, signal: new AbortController().signal };
 }
 
+it.each([
+  { files: ["app.py"], languages: ["Python"] },
+  { files: ["README.md"], languages: [] },
+  { files: ["app.py"], languages: ["JavaScript"] },
+  { files: [], languages: ["TypeScript"] },
+])("skips unsupported-only snapshot $files without executing or reading a scanner", async (source) => {
+  const ctx = await context(sarif([]));
+  const unsupported = { ...snapshot, ...source };
+  const expected = {
+    findings: [],
+    coverage: [expect.objectContaining({ status: "skipped", applicable: false })],
+  };
+  expect(parseOpengrepSarif(sarif([]), unsupported)).toEqual(expected);
+  expect(await scanOpengrep({ ...ctx, snapshot: unsupported })).toEqual(expected);
+  expect(ctx.session.invocations).toEqual([]);
+});
+it.each([
+  "app.js",
+  "app.jsx",
+  "app.mjs",
+  "app.ts",
+  "app.tsx",
+])("keeps mixed supported %s and Python source applicable, preserving warnings", async (path) => {
+  const mixed = {
+    ...snapshot,
+    files: ["app.py", path],
+    languages: ["Python", "JavaScript", "TypeScript"],
+  };
+  const ctx = await context(sarif([]));
+  expect((await scanOpengrep({ ...ctx, snapshot: mixed })).coverage[0]).toMatchObject({
+    status: "checked",
+    applicable: true,
+  });
+  expect(ctx.session.invocations.length).toBeGreaterThan(0);
+  const warning = sarif([]);
+  warning.runs[0].invocations[0].toolExecutionNotifications = [{ level: "warning" }];
+  expect(parseOpengrepSarif(warning, mixed).coverage[0]).toMatchObject({
+    status: "degraded",
+    applicable: true,
+  });
+});
+
 it("preserves a selected taint source, sink and path without target snippets", () => {
   const parsed = parseOpengrepSarif(sarif(), snapshot);
   expect(parsed.findings).toHaveLength(1);
