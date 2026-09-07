@@ -1,5 +1,14 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["**", "!toolchain/rules"]
+  },
+  "overrides": [
+    {
+      "includes": ["tests/fixtures/scanners/code/**"],
+      "linter": { "enabled": false }
+    }
+  ],
   "vcs": {
     "enabled": true,
     "clientKind": "git",

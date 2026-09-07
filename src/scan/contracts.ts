@@ -29,6 +29,19 @@ export interface Finding {
   rootCause: string;
   remediationKey: string;
   dependency?: Dependency;
+  code?: {
+    mode: "search" | "taint";
+    flows: Location[][];
+    rule: {
+      name: string;
+      description: string;
+      help: string;
+      tags: string[];
+      precision: string;
+      defaultLevel: string;
+      securitySeverity: string;
+    };
+  };
 }
 export interface Coverage {
   scanner: ScannerId;

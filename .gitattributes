@@ -1,0 +1,2 @@
+# Frozen upstream sources retain their original whitespace and per-file hashes.
+toolchain/rules/** -whitespace

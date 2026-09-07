@@ -5,6 +5,25 @@ import { buildReport } from "../../src/scan/report.js";
 import { makeFinding, makeReportInput } from "../support/findings.js";
 
 describe("deterministic report publication", () => {
+  it("does not promote a bare eval pattern to remote-code execution", () => {
+    const report = buildReport(
+      makeReportInput([
+        {
+          findings: [
+            makeFinding({
+              scanner: "opengrep",
+              ruleId: "javascript-eval",
+              category: "code",
+              confidence: "unknown",
+              evidence: "eval(value)",
+            }),
+          ],
+          coverage: [],
+        },
+      ]),
+    );
+    expect(report.issues).toHaveLength(0);
+  });
   it("keeps coverage loss visible beside a grouped important issue", () => {
     const finding = makeFinding();
     const report = buildReport(

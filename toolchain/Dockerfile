@@ -143,14 +143,24 @@ RUN curl -fsSL https://get.anchore.io/syft | sh -s -- -b /usr/local/bin \
     | sh -s -- -b /usr/local/bin \
   && curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
     | bash -s -- latest /usr/local/bin \
-  && curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh | bash \
-  && ln -sf /root/.opengrep/cli/latest/opengrep /usr/local/bin/opengrep \
   && python3 -m pip install --no-cache-dir --break-system-packages zizmor \
   && syft version \
   && trivy --version \
   && actionlint -version \
-  && opengrep --version \
   && zizmor --version
+
+# OpenGrep 1.25.0 release assets, pinned by upstream SHA-256 digest.
+RUN arch="$(dpkg --print-architecture)" \
+  && case "$arch" in \
+    amd64) asset="opengrep_manylinux_x86"; digest="9ac4aebb47ba3f7b0d8fc641ac8749cb6c2f253f616131a67d9631e00d4bea33" ;; \
+    arm64) asset="opengrep_manylinux_aarch64"; digest="fd40124272d006082a5594b19aecee07b01dd50933d8add7a4fd5c557d2be5f6" ;; \
+    *) exit 1 ;; \
+  esac \
+  && curl -fsSL "https://github.com/opengrep/opengrep/releases/download/v1.25.0/${asset}" -o /usr/local/bin/opengrep \
+  && printf '%s  %s\n' "$digest" /usr/local/bin/opengrep | sha256sum -c - \
+  && chmod 755 /usr/local/bin/opengrep \
+  && mkdir -p /opt/vibeshield/opengrep-home \
+  && test "$(HOME=/opt/vibeshield/opengrep-home opengrep --version)" = "1.25.0"
 
 WORKDIR /work
 
@@ -162,3 +172,9 @@ RUN ln -s /usr/local/bin/export-results.mjs /usr/local/bin/vibeshield-export-res
   && printf '[extend]\nuseDefault = true\n' > /opt/vibeshield/gitleaks.toml \
   && touch /opt/vibeshield/gitleaks.ignore \
   && chmod 644 /opt/vibeshield/gitleaks.toml /opt/vibeshield/gitleaks.ignore
+
+COPY rules /opt/vibeshield/rules
+COPY opengrep.mjs /usr/local/bin/vibeshield-opengrep
+RUN touch /opt/vibeshield/opengrep.ignore \
+  && printf '{}\n' > /opt/vibeshield/opengrep-settings.yml \
+  && chmod 644 /opt/vibeshield/opengrep.ignore /opt/vibeshield/opengrep-settings.yml

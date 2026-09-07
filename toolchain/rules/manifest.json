@@ -1,0 +1,113 @@
+{
+  "upstream": "https://gitlab.com/gitlab-org/security-products/sast-rules",
+  "revision": "7051ea7602a210dfb0793916afedc9a0555addb7",
+  "license": "LGPL-3.0 (selected rules); MIT (upstream root)",
+  "rules": [
+    {
+      "path": "opengrep/exec/rule-shelljs_os_command_exec.yml",
+      "upstreamPath": "rules/lgpl/javascript/exec/rule-shelljs_os_command_exec.yml",
+      "sha256": "39e8e5f51ab6ab5b60ec5cc354508de34c779f928824dc8fc2699ffd1ccd6b7f",
+      "id": "rules_lgpl_javascript_exec_rule-shelljs-os-command-exec",
+      "remediationKey": "command-input",
+      "mode": "search",
+      "license": "LGPL-3.0"
+    },
+    {
+      "path": "opengrep/database/rule-node_sqli_injection.yml",
+      "upstreamPath": "rules/lgpl/javascript/database/rule-node_sqli_injection.yml",
+      "sha256": "44f17d8b81f33d1ee6b436d3b4ca9f77f8b448244a80a90cad591cee78d12515",
+      "id": "rules_lgpl_javascript_database_rule-node-sqli-injection",
+      "remediationKey": "sql-input",
+      "mode": "search",
+      "license": "LGPL-3.0"
+    },
+    {
+      "path": "opengrep/traversal/rule-express_lfr.yml",
+      "upstreamPath": "rules/lgpl/javascript/traversal/rule-express_lfr.yml",
+      "sha256": "07c3f831ba53364906962252fb6077b45bffc6038fd6f6580cbb75fc997bc957",
+      "id": "rules_lgpl_javascript_traversal_rule-express-lfr",
+      "remediationKey": "path-url-validation",
+      "mode": "taint",
+      "license": "LGPL-3.0"
+    },
+    {
+      "path": "opengrep/ssrf/rule-node_ssrf.yml",
+      "upstreamPath": "rules/lgpl/javascript/ssrf/rule-node_ssrf.yml",
+      "sha256": "d2b3984e9957a950e80debdab8d2850b4bb9019ee1bcd2a5bbd61be8491c2064",
+      "id": "rules_lgpl_javascript_ssrf_rule-node-ssrf",
+      "remediationKey": "path-url-validation",
+      "mode": "taint",
+      "license": "LGPL-3.0"
+    },
+    {
+      "path": "opengrep/eval/rule-node_deserialize.yml",
+      "upstreamPath": "rules/lgpl/javascript/eval/rule-node_deserialize.yml",
+      "sha256": "a80c58b11fb95a113e9e6d6e3b4dac844337f291d0848e24fa0ede82bd8a638c",
+      "id": "rules_lgpl_javascript_eval_rule-node-deserialize",
+      "remediationKey": "unsafe-deserialization",
+      "mode": "search",
+      "license": "LGPL-3.0"
+    },
+    {
+      "path": "opengrep/jwt/rule-node_jwt_none_algorithm.yml",
+      "upstreamPath": "rules/lgpl/javascript/jwt/rule-node_jwt_none_algorithm.yml",
+      "sha256": "f378e040d87a7e235a63fea5774c8410617a98acaf841be3b29e4113dc5ad478",
+      "id": "rules_lgpl_javascript_jwt_rule-node-jwt-none-algorithm",
+      "remediationKey": "jwt-validation",
+      "mode": "taint",
+      "license": "LGPL-3.0"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "fixtures/exec/rule-shelljs_os_command_exec.js",
+      "upstreamPath": "rules/lgpl/javascript/exec/rule-shelljs_os_command_exec.js",
+      "sha256": "e1d1a74902a4bf737bbcaec9c28fe3f3f854319f9c01ede39d3124e8240627c8"
+    },
+    {
+      "path": "fixtures/database/rule-node_sqli_injection.js",
+      "upstreamPath": "rules/lgpl/javascript/database/rule-node_sqli_injection.js",
+      "sha256": "1b7c266dedf7fb68748e7dce57eb0c86ef25d23c130a94d753b126f761de6bcb"
+    },
+    {
+      "path": "fixtures/traversal/rule-express_lfr.js",
+      "upstreamPath": "rules/lgpl/javascript/traversal/rule-express_lfr.js",
+      "sha256": "138e60402fb7025d22297076e38b08b5d804aed7961b837c8aa7fec89322fbfd"
+    },
+    {
+      "path": "fixtures/ssrf/rule-node_ssrf.js",
+      "upstreamPath": "rules/lgpl/javascript/ssrf/rule-node_ssrf.js",
+      "sha256": "2a493b09560153c65b822ac8b606193527504f38cdeaf0c679db845987786a6e"
+    },
+    {
+      "path": "fixtures/eval/rule-node_deserialize.js",
+      "upstreamPath": "rules/lgpl/javascript/eval/rule-node_deserialize.js",
+      "sha256": "1a951d18e42c6025efb63b3354d560bbf3f6bcc55e9583828cceddfdf3100c72"
+    },
+    {
+      "path": "fixtures/eval/rule-node_deserialize.ts",
+      "upstreamPath": "rules/lgpl/javascript/eval/rule-node_deserialize.ts",
+      "sha256": "33227b655d2307a25ef3a127afae324d1d0fa183a52c91015ebb94039ef96eb7"
+    },
+    {
+      "path": "fixtures/jwt/rule-node_jwt_none_algorithm.js",
+      "upstreamPath": "rules/lgpl/javascript/jwt/rule-node_jwt_none_algorithm.js",
+      "sha256": "b7d4161d3956e9fe1caf9c2f70abf21b85808acafbb9edc4bd4c4f1d8dee5d76"
+    },
+    {
+      "path": "LICENSE-MIT",
+      "upstreamPath": "LICENSE",
+      "sha256": "33acf42afdd03163d75fe856cb431e70710e0b5deede3362e6d1c4697cfe1c6a"
+    },
+    {
+      "path": "LICENSE-LGPL-3.0",
+      "upstreamPath": "rules/lgpl/LICENSE",
+      "sha256": "a5681bf9b05db14d86776930017c647ad9e6e56ff6bbcfdf21e5848288dfaf1b"
+    },
+    {
+      "path": "LICENSE-GPL-3.0",
+      "upstreamPath": "https://www.gnu.org/licenses/gpl-3.0.txt",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    }
+  ]
+}
