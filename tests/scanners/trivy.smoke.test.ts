@@ -3,17 +3,69 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Sandbox } from "microsandbox";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { FakeSandboxRuntime } from "../../src/adapters/fake-sandbox.js";
 import { MicrosandboxRuntime } from "../../src/adapters/microsandbox/runtime.js";
 import type { Snapshot } from "../../src/scan/contracts.js";
-import { defaultPolicy } from "../../src/scan/policy.js";
+import { defaultPolicy, trivyPolicy } from "../../src/scan/policy.js";
 import { buildReport } from "../../src/scan/report.js";
-import { readScannerJson } from "../../src/scan/scanners/shared.js";
+import { readScannerJson, type ScannerContext } from "../../src/scan/scanners/shared.js";
 import { scanTrivy } from "../../src/scan/scanners/trivy.js";
 import { makeReportInput } from "../support/findings.js";
 
 const live = it.runIf(process.env.VIBESHIELD_LIVE_TRIVY === "1");
 const layout = process.env.VIBESHIELD_TRIVY_TEST_LAYOUT ?? "installed";
+async function scanFixture(context: ScannerContext) {
+  // Detection fixtures use their review date; production freshness keeps the real clock.
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-07T12:00:00Z"));
+  try {
+    return await scanTrivy(context);
+  } finally {
+    clock.mockRestore();
+  }
+}
+
+it.each([
+  "2020-01-01T00:00:00Z",
+  "2030-01-01T00:00:00Z",
+])("fixture clock isolates detection acceptance from %s and restores the caller's time", async (wallTime) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(wallTime));
+  const runtime = new FakeSandboxRuntime();
+  const session = await runtime.create({ name: "trivy-fixture-clock", imageTag: "fixture" });
+  try {
+    const raw = JSON.parse(
+      await readFile(new URL("../fixtures/scanners/config/trivy.json", import.meta.url), "utf8"),
+    );
+    await session.uploadBytes(
+      "/work/.vibeshield/exports/trivy.json",
+      Buffer.from(JSON.stringify({ report: raw, bundle: trivyPolicy.bundle, warnings: false })),
+    );
+    const snapshot: Snapshot = {
+      url: "https://github.com/fixture/config",
+      commit: "a".repeat(40),
+      files: ["vulnerable.yaml", "fixed.yaml"],
+      languages: [],
+      history: { commits: 1, truncated: false },
+    };
+    const ctx = { session, snapshot, signal: new AbortController().signal };
+    const result = await scanFixture(ctx);
+    expect(result.findings[0]?.ruleId).toBe("KSV-0017");
+    expect(result.coverage.every((entry) => entry.status === "checked")).toBe(true);
+    expect(Date.now()).toBe(Date.parse(wallTime));
+    // Outside the fixture call, production still sees the caller's stale/invalid clock.
+    expect((await scanTrivy(ctx)).coverage).toContainEqual(
+      expect.objectContaining({ area: "check-bundle", status: "degraded" }),
+    );
+    await expect(
+      scanFixture({ ...ctx, signal: AbortSignal.abort(new Error("fixture cancelled")) }),
+    ).rejects.toThrow("fixture cancelled");
+    expect(Date.now()).toBe(Date.parse(wallTime));
+  } finally {
+    vi.useRealTimers();
+    await session.destroy();
+  }
+});
 live(
   `pinned Trivy and bundle (${layout}) detect privileged pods, accept restricted pods, and reject missing checks`,
   async () => {
@@ -136,7 +188,7 @@ live(
         history: { commits: 1, truncated: false },
       };
       const ctx = { session, snapshot, signal: new AbortController().signal };
-      const result = await scanTrivy(ctx);
+      const result = await scanFixture(ctx);
       console.log("Trivy acceptance", JSON.stringify(result));
       expect(result.findings).toHaveLength(1);
       expect(result.findings[0]).toMatchObject({
