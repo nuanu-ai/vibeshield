@@ -24,7 +24,7 @@ describe("deterministic report publication", () => {
       ]),
     );
     expect(report.issues).toHaveLength(1);
-    expect(report.issues[0]?.findingIds).toEqual([finding.id, "duplicate"]);
+    expect(report.issues[0]?.findingIds).toEqual(["duplicate", finding.id]);
     expect(report.issues[0]?.verification.length).toBeGreaterThan(0);
     expect(report.incomplete).toBe(true);
   });
@@ -41,6 +41,32 @@ describe("deterministic report publication", () => {
     const report = buildReport(
       makeReportInput([{ findings: [dependencyFinding({ severity: "unknown" })], coverage: [] }]),
     );
+    expect(report.issues).toEqual([]);
+  });
+
+  it("does not publish an OSV wildcard finding without a real advisory record", () => {
+    const { dependency: _dependency, ...malformed } = dependencyFinding();
+    const report = buildReport(makeReportInput([{ findings: [malformed], coverage: [] }]));
+    expect(report.issues).toEqual([]);
+  });
+
+  it("does not publish an arbitrary Gitleaks rule through a wildcard policy", () => {
+    const finding = makeFinding({ ruleId: "unvalidated-secret-rule" });
+    const input = makeReportInput([{ findings: [finding], coverage: [] }]);
+    const report = buildReport({
+      ...input,
+      policy: [wildcardPolicy("gitleaks", "secret-rotation")],
+    });
+    expect(report.issues).toEqual([]);
+  });
+
+  it("keeps inherited remediation names unpublished", () => {
+    const finding = makeFinding({ remediationKey: "toString" });
+    const input = makeReportInput([{ findings: [finding], coverage: [] }]);
+    const report = buildReport({
+      ...input,
+      policy: [exactPolicy("gitleaks", "generic-api-key", "toString")],
+    });
     expect(report.issues).toEqual([]);
   });
 
@@ -134,7 +160,46 @@ describe("deterministic report publication", () => {
     );
     expect(report.issues).toHaveLength(3);
   });
+
+  it("emits equivalent group members and locations in stable order", () => {
+    const alpha = makeFinding({
+      id: "alpha",
+      locations: [
+        { path: "src/a.ts", line: 3 },
+        { path: "src/z.ts", line: 1 },
+      ],
+    });
+    const bravo = makeFinding({ id: "bravo", locations: [{ path: "src/b.ts", line: 2 }] });
+    const forward = buildReport(makeReportInput([{ findings: [alpha, bravo], coverage: [] }]));
+    const reversed = buildReport(makeReportInput([{ findings: [bravo, alpha], coverage: [] }]));
+
+    expect(forward.issues).toEqual(reversed.issues);
+    expect(forward.issues[0]?.findingIds).toEqual(["alpha", "bravo"]);
+    expect(forward.issues[0]?.locations).toEqual([
+      { path: "src/a.ts", line: 3 },
+      { path: "src/b.ts", line: 2 },
+      { path: "src/z.ts", line: 1 },
+    ]);
+  });
 });
+
+function wildcardPolicy(scanner: RulePolicy["scanner"], remediationKey: string): RulePolicy {
+  return {
+    scanner,
+    ruleId: "*",
+    remediationKey,
+    publishMedium: false,
+    requireHighConfidence: false,
+  };
+}
+
+function exactPolicy(
+  scanner: RulePolicy["scanner"],
+  ruleId: string,
+  remediationKey: string,
+): RulePolicy {
+  return { ...wildcardPolicy(scanner, remediationKey), ruleId };
+}
 
 function requiredDependency(): NonNullable<Finding["dependency"]> {
   return {

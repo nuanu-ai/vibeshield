@@ -45,7 +45,30 @@ function policyMatches(policy: RulePolicy, finding: Finding): boolean {
   if (policy.ruleId === finding.ruleId) {
     return true;
   }
-  return policy.ruleId === "*" && (finding.scanner === "osv" || finding.scanner === "gitleaks");
+  if (policy.ruleId !== "*") {
+    return false;
+  }
+  if (finding.scanner === "osv") {
+    return isOsvAdvisoryFinding(finding);
+  }
+  return false;
+}
+
+function isOsvAdvisoryFinding(finding: Finding): boolean {
+  const dependency = finding.dependency;
+  return (
+    finding.category === "dependency" &&
+    dependency !== undefined &&
+    hasText(dependency.ecosystem) &&
+    hasText(dependency.name) &&
+    hasText(dependency.version) &&
+    hasText(dependency.manifest) &&
+    dependency.advisoryIds.some(hasText)
+  );
+}
+
+function hasText(value: string): boolean {
+  return value.trim().length > 0;
 }
 
 function hasRequiredEvidence(finding: Finding): boolean {
@@ -129,11 +152,12 @@ function sharesAdvisoryAlias(left: Finding, right: Finding): boolean {
 }
 
 function issueFor(members: Finding[]): Issue {
-  const representative = requiredFirst(stableFindings(members), "issue group");
+  const sortedMembers = stableFindings(members);
+  const representative = requiredFirst(sortedMembers, "issue group");
   const remediation = remediationFor(representative);
-  const evidence = members.map((finding) => finding.evidence);
-  const locations = members.flatMap((finding) => finding.locations);
-  const findingIds = members.map((finding) => finding.id);
+  const evidence = sortedMembers.map((finding) => finding.evidence);
+  const locations = sortedMembers.flatMap((finding) => finding.locations).sort(compareLocations);
+  const findingIds = sortedMembers.map((finding) => finding.id);
   return {
     id: `issue:${findingIds.join(",")}`,
     title: representative.title,
@@ -146,6 +170,17 @@ function issueFor(members: Finding[]): Issue {
     verification: remediation.verification,
     prompt: deterministicPrompt(representative, locations, remediation),
   };
+}
+
+function compareLocations(
+  left: Finding["locations"][number],
+  right: Finding["locations"][number],
+): number {
+  return (
+    left.path.localeCompare(right.path) ||
+    left.line - right.line ||
+    (left.commit ?? "").localeCompare(right.commit ?? "")
+  );
 }
 
 function deterministicPrompt(

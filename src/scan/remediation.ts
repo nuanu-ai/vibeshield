@@ -60,7 +60,7 @@ const templates = {
 export type RemediationKey = keyof typeof templates;
 
 export function hasRemediationTemplate(key: string): key is RemediationKey {
-  return key in templates;
+  return Object.hasOwn(templates, key);
 }
 
 export function remediationFor(finding: Finding): { remediation: string; verification: string } {
