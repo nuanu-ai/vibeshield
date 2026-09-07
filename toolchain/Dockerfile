@@ -153,3 +153,12 @@ RUN curl -fsSL https://get.anchore.io/syft | sh -s -- -b /usr/local/bin \
   && zizmor --version
 
 WORKDIR /work
+
+# Public-web acquisition and file-only, redacted scanner exports.
+COPY acquire.mjs /usr/local/bin/vibeshield-acquire
+COPY export-results.mjs /usr/local/bin/export-results.mjs
+RUN ln -s /usr/local/bin/export-results.mjs /usr/local/bin/vibeshield-export-results \
+  && mkdir -p /opt/vibeshield \
+  && printf '[extend]\nuseDefault = true\n' > /opt/vibeshield/gitleaks.toml \
+  && touch /opt/vibeshield/gitleaks.ignore \
+  && chmod 644 /opt/vibeshield/gitleaks.toml /opt/vibeshield/gitleaks.ignore
