@@ -39,6 +39,7 @@ export function createJobs(options: {
   execute: ExecuteScan;
   cleanup: () => Promise<void>;
   clock: Clock;
+  diagnostic?: (message: string) => void;
 }): JobStore {
   const jobs = new Map<string, Job>();
   const expiry = new Map<string, () => void>();
@@ -47,6 +48,21 @@ export function createJobs(options: {
   let stopped = false;
   let retry: Promise<void> | undefined;
   let stopping: Promise<void> | undefined;
+  let cancelMaintenance: (() => void) | undefined;
+  const scheduleCleanup = (current: Active, attempt = 1) => {
+    if (stopped || active !== current) return;
+    cancelMaintenance = options.clock.schedule(5000, () => {
+      cancelMaintenance = undefined;
+      void store.retryCleanup().catch(() => {
+        options.diagnostic?.(
+          attempt < 3
+            ? "Temporary resource cleanup retry failed. Admission remains closed."
+            : "Temporary resource cleanup retries exhausted. Operator reconciliation is required.",
+        );
+        if (attempt < 3) scheduleCleanup(current, attempt + 1);
+      });
+    });
+  };
   const remove = (id: string) => {
     expiry.get(id)?.();
     expiry.delete(id);
@@ -78,7 +94,11 @@ export function createJobs(options: {
         "Scan failed before a report could be prepared. Check repository access and the scanner environment.";
     }
     job.finishedAt = options.clock.now();
-    if (active === current) active = undefined;
+    if (active === current) {
+      active = undefined;
+      cancelMaintenance?.();
+      cancelMaintenance = undefined;
+    }
     if (!stopped)
       expiry.set(
         job.id,
@@ -122,7 +142,11 @@ export function createJobs(options: {
           if (error instanceof CleanupError) {
             if (error.report) current.report = error.report;
             job.status = "cleanup-failed";
-            job.error = error.message;
+            job.error = "Temporary resource cleanup is still pending. Please try again later.";
+            options.diagnostic?.(
+              "Temporary resource cleanup could not be verified. Admission remains closed during bounded retries.",
+            );
+            scheduleCleanup(current);
           } else finish(current);
         } finally {
           current.deadline.dispose();
@@ -161,6 +185,8 @@ export function createJobs(options: {
     },
     async shutdown() {
       stopped = true;
+      cancelMaintenance?.();
+      cancelMaintenance = undefined;
       for (const cancel of expiry.values()) cancel();
       expiry.clear();
       active?.deadline.abort();

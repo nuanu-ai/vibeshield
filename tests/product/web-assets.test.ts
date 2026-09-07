@@ -1,6 +1,7 @@
 import { runInNewContext } from "node:vm";
 import { expect, it, vi } from "vitest";
 import { browserScript } from "../../src/web/assets.js";
+import { createBrowserFixture } from "../support/browser-server.js";
 
 /** Minimal DOM boundary. Real DOM/rendering and clipboard permissions are covered
  * by external browser acceptance; here the shipped script executes unmodified. */
@@ -145,4 +146,53 @@ it("clipboard rejection selects the exact prompt and never claims success", asyn
   expect(b.selected()).toBe("  Exact <evidence> & remediation\nVerify it.\n");
   expect(b.copyStatus.textContent).toContain("Select");
   expect(b.copyStatus.textContent).not.toContain("Copied");
+});
+
+it("reconnects the shipped script to the same HTTP job and reaches its report without another submission", async () => {
+  const app = createBrowserFixture();
+  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  const received: { method: string | undefined; path: string | undefined }[] = [];
+  app.server.prependListener("request", (request) =>
+    received.push({ method: request.method, path: request.url }),
+  );
+  try {
+    const accepted = await fetch(`${base}/scans`, {
+      method: "POST",
+      headers: { origin: base, "content-type": "application/x-www-form-urlencoded" },
+      body: "repository=https://github.com/owner/repo",
+      redirect: "manual",
+    });
+    expect(accepted.status).toBe(303);
+    const path = accepted.headers.get("location") as string;
+    const b = browser();
+    b.location.pathname = path;
+    let offline = true;
+    b.fetch.mockImplementation(async (url, options) => {
+      if (offline) throw new Error("Connection lost");
+      return fetch(`${base}${url}`, options as RequestInit);
+    });
+    b.run();
+    await settle();
+    expect(b.retry.hidden).toBe(false);
+    expect(b.error.textContent).toContain("temporarily unavailable");
+    offline = false;
+    await b.listeners.get("retry")?.();
+    expect(b.status.textContent).toBe("Running");
+    expect(b.error.textContent).toBe("");
+    app.sandbox.releaseAll();
+    await expect.poll(() => app.jobs.get(path.split("/")[2] ?? "")?.status).toBe("completed");
+    await [...b.timers.values()][0]?.callback();
+    expect(b.location.assign).toHaveBeenCalledWith(`${path}/report`);
+    expect(received).toEqual([
+      { method: "POST", path: "/scans" },
+      { method: "GET", path: `${path}/status` },
+      { method: "GET", path: `${path}/status` },
+    ]);
+    expect(app.sandbox.created).toHaveLength(1);
+  } finally {
+    await app.shutdown();
+    expect(app.sandbox.sessions.size).toBe(0);
+    expect(app.clock.pending()).toBe(0);
+  }
 });

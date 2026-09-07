@@ -1,7 +1,14 @@
+import { pathToFileURL } from "node:url";
 import { createExecutor } from "../../src/scan/execute.js";
 import { createJobs } from "../../src/web/jobs.js";
 import { createWebServer } from "../../src/web/server.js";
-import { ControlledSandbox, fixtureProvenance, ManualClock, rawOsv } from "./controlled-sandbox.js";
+import {
+  ControlledSandbox,
+  engines,
+  fixtureProvenance,
+  ManualClock,
+  rawOsv,
+} from "./controlled-sandbox.js";
 
 function fixture() {
   const sandbox = new ControlledSandbox();
@@ -30,38 +37,91 @@ function fixture() {
   });
   return { sandbox, clock, jobs };
 }
-let state = fixture();
-const server = createWebServer({
-  start: (url) => state.jobs.start(url),
-  get: (id) => state.jobs.get(id),
-  busy: () => state.jobs.busy(),
-  shutdown: () => state.jobs.shutdown(),
-  retryCleanup: () => state.jobs.retryCleanup(),
-});
-const route = server.listeners("request")[0];
-if (!route) throw new Error("Missing HTTP route handler");
-server.removeAllListeners("request");
-server.on("request", (request, response) => {
-  void (async () => {
-    if (request.method === "POST" && request.url === "/__test/release-all") {
-      state.sandbox.releaseAll();
-      response.end();
-    } else if (request.method === "POST" && request.url === "/__test/reset") {
-      state.sandbox.releaseAll();
-      await state.jobs.shutdown();
-      state = fixture();
-      response.end();
-    } else {
-      route.call(server, request, response);
-    }
-  })().catch(() => response.writeHead(500).end());
-});
-server.listen(4317, "127.0.0.1");
-async function stop() {
-  state.sandbox.releaseAll();
-  await state.jobs.shutdown();
-  server.closeAllConnections();
-  server.close();
+export function createBrowserFixture() {
+  let state = fixture();
+  const server = createWebServer({
+    start: (url) => state.jobs.start(url),
+    get: (id) => state.jobs.get(id),
+    busy: () => state.jobs.busy(),
+    shutdown: () => state.jobs.shutdown(),
+    retryCleanup: () => state.jobs.retryCleanup(),
+  });
+  const route = server.listeners("request")[0];
+  if (!route) throw new Error("Missing HTTP route handler");
+  server.removeAllListeners("request");
+  server.on("request", (request, response) => {
+    void (async () => {
+      if (request.method === "POST" && request.url === "/__test/release-all") {
+        state.sandbox.releaseAll();
+        response.end();
+      } else if (
+        request.method === "POST" &&
+        ["/__test/reset", "/__test/restart"].includes(request.url ?? "")
+      ) {
+        state.sandbox.releaseAll();
+        await state.jobs.shutdown();
+        state = fixture();
+        response.end();
+      } else if (
+        request.method === "POST" &&
+        ["/__test/advance", "/__test/fail"].includes(request.url ?? "")
+      ) {
+        let data: Record<string, unknown>;
+        try {
+          let body = "";
+          for await (const chunk of request) {
+            body += String(chunk);
+            if (Buffer.byteLength(body) > 8192) throw new Error("Control body too large");
+          }
+          data = JSON.parse(body);
+          if (!data || typeof data !== "object") throw new Error("Invalid control");
+        } catch {
+          response.writeHead(400).end();
+          return;
+        }
+        if (request.url === "/__test/advance") {
+          if (typeof data.ms !== "number" || !Number.isSafeInteger(data.ms) || data.ms < 0) {
+            response.writeHead(400).end();
+            return;
+          }
+          state.clock.advance(data.ms);
+        } else {
+          const scanner = engines.find((id) => id === data.scanner);
+          if (!scanner) {
+            response.writeHead(400).end();
+            return;
+          }
+          state.sandbox.fail(scanner);
+        }
+        response.end();
+      } else {
+        route.call(server, request, response);
+      }
+    })().catch(() => response.writeHead(500).end());
+  });
+  async function stop() {
+    state.sandbox.releaseAll();
+    await state.jobs.shutdown();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  return {
+    server,
+    shutdown: stop,
+    get sandbox() {
+      return state.sandbox;
+    },
+    get clock() {
+      return state.clock;
+    },
+    get jobs() {
+      return state.jobs;
+    },
+  };
 }
-process.once("SIGTERM", () => void stop());
-process.once("SIGINT", () => void stop());
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const app = createBrowserFixture();
+  app.server.listen(4317, "127.0.0.1");
+  process.once("SIGTERM", () => void app.shutdown());
+  process.once("SIGINT", () => void app.shutdown());
+}
