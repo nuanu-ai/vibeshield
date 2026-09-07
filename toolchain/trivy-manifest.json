@@ -1,0 +1,15 @@
+{
+  "engineVersion": "0.72.0",
+  "bundle": {
+    "digest": "sha256:1583562f8b90ed2a071b99f0e5ffff6b57e4ceb6ca3e4796577b4e6a339eb74c",
+    "revision": "d7c9302130a9b7e614a5c5d32854f6a08b4bc52e",
+    "version": "2.2.0",
+    "reviewedAt": "2026-09-07T00:00:00Z"
+  },
+  "upstream": "https://github.com/aquasecurity/trivy-checks",
+  "license": "MIT",
+  "archiveSha256": "40a47ef8eb262c8e41d44f25c266463fff4dba9adcba12d33b93da88cbc7c80f",
+  "treeSha256": "3a42784bbcbfc0468b8b4328004d6e27282053afa428b322eeae6972727d01f8",
+  "files": 641,
+  "rules": ["KSV-0017"]
+}

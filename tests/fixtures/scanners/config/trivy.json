@@ -1,0 +1,36 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": { "Version": "0.72.0" },
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "vulnerable.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "Misconfigurations": [
+        {
+          "ID": "KSV-0017",
+          "Title": "Privileged",
+          "Description": "Privileged containers share namespaces with the host system and do not offer any security. They should be used exclusively for system containers that require high privileges.",
+          "Namespace": "builtin.kubernetes.KSV017",
+          "Query": "data.builtin.kubernetes.KSV017.deny",
+          "Resolution": "Change 'containers[].securityContext.privileged' to 'false'.",
+          "Severity": "HIGH",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-0017",
+          "References": [
+            "https://kubernetes.io/docs/concepts/security/pod-security-standards/#baseline",
+            "https://avd.aquasec.com/misconfig/ksv-0017"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": { "StartLine": 15, "EndLine": 29 }
+        }
+      ]
+    },
+    {
+      "Target": "fixed.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "Misconfigurations": [{ "ID": "KSV-0017", "Status": "PASS" }]
+    }
+  ]
+}

@@ -139,15 +139,41 @@ RUN chmod +x /usr/local/bin/vibeshield-joern-extract /usr/local/bin/vibeshield-o
   && vibeshield-osv-scan --help >/tmp/vibeshield-osv-scan-help.txt
 
 RUN curl -fsSL https://get.anchore.io/syft | sh -s -- -b /usr/local/bin \
-  && curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-    | sh -s -- -b /usr/local/bin \
   && curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
     | bash -s -- latest /usr/local/bin \
   && python3 -m pip install --no-cache-dir --break-system-packages zizmor \
   && syft version \
-  && trivy --version \
   && actionlint -version \
   && zizmor --version
+
+# Official Trivy 0.72.0 release tarballs, pinned by upstream SHA-256.
+RUN arch="$(dpkg --print-architecture)" \
+  && case "$arch" in \
+    amd64) asset="64bit"; digest="bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea" ;; \
+    arm64) asset="ARM64"; digest="2ca2c023109c2db6b2b77366b6717291452d4531167377d95c79547f0c8e3467" ;; \
+    *) exit 1 ;; \
+  esac \
+  && curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v0.72.0/trivy_0.72.0_Linux-${asset}.tar.gz" -o /tmp/trivy.tar.gz \
+  && printf '%s  %s\n' "$digest" /tmp/trivy.tar.gz | sha256sum -c - \
+  && tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy \
+  && mkdir -p /opt/vibeshield/trivy \
+  && tar -xzf /tmp/trivy.tar.gz -C /opt/vibeshield/trivy LICENSE \
+  && rm /tmp/trivy.tar.gz \
+  && trivy --version
+
+# Official checks 2.2.0, OCI manifest sha256:1583562f8b90ed2a071b99f0e5ffff6b57e4ceb6ca3e4796577b4e6a339eb74c.
+# This cache is selected explicitly. Missing/corrupt files fail before Trivy's embedded fallback.
+RUN mkdir -p /opt/vibeshield/trivy/cache/policy/content \
+  && curl -fsSL "https://mirror.gcr.io/v2/aquasec/trivy-checks/blobs/sha256:40a47ef8eb262c8e41d44f25c266463fff4dba9adcba12d33b93da88cbc7c80f" -o /tmp/trivy-checks.tar.gz \
+  && printf '%s  %s\n' '40a47ef8eb262c8e41d44f25c266463fff4dba9adcba12d33b93da88cbc7c80f' /tmp/trivy-checks.tar.gz | sha256sum -c - \
+  && tar --no-same-owner -xzf /tmp/trivy-checks.tar.gz -C /opt/vibeshield/trivy/cache/policy/content \
+  && rm /tmp/trivy-checks.tar.gz \
+  && printf '{"Digest":"sha256:1583562f8b90ed2a071b99f0e5ffff6b57e4ceb6ca3e4796577b4e6a339eb74c","MajorVersion":2}\n' > /opt/vibeshield/trivy/cache/policy/metadata.json \
+  && printf '{}\n' > /opt/vibeshield/trivy.yaml \
+  && touch /opt/vibeshield/empty.ignore
+COPY trivy-manifest.json /opt/vibeshield/trivy/manifest.json
+COPY licenses/trivy-checks.LICENSE /opt/vibeshield/trivy/CHECKS-LICENSE
+COPY trivy.mjs /usr/local/bin/vibeshield-trivy
 
 # OpenGrep 1.25.0 release assets, pinned by upstream SHA-256 digest.
 RUN arch="$(dpkg --print-architecture)" \

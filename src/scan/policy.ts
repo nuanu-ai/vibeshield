@@ -1,5 +1,19 @@
 import type { RulePolicy } from "./contracts.js";
 
+export const trivyPolicy = {
+  version: "0.72.0",
+  bundle: {
+    digest: "sha256:1583562f8b90ed2a071b99f0e5ffff6b57e4ceb6ca3e4796577b4e6a339eb74c",
+    revision: "d7c9302130a9b7e614a5c5d32854f6a08b4bc52e",
+    version: "2.2.0",
+    reviewedAt: "2026-09-07T00:00:00Z",
+  },
+  // Observed under this exact bundle on privileged/fixed Kubernetes pods.
+  rules: [
+    { id: "KSV-0017", namespace: "builtin.kubernetes.KSV017", remediationKey: "config-privilege" },
+  ],
+} as const;
+
 // Only these explicit lockfile extractors are enabled; package.json resolution is disabled.
 export const osvPolicy = {
   version: "2.3.8",
@@ -69,13 +83,15 @@ export const defaultPolicy: readonly RulePolicy[] = [
     publishMedium: false,
     requireHighConfidence: false,
   },
-  {
-    scanner: "trivy",
-    ruleId: "privileged-container",
-    remediationKey: "config-privilege",
-    publishMedium: false,
-    requireHighConfidence: true,
-  },
+  ...trivyPolicy.rules.map(
+    (rule): RulePolicy => ({
+      scanner: "trivy",
+      ruleId: rule.id,
+      remediationKey: rule.remediationKey,
+      publishMedium: false,
+      requireHighConfidence: true,
+    }),
+  ),
   {
     scanner: "zizmor",
     ruleId: "dangerous-workflow-permissions",
