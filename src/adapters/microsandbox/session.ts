@@ -37,7 +37,10 @@ export class MicrosandboxSession implements SandboxSession {
       cleanup ??= (async () => {
         let signalError: unknown;
         try {
-          await active?.signal(15);
+          // A stuck signal acknowledgement must not prevent verified VM removal.
+          void active?.signal(15).catch((error: unknown) => {
+            signalError = error;
+          });
         } catch (error) {
           signalError = error;
         }

@@ -118,6 +118,49 @@ describe("MicrosandboxSession", () => {
     }
   });
 
+  it("removes the VM despite a pending signal acknowledgement and waits for confirmed cleanup", async () => {
+    const sandbox = streamingSandbox();
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    sandbox.shellStream = async () =>
+      ({
+        signal: () => new Promise(() => {}),
+        recv: () => {
+          markRunning();
+          return new Promise(() => {});
+        },
+      }) as unknown as Awaited<ReturnType<Sandbox["shellStream"]>>;
+    let cleanupCalled = false;
+    let confirmCleanup!: () => void;
+    const confirmed = new Promise<void>((resolve) => {
+      confirmCleanup = resolve;
+    });
+    const session = new MicrosandboxSession(sandbox, "pending-signal-client", async () => {
+      cleanupCalled = true;
+      await confirmed;
+    });
+    const controller = new AbortController();
+    let outcome = "pending";
+    const execution = session.exec(["hang"], { signal: controller.signal }).then(
+      () => {
+        outcome = "resolved";
+      },
+      () => {
+        outcome = "cancelled";
+      },
+    );
+    await running;
+    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(cleanupCalled).toBe(true);
+    expect(outcome).toBe("pending");
+    confirmCleanup();
+    await Promise.race([execution, new Promise((resolve) => setTimeout(resolve, 100))]);
+    expect(outcome).toBe("cancelled");
+  });
+
   it("explains closed AgentClient errors with operation context", async () => {
     const session = new MicrosandboxSession(closedClientSandbox(), "closed-client");
 
