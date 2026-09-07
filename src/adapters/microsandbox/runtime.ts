@@ -11,13 +11,20 @@
  */
 
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
-import { isInstalled, Sandbox } from "microsandbox";
+import { isInstalled, MiB, Sandbox } from "microsandbox";
 import type {
   SandboxAvailability,
   SandboxCreateOptions,
   SandboxRuntime,
 } from "../../ports/sandbox-runtime.js";
+import {
+  clearRuntimeOwnership,
+  OWNER_LABEL,
+  recordRuntimeOwnership,
+} from "../runtime-ownership.js";
 import { MicrosandboxSession } from "./session.js";
 
 const execFileP = promisify(execFile);
@@ -52,6 +59,7 @@ async function listCachedImages(): Promise<string[] | null> {
 }
 
 export interface MicrosandboxRuntimeOptions {
+  readonly ownerDir?: string;
   /** Toolchain image tag; defaults to "vibeshield-toolchain:latest". */
   readonly imageTag?: string;
   /** vCPUs per sandbox; default 2. */
@@ -64,11 +72,15 @@ export class MicrosandboxRuntime implements SandboxRuntime {
   private readonly imageTag: string;
   private readonly cpus: number;
   private readonly memoryMib: number;
+  private readonly ownerDir: string;
+  private readonly live = new Map<string, Sandbox>();
 
   constructor(opts: MicrosandboxRuntimeOptions = {}) {
     this.imageTag = opts.imageTag ?? "vibeshield-toolchain:latest";
     this.cpus = opts.cpus ?? 2;
     this.memoryMib = opts.memoryMib ?? 4096;
+    this.ownerDir =
+      opts.ownerDir ?? join(homedir(), ".local", "state", "vibeshield", "runtime-ownership");
   }
 
   async isAvailable(): Promise<SandboxAvailability> {
@@ -104,42 +116,89 @@ export class MicrosandboxRuntime implements SandboxRuntime {
   }
 
   async create(options: SandboxCreateOptions): Promise<MicrosandboxSession> {
-    const sb = await Sandbox.builder(options.name)
-      .image(options.imageTag)
-      .pullPolicy("never")
-      .cpus(this.cpus)
-      .memory(this.memoryMib)
-      .replace()
-      .create();
-    return new MicrosandboxSession(sb, options.name);
+    options.signal?.throwIfAborted();
+    if ((await Sandbox.list()).some((resource) => resource.name === options.name)) {
+      throw new Error("Sandbox name is already in use");
+    }
+    const marker = await recordRuntimeOwnership(this.ownerDir, options.name);
+    try {
+      const sb = await Sandbox.builder(options.name)
+        .image(options.imageTag)
+        .pullPolicy("never")
+        .cpus(this.cpus)
+        .memory(this.memoryMib)
+        .volume("/work", (mount) => mount.tmpfs().size(MiB(2048)).nosuid().nodev())
+        .label(OWNER_LABEL, marker.token)
+        .create();
+      this.live.set(options.name, sb);
+      if (options.signal?.aborted) {
+        await this.destroy(options.name);
+        options.signal.throwIfAborted();
+      }
+      return new MicrosandboxSession(sb, options.name, () => this.destroy(options.name));
+    } catch (error) {
+      try {
+        if (!this.live.has(options.name)) {
+          const resource = (await Sandbox.list()).find(
+            (candidate) => candidate.name === options.name,
+          );
+          const labels = resource?.config().labels as Record<string, string> | undefined;
+          if (resource && labels?.[OWNER_LABEL] !== marker.token) {
+            throw new Error(
+              "Sandbox cleanup refused: resource ownership differs from creation marker",
+            );
+          }
+        }
+        await this.destroy(options.name);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "Sandbox creation failed and cleanup failed",
+        );
+      }
+      throw error;
+    }
   }
 
   async destroy(name: string): Promise<void> {
     const msb = await msbPath();
-    if (msb !== null && (await removeWithCli(msb, name))) {
-      return;
+    const errors: unknown[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const resource =
+          this.live.get(name) ??
+          (await Sandbox.list()).find((candidate) => candidate.name === name);
+        if (resource) await resource.killWithTimeout(1_000);
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        if (msb === null) throw new Error("Microsandbox CLI unavailable");
+        await execFileP(msb, ["remove", "--force", name], { timeout: 15_000, maxBuffer: 65536 });
+      } catch (error) {
+        errors.push(error);
+        try {
+          await Sandbox.remove(name);
+        } catch (sdkError) {
+          errors.push(sdkError);
+        }
+      }
+      try {
+        if (!(await Sandbox.list()).some((resource) => resource.name === name)) {
+          this.live.delete(name);
+          await clearRuntimeOwnership(this.ownerDir, name);
+          return;
+        }
+      } catch (error) {
+        errors.push(error);
+      }
+      if (attempt < 2) await sleep(100);
     }
-    try {
-      await Sandbox.remove(name);
-    } catch {
-      // destroy is best-effort; a missing or already-removed sandbox is fine.
-    }
-    if (msb !== null) {
-      await removeWithCli(msb, name);
-    }
+    throw new AggregateError(
+      errors,
+      `Sandbox cleanup failed: absence of ${name} could not be established`,
+    );
   }
-}
-
-async function removeWithCli(msb: string, name: string): Promise<boolean> {
-  for (let i = 0; i < 5; i += 1) {
-    try {
-      await execFileP(msb, ["remove", "--force", name]);
-      return true;
-    } catch {
-      await sleep(200);
-    }
-  }
-  return false;
 }
 
 function sleep(ms: number): Promise<void> {

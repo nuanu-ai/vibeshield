@@ -40,16 +40,32 @@ export class FakeSandboxSession implements SandboxSession {
   constructor(
     readonly id: string,
     private readonly execHandler: FakeExecHandler,
+    private readonly remove?: () => void,
   ) {}
 
   async exec(command: string[], options: SandboxExecOptions = {}): Promise<ExecResult> {
+    options.signal?.throwIfAborted();
     this.invocations.push({
       name: this.id,
       command,
       ...(options.env === undefined ? {} : { env: options.env }),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     });
-    return await this.execHandler(command, this, options);
+    let rejectAbort!: (error: unknown) => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      rejectAbort = reject;
+    });
+    const abort = () => {
+      void this.destroy().then(() => rejectAbort(options.signal?.reason));
+    };
+    options.signal?.addEventListener("abort", abort, { once: true });
+    try {
+      const result = await Promise.race([this.execHandler(command, this, options), cancelled]);
+      options.signal?.throwIfAborted();
+      return result;
+    } finally {
+      options.signal?.removeEventListener("abort", abort);
+    }
   }
 
   async upload(localPath: string, guestPath: string): Promise<void> {
@@ -71,6 +87,7 @@ export class FakeSandboxSession implements SandboxSession {
 
   async destroy(): Promise<void> {
     this.files.clear();
+    this.remove?.();
   }
 }
 
@@ -103,20 +120,28 @@ export class FakeSandboxRuntime implements SandboxRuntime {
   }
 
   async create(options: SandboxCreateOptions): Promise<FakeSandboxSession> {
-    const session = new FakeSandboxSession(options.name, (cmd, currentSession, execOptions) => {
-      this.invocations.push({
-        name: options.name,
-        command: cmd,
-        ...(execOptions.env === undefined ? {} : { env: execOptions.env }),
-        ...(execOptions.timeoutMs === undefined ? {} : { timeoutMs: execOptions.timeoutMs }),
-      });
-      return this.execHandler(cmd, currentSession, execOptions);
-    });
+    options.signal?.throwIfAborted();
+    const session = new FakeSandboxSession(
+      options.name,
+      (cmd, currentSession, execOptions) => {
+        this.invocations.push({
+          name: options.name,
+          command: cmd,
+          ...(execOptions.env === undefined ? {} : { env: execOptions.env }),
+          ...(execOptions.timeoutMs === undefined ? {} : { timeoutMs: execOptions.timeoutMs }),
+        });
+        return this.execHandler(cmd, currentSession, execOptions);
+      },
+      () => {
+        this.sessions.delete(options.name);
+      },
+    );
     this.sessions.set(options.name, session);
     return session;
   }
 
   async destroy(name: string): Promise<void> {
+    await this.sessions.get(name)?.destroy();
     this.sessions.delete(name);
   }
 }

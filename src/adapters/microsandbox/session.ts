@@ -6,10 +6,9 @@
  * Network is on by default in microsandbox; we do not restrict egress here.
  */
 
-import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { promisify } from "node:util";
-import type { ExecEvent, Sandbox } from "microsandbox";
+import type { ExecEvent, ExecHandle, Sandbox } from "microsandbox";
 import type {
   ExecResult,
   SandboxExecEvent,
@@ -17,29 +16,110 @@ import type {
   SandboxSession,
 } from "../../ports/sandbox-runtime.js";
 
-const execFileP = promisify(execFile);
 const decoder = new TextDecoder();
+const TAIL_BYTES = 64 * 1024;
 
 export class MicrosandboxSession implements SandboxSession {
   constructor(
     private readonly sb: Sandbox,
     readonly id: string,
+    private readonly remove?: () => Promise<void>,
   ) {}
 
   async exec(command: string[], options: SandboxExecOptions = {}): Promise<ExecResult> {
-    const joined = withEnvPrefix(command.map(shellQuote).join(" "), options.env);
-    const shellCommand = withTimeout(joined, options.timeoutMs);
-    const onEvent = options.onEvent;
-    if (onEvent === undefined) {
-      const out = await withMicrosandboxContext(`running in Microsandbox: ${shellCommand}`, () =>
-        this.sb.shell(shellCommand),
+    let cleanup: Promise<void> | undefined;
+    let active: ExecHandle | undefined;
+    let rejectAbort!: (error: unknown) => void;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAbort = reject;
+    });
+    const abort = () => {
+      cleanup ??= (async () => {
+        let signalError: unknown;
+        try {
+          await active?.signal(15);
+        } catch (error) {
+          signalError = error;
+        }
+        try {
+          await this.destroy();
+        } catch (error) {
+          throw new AggregateError(
+            [signalError, error].filter(Boolean),
+            "Sandbox abort cleanup failed",
+          );
+        }
+      })();
+      void cleanup.then(
+        () => rejectAbort(options.signal?.reason ?? new Error("Scan aborted")),
+        rejectAbort,
       );
-      return { exitCode: out.code, stdout: out.stdout(), stderr: out.stderr() };
+    };
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) abort();
+    try {
+      return await Promise.race([
+        withMicrosandboxContext(
+          `running in Microsandbox: ${command.map(shellQuote).join(" ")}`,
+          () =>
+            this.run(command, options, (handle) => {
+              active = handle;
+            }),
+        ),
+        aborted,
+      ]);
+    } catch (error) {
+      if (cleanup) {
+        try {
+          await cleanup;
+        } catch (cleanupError) {
+          throw new AggregateError([error, cleanupError], "Execution aborted and cleanup failed");
+        }
+      }
+      throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", abort);
     }
+  }
+
+  private async run(
+    command: string[],
+    options: SandboxExecOptions,
+    setHandle: (handle: ExecHandle) => void,
+  ): Promise<ExecResult> {
+    options.signal?.throwIfAborted();
+    const control = `/run/vibeshield-${randomUUID()}`;
+    const configPath = `${control}.json`;
+    await this.sb
+      .fs()
+      .write(
+        `${control}-run-check.mjs`,
+        await readFile(new URL("../../../toolchain/run-check.mjs", import.meta.url)),
+      );
+    options.signal?.throwIfAborted();
+    await this.sb.fs().write(
+      configPath,
+      Buffer.from(
+        JSON.stringify({
+          argv: command,
+          timeoutMs: options.timeoutMs ?? 600_000,
+          workspace: "/work",
+          maxWorkspaceBytes: 2 * 1024 ** 3,
+          stdoutPath: options.stdoutPath ?? null,
+        }),
+      ),
+    );
+    options.signal?.throwIfAborted();
+    const shellCommand = withEnvPrefix(
+      `exec node ${shellQuote(`${control}-run-check.mjs`)} ${shellQuote(configPath)}`,
+      options.env,
+    );
+    const onEvent = options.onEvent;
     return await withMicrosandboxContext(`streaming in Microsandbox: ${shellCommand}`, async () => {
       const handle = await this.sb.shellStream(shellCommand);
-      const stdout: string[] = [];
-      const stderr: string[] = [];
+      setHandle(handle);
+      let stdout = "";
+      let stderr = "";
       let exitCode: number | undefined;
 
       for (;;) {
@@ -49,19 +129,20 @@ export class MicrosandboxSession implements SandboxSession {
         }
         const mapped = toSandboxExecEvent(event);
         if (mapped.type === "stdout") {
-          stdout.push(mapped.data);
+          stdout = tail(stdout + mapped.data);
         } else if (mapped.type === "stderr") {
-          stderr.push(mapped.data);
+          stderr = tail(stderr + mapped.data);
         } else if (mapped.type === "exited") {
           exitCode = mapped.exitCode;
         }
-        onEvent(mapped);
+        onEvent?.(mapped);
       }
 
       if (exitCode === undefined) {
         exitCode = (await handle.wait()).code;
       }
-      return { exitCode, stdout: stdout.join(""), stderr: stderr.join("") };
+      options.signal?.throwIfAborted();
+      return { exitCode, stdout, stderr };
     });
   }
 
@@ -93,23 +174,9 @@ export class MicrosandboxSession implements SandboxSession {
   }
 
   async destroy(): Promise<void> {
-    try {
-      await this.sb.stop();
-    } catch {
-      // Best effort: the runtime-level destroy still tries to force-remove by name.
-    }
-    const msb = await msbPath();
-    if (msb === null) {
-      return;
-    }
-    for (let i = 0; i < 5; i += 1) {
-      try {
-        await execFileP(msb, ["remove", "--force", this.id]);
-        return;
-      } catch {
-        await sleep(200);
-      }
-    }
+    if (this.remove) return this.remove();
+    const { MicrosandboxRuntime } = await import("./runtime.js");
+    await new MicrosandboxRuntime().destroy(this.id);
   }
 }
 
@@ -144,12 +211,8 @@ function toSandboxExecEvent(event: ExecEvent): SandboxExecEvent {
   }
 }
 
-function withTimeout(command: string, timeoutMs: number | undefined): string {
-  if (timeoutMs === undefined) {
-    return command;
-  }
-  const seconds = Math.max(1, Math.ceil(timeoutMs / 1000));
-  return `timeout --kill-after=5s ${seconds}s ${command}`;
+function tail(value: string): string {
+  return Buffer.from(value).subarray(-TAIL_BYTES).toString("utf8");
 }
 
 /**
@@ -175,25 +238,13 @@ async function withMicrosandboxContext<T>(operation: string, fn: () => Promise<T
     if (message.includes("client closed")) {
       throw new Error(
         `Microsandbox session closed while ${operation}. This is a sandbox runtime interruption, not a scan finding. Re-run the scan; if it repeats, check \`msb list\` and reload the toolchain with \`pnpm toolchain:prepare\`. Original error: ${message}`,
+        { cause: error },
       );
     }
-    throw new Error(`Microsandbox failed while ${operation}: ${message}`);
+    throw new Error(`Microsandbox failed while ${operation}: ${message}`, { cause: error });
   }
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function msbPath(): Promise<string | null> {
-  try {
-    const { stdout } = await execFileP("sh", ["-c", "echo $HOME"]);
-    return `${stdout.trim()}/.microsandbox/bin/msb`;
-  } catch {
-    return null;
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

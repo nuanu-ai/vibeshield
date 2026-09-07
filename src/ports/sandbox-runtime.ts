@@ -19,7 +19,7 @@ export interface SandboxSession {
   download(guestPath: string): Promise<Uint8Array>;
   /** Read a file's bytes from the sandbox. */
   read(guestPath: string): Promise<Uint8Array>;
-  /** Stop/remove resources owned by this session. Idempotent best-effort cleanup. */
+  /** Stop/remove this session; resolves only after absence is confirmed. */
   destroy(): Promise<void>;
 }
 
@@ -36,6 +36,9 @@ export type SandboxExecEvent =
   | { readonly type: "exited"; readonly exitCode: number };
 
 export interface SandboxExecOptions {
+  readonly signal?: AbortSignal;
+  /** Optional bounded scanner output file under /work. */
+  readonly stdoutPath?: string;
   /** Environment overrides for this command only. */
   readonly env?: Readonly<Record<string, string>>;
   readonly onEvent?: (event: SandboxExecEvent) => void;
@@ -44,6 +47,7 @@ export interface SandboxExecOptions {
 }
 
 export interface SandboxCreateOptions {
+  readonly signal?: AbortSignal;
   /** Run-local name; sandboxes for the same run share it. */
   readonly name: string;
   /** OCI image tag to boot (e.g. "vibeshield-toolchain:latest"). */
@@ -55,7 +59,7 @@ export interface SandboxRuntime {
   isAvailable(): Promise<SandboxAvailability>;
   /** Boot a new sandbox. Throws if the image is missing or boot fails. */
   create(options: SandboxCreateOptions): Promise<SandboxSession>;
-  /** Remove a sandbox by name, best-effort. */
+  /** Remove a sandbox by name; throw unless absence can be confirmed. */
   destroy(name: string): Promise<void>;
 }
 
