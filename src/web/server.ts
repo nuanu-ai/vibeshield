@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { isIP } from "node:net";
 import { parseRepositoryUrl } from "../scan/source.js";
 import { browserScript, stylesheet } from "./assets.js";
 import { BusyError, type JobStore } from "./jobs.js";
@@ -125,13 +126,36 @@ function requestOrigin(request: IncomingMessage, server: Server): string {
   ).length;
   if (!host || hostCount !== 1 || !address || typeof address === "string")
     throw new RequestError(400, "Invalid service address.");
-  const hosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
-  const local = request.socket.localAddress;
-  if (local) hosts.add(local.includes(":") ? `[${local}]` : local);
-  const suffix = address.port === 80 ? "" : `:${address.port}`;
-  if (![...hosts].some((name) => host === `${name}${suffix}`))
+  // Parse the authority before URL canonicalization: URL alone accepts numeric
+  // IPv4 shorthand, credentials and other forms that are not service IP literals.
+  const authority = /^(?:\[([a-f\d:.]+)\]|(localhost|[\d.]+))(?::(\d+))?$/i.exec(host);
+  const literal = authority?.[1] ?? authority?.[2];
+  if (
+    !literal ||
+    (authority?.[1] !== undefined && isIP(literal) !== 6) ||
+    (authority?.[3] ?? "80") !== String(address.port)
+  )
     throw new RequestError(400, "Invalid service address.");
-  return `http://${host}`;
+  const requested = literal.toLowerCase() === "localhost" ? "localhost" : normalizeIp(literal);
+  const hosts = new Set(["127.0.0.1", "localhost", "::1"]);
+  const local = normalizeIp(request.socket.localAddress ?? "");
+  if (local) hosts.add(local);
+  if (!requested || !hosts.has(requested)) throw new RequestError(400, "Invalid service address.");
+  // Preserve browser origin identity: a mapped-IPv6 URL and a dotted-IPv4 URL
+  // share an address, but must not authorize each other's form submissions.
+  return new URL(`http://${host}`).origin;
+}
+function normalizeIp(value: string): string | undefined {
+  if (isIP(value) === 4) return value;
+  if (isIP(value) !== 6 || value.includes("%")) return undefined;
+  const canonical = new URL(`http://[${value}]/`).hostname.slice(1, -1);
+  const mapped = /^::ffff:([a-f\d]{1,4}):([a-f\d]{1,4})$/.exec(canonical);
+  if (mapped?.[1] && mapped[2]) {
+    const high = Number.parseInt(mapped[1], 16);
+    const low = Number.parseInt(mapped[2], 16);
+    return [high >>> 8, high & 255, low >>> 8, low & 255].join(".");
+  }
+  return canonical;
 }
 function readBody(request: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {

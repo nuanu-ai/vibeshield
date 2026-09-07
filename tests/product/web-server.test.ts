@@ -40,7 +40,7 @@ function raw(
   options: {
     method?: string;
     body?: string;
-    headers?: Record<string, string>;
+    headers?: Record<string, string | string[]>;
     chunked?: boolean;
   } = {},
 ) {
@@ -55,11 +55,14 @@ function raw(
         port,
         path,
         method: options.method ?? "GET",
-        headers: {
+        headers: Object.entries({
+          host: `127.0.0.1:${port}`,
           origin: base,
           "content-type": "application/x-www-form-urlencoded",
           ...options.headers,
-        },
+        }).flatMap(([name, value]) =>
+          Array.isArray(value) ? value.flatMap((item) => [name, item]) : [name, value],
+        ),
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -236,6 +239,90 @@ it("accepts an explicitly bound local interface without allowing arbitrary Host 
   base = `http://127.0.0.1:${port}`;
   expect((await raw("/")).status).toBe(200);
   expect((await raw("/", { headers: { host: `rebind.evil:${port}` } })).status).toBe(400);
+});
+it.each([
+  ["::ffff:192.168.88.134", "192.168.88.134", "http://192.168.88.134"],
+  ["::ffff:c0a8:5886", "192.168.88.134", "http://192.168.88.134"],
+  ["::ffff:192.168.88.134", "[::ffff:c0a8:5886]", "http://[::ffff:c0a8:5886]"],
+  ["::ffff:127.0.0.1", "[::ffff:7f00:1]", "http://[::ffff:7f00:1]"],
+  ["2001:0db8:0000:0000:0000:0000:0000:0001", "[2001:db8::1]", "http://[2001:db8::1]"],
+  ["2001:db8::1", "[2001:0DB8:0000:0000:0000:0000:0000:0001]", "http://[2001:db8::1]"],
+])("accepts equivalent receiving IP literals on a dual-stack bind: %s / %s", async (localAddress, host, origin) => {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await new Promise<void>((resolve) => server.listen(0, "::", resolve));
+  port = (server.address() as { port: number }).port;
+  // Control only the kernel-supplied receiving-address boundary. The actual
+  // server binds :: and receives IPv4 requests through Node's HTTP parser.
+  server.on("connection", (socket) => {
+    expect(socket.localAddress).toMatch(/^::ffff:/);
+    Object.defineProperty(socket, "localAddress", { value: localAddress });
+  });
+  expect((await raw("/", { headers: { host: `${host}:${port}` } })).status).toBe(200);
+  expect(
+    (
+      await raw("/scans", {
+        method: "POST",
+        body: "repository=https://github.com/owner/repo",
+        headers: { host: `${host}:${port}`, origin: `${origin}:${port}` },
+      })
+    ).status,
+  ).toBe(303);
+});
+it("normalizes only IP literals and never trusts a different host, port, duplicate or forwarded authority", async () => {
+  server.prependListener("request", (request) => {
+    Object.defineProperty(request.socket, "localAddress", {
+      value: "::ffff:192.168.88.134",
+      configurable: true,
+    });
+  });
+  for (const host of [
+    `evil.test:${port}`,
+    `192.168.88.135:${port}`,
+    `192.168.88.134:${port + 1}`,
+    `[::ffff:c0a8:5887]:${port}`,
+    `[2001:db8::1]:${port}`,
+    `[::192.168.88.134]:${port}`,
+    `[192.168.88.134]:${port}`,
+    `192.168.88.134.evil.test:${port}`,
+    `evil.test@192.168.88.134:${port}`,
+    `192.168.88.134:${port}/`,
+    `192.168.88.134:${port}?x`,
+    `192.168.88.134:${port}#x`,
+    `0xc0a85886:${port}`,
+    `3232258182:${port}`,
+    `0300.0250.0130.0206:${port}`,
+    `[::ffff:192.168.88.134%25en0]:${port}`,
+  ]) {
+    expect(
+      (
+        await raw("/", {
+          headers: {
+            host,
+            "x-forwarded-host": `192.168.88.134:${port}`,
+            forwarded: `host="192.168.88.134:${port}"`,
+          },
+        })
+      ).status,
+    ).toBe(400);
+  }
+  expect(
+    (await raw("/", { headers: { host: [`192.168.88.134:${port}`, `192.168.88.134:${port}`] } }))
+      .status,
+  ).toBe(400);
+  expect(
+    (
+      await raw("/scans", {
+        method: "POST",
+        body: "repository=https://github.com/owner/repo",
+        headers: {
+          host: `[::ffff:c0a8:5886]:${port}`,
+          origin: `http://192.168.88.134:${port}`,
+        },
+      })
+    ).status,
+  ).toBe(400);
+  expect(jobs.busy()).toBe(false);
 });
 it("rejects encoded or ambiguous paths and never mounts browser control or cleanup routes", async () => {
   for (const path of [

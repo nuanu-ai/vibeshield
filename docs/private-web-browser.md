@@ -25,6 +25,9 @@ The default address is `http://127.0.0.1:3000`. `HOST` accepts an IP address or
 choice. Host headers must name loopback or the actual receiving interface, with
 the server's port. Arbitrary DNS aliases and forwarded Host/Origin headers are
 not trusted. Browser submissions require an exact same-origin Origin header.
+IPv6 literals are compared canonically. On a dual-stack `HOST=::` bind,
+IPv4-mapped receiving addresses also accept their equivalent dotted IPv4 Host.
+This address equivalence does not make different browser origins interchangeable.
 There is no application authentication or public multi-user hosting in this slice.
 
 `VIBESHIELD_TOOLCHAIN_TAG` selects the prepared image, defaulting to
