@@ -25,6 +25,12 @@ stay in the disposable guest. Malformed YAML, tool errors, missing evidence,
 unsafe paths, and oversized exports cannot become a successful empty check.
 Engine warnings reduce coverage.
 
+Every emitted record is checked before publication filtering: it must have an
+audit ID, audit reference, primary location, and supported severity/confidence
+values. A malformed record fails the entire workflow result, including a mix of
+valid and malformed records. Well-formed unselected audit records are filtered
+without failing coverage.
+
 ## Coverage limits
 
 Only root `.github/workflows/*.yml` and `*.yaml` files are included. Composite

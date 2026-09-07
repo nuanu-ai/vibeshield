@@ -70,13 +70,23 @@ export function sanitizeZizmor(value) {
   if (!Array.isArray(value)) throw new Error();
   return value.map((raw) => {
     const item = object(raw);
-    if (!Array.isArray(item.locations)) throw new Error();
+    const determinations = object(item.determinations);
+    if (
+      typeof item.ident !== "string" ||
+      !/^[a-z][a-z0-9-]{0,127}$/.test(item.ident) ||
+      item.url !== `https://docs.zizmor.sh/audits/#${item.ident}` ||
+      !["Informational", "Low", "Medium", "High"].includes(determinations.severity) ||
+      !["Low", "Medium", "High"].includes(determinations.confidence) ||
+      !Array.isArray(item.locations) ||
+      !item.locations.some((loc) => object(object(loc).symbolic).kind === "Primary")
+    )
+      throw new Error();
     return {
       ident: item.ident,
       url: item.url,
       determinations: {
-        severity: object(item.determinations).severity,
-        confidence: object(item.determinations).confidence,
+        severity: determinations.severity,
+        confidence: determinations.confidence,
       },
       locations: item.locations
         .filter((loc) => object(object(loc).symbolic).kind === "Primary")

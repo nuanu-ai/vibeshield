@@ -298,3 +298,143 @@ it("requests strict offline parsing, ignores repository annotations and reads ex
   ])
     expect(argv).toContain(flag);
 });
+
+function engineFinding() {
+  return {
+    ident: "template-injection",
+    url: "https://docs.zizmor.sh/audits/#template-injection",
+    determinations: { severity: "High", confidence: "High" },
+    desc: secret,
+    locations: [
+      {
+        symbolic: {
+          kind: "Primary",
+          key: { Local: { verbatim_path: "/work/snapshot/.github/workflows/vulnerable.yml" } },
+          annotation: secret,
+        },
+        concrete: {
+          location: { start_point: { row: 11 }, end_point: { row: 11 } },
+          feature: secret,
+        },
+      },
+    ],
+  };
+}
+async function sanitizedScan(records: unknown[]) {
+  let value: ReturnType<typeof output>;
+  try {
+    value = { ...output(), findings: guest.sanitizeZizmor(records) };
+  } catch {
+    // The real guest entrypoint catches sanitizer errors and exits without an export.
+    return scanZizmor(await context(output(), 1));
+  }
+  return scanZizmor(await context(value));
+}
+const malformedFields = [
+  ["ident", undefined],
+  ["ident", 17],
+  ["ident", ""],
+  ["ident", "invalid audit id"],
+  ["url", undefined],
+  ["url", secret],
+  ["locations", undefined],
+  ["locations", null],
+  ["locations", 17],
+  ["locations", []],
+  ["determinations", undefined],
+  ["severity", undefined],
+  ["severity", 17],
+  ["severity", "Unknown"],
+  ["severity", "high"],
+  ["confidence", undefined],
+  ["confidence", 17],
+  ["confidence", "Unknown"],
+  ["confidence", "high"],
+] as const;
+function alterField(value: Record<string, unknown>, field: string, replacement: unknown) {
+  if (field === "severity" || field === "confidence")
+    (value.determinations as Record<string, unknown>)[field] = replacement;
+  else {
+    value[field] = replacement;
+    // Isolate audit-ID validation from the independent reference correspondence check.
+    if (field === "ident") value.url = `https://docs.zizmor.sh/audits/#${replacement}`;
+  }
+}
+it.each(
+  malformedFields,
+)("fails malformed emitted %s=%s through sanitizer, adapter and report", async (field, replacement) => {
+  const item = engineFinding();
+  alterField(item, field, replacement);
+  expect(() => guest.sanitizeZizmor([item])).toThrow();
+  const result = await sanitizedScan([item]);
+  expect(result.findings).toEqual([]);
+  expect(result.coverage).toContainEqual(
+    expect.objectContaining({ scanner: "zizmor", area: "workflows", status: "failed" }),
+  );
+  expect(report(result).issues).toEqual([]);
+  expect(report(result).incomplete).toBe(true);
+  expect(JSON.stringify(result)).not.toContain(secret);
+
+  // A malformed normalized export must fail independently of the guest's defense.
+  const exported = guest.sanitizeZizmor([engineFinding()])[0];
+  alterField(exported, field, replacement);
+  const fromExport = await scanZizmor(await context({ ...output(), findings: [exported] }));
+  expect(fromExport.findings).toEqual([]);
+  expect(fromExport.coverage[0]?.status).toBe("failed");
+});
+it("fails the entire workflow result when valid and malformed selected or unselected records are mixed", async () => {
+  const good = engineFinding();
+  for (const ident of ["template-injection", "unpinned-uses"]) {
+    const bad = {
+      ...engineFinding(),
+      ident,
+      url: `https://docs.zizmor.sh/audits/#${ident}`,
+      determinations: { severity: "High", confidence: 17 },
+    };
+    for (const records of [
+      [good, bad],
+      [bad, good],
+    ]) {
+      expect(() => guest.sanitizeZizmor(records)).toThrow();
+      const result = await sanitizedScan(records);
+      expect(result.findings).toEqual([]);
+      expect(result.coverage[0]?.status).toBe("failed");
+      expect(report(result).incomplete).toBe(true);
+      const validExport = guest.sanitizeZizmor([good])[0];
+      const badExport = {
+        ...validExport,
+        ident,
+        url: `https://docs.zizmor.sh/audits/#${ident}`,
+        determinations: bad.determinations,
+      };
+      const fromExport = await scanZizmor(
+        await context({ ...output(), findings: [validExport, badExport] }),
+      );
+      expect(fromExport.findings).toEqual([]);
+      expect(fromExport.coverage[0]?.status).toBe("failed");
+    }
+  }
+});
+it("accepts valid unselected audit records and all pinned determination values without publishing routine advice", async () => {
+  for (const severity of ["Informational", "Low", "Medium", "High"])
+    for (const confidence of ["Low", "Medium", "High"]) {
+      const item = {
+        ...engineFinding(),
+        ident: "unpinned-uses",
+        url: "https://docs.zizmor.sh/audits/#unpinned-uses",
+        determinations: { severity, confidence },
+      };
+      const result = await sanitizedScan([item]);
+      expect(result.findings).toEqual([]);
+      expect(result.coverage[0]?.status).toBe("checked");
+      expect(report(result).issues).toEqual([]);
+    }
+  const unknown = {
+    ...engineFinding(),
+    ident: "future-audit",
+    url: "https://docs.zizmor.sh/audits/#future-audit",
+  };
+  const result = await sanitizedScan([unknown]);
+  expect(result.findings).toEqual([]);
+  expect(result.coverage[0]?.status).toBe("checked");
+});

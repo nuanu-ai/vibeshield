@@ -68,12 +68,17 @@ export async function scanZizmor({
     const findings: Finding[] = [];
     for (const raw of value.findings) {
       const item = object(raw);
-      const rule = zizmorPolicy.audits.find((rule) => rule.id === item.ident);
-      if (!rule) continue;
+      const determinations = object(item.determinations);
+      // Validate every emitted record before policy filtering. A malformed
+      // unselected record cannot turn into successful empty workflow coverage.
       if (
+        typeof item.ident !== "string" ||
+        !/^[a-z][a-z0-9-]{0,127}$/.test(item.ident) ||
+        !["Informational", "Low", "Medium", "High"].includes(text(determinations.severity)) ||
+        !["Low", "Medium", "High"].includes(text(determinations.confidence)) ||
         !Array.isArray(item.locations) ||
         item.locations.length === 0 ||
-        item.url !== `https://docs.zizmor.sh/audits/#${rule.id}`
+        item.url !== `https://docs.zizmor.sh/audits/#${item.ident}`
       )
         return failed();
       const locations = [];
@@ -97,7 +102,8 @@ export async function scanZizmor({
           return failed();
         locations.push({ path, line: row + 1 });
       }
-      const determinations = object(item.determinations);
+      const rule = zizmorPolicy.audits.find((rule) => rule.id === item.ident);
+      if (!rule) continue;
       const severity = text(determinations.severity).toLowerCase();
       const confidence = text(determinations.confidence).toLowerCase();
       const identity = createHash("sha256")
