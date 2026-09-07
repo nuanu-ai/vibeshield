@@ -49,6 +49,12 @@ const templates = {
     verification:
       "Review the rendered configuration and run the configuration scan to confirm the privilege finding is gone.",
   },
+  "workflow-input": {
+    remediation:
+      "Pass untrusted workflow input through an environment variable, then use safe quoting in shell commands. Do not interpolate the input directly into run or another executable script field.",
+    verification:
+      "Check a workflow fixture with a quote-bearing pull request title, confirm the title remains data, and rerun the workflow security scan.",
+  },
   "workflow-privilege": {
     remediation:
       "Restrict workflow permissions and untrusted trigger access to the minimum needed for the job.",

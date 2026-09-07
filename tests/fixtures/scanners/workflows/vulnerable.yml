@@ -1,0 +1,12 @@
+name: Pull request title
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: echo "${{ github.event.pull_request.title }}" # zizmor: ignore[template-injection]

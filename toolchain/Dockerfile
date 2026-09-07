@@ -141,10 +141,23 @@ RUN chmod +x /usr/local/bin/vibeshield-joern-extract /usr/local/bin/vibeshield-o
 RUN curl -fsSL https://get.anchore.io/syft | sh -s -- -b /usr/local/bin \
   && curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
     | bash -s -- latest /usr/local/bin \
-  && python3 -m pip install --no-cache-dir --break-system-packages zizmor \
   && syft version \
-  && actionlint -version \
-  && zizmor --version
+  && actionlint -version
+
+# Official zizmor v1.30.0 immutable release archives; MIT license at the exact tag commit.
+RUN arch="$(dpkg --print-architecture)" \
+  && case "$arch" in \
+    amd64) asset="x86_64"; digest="ec8c95cd800845abb9bbc5f377ec7c57d2eb8e2386a00a201d3a74ee4092e5ed" ;; \
+    arm64) asset="aarch64"; digest="018a024d6b6d09733b07f6ef42838d984c23ec04bc9b2acd55f7d67826aeafe5" ;; \
+    *) exit 1 ;; \
+  esac \
+  && curl -fsSL "https://github.com/zizmorcore/zizmor/releases/download/v1.30.0/zizmor-${asset}-unknown-linux-gnu.tar.gz" -o /tmp/zizmor.tar.gz \
+  && printf '%s  %s\n' "$digest" /tmp/zizmor.tar.gz | sha256sum -c - \
+  && tar -xzf /tmp/zizmor.tar.gz -C /usr/local/bin zizmor \
+  && rm /tmp/zizmor.tar.gz \
+  && test "$(zizmor --version)" = "zizmor 1.30.0"
+COPY licenses/zizmor.LICENSE /opt/vibeshield/zizmor/LICENSE
+RUN printf '%s  %s\n' 'a6fd1bd18da7cec8284639d5b0d351b90934317be1b9f9ea94a077621c6f35af' /opt/vibeshield/zizmor/LICENSE | sha256sum -c -
 
 # Official Trivy 0.72.0 release tarballs, pinned by upstream SHA-256.
 RUN arch="$(dpkg --print-architecture)" \
@@ -210,6 +223,8 @@ RUN mkdir -p /opt/vibeshield \
 # Public-web acquisition and file-only, redacted scanner exports.
 COPY acquire.mjs /usr/local/bin/vibeshield-acquire
 COPY export-results.mjs /usr/local/bin/export-results.mjs
+COPY zizmor.mjs /usr/local/bin/vibeshield-zizmor
+RUN node /usr/local/bin/vibeshield-zizmor install-config
 RUN ln -s /usr/local/bin/export-results.mjs /usr/local/bin/vibeshield-export-results \
   && mkdir -p /opt/vibeshield \
   && printf '[extend]\nuseDefault = true\n' > /opt/vibeshield/gitleaks.toml \

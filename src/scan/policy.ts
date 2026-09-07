@@ -1,5 +1,11 @@
 import type { RulePolicy } from "./contracts.js";
 
+export const zizmorPolicy = {
+  version: "1.30.0",
+  // Confirmed with the pinned engine on direct PR title expansion and env/quoted controls.
+  audits: [{ id: "template-injection", remediationKey: "workflow-input" }],
+} as const;
+
 export const trivyPolicy = {
   version: "0.72.0",
   bundle: {
@@ -92,11 +98,13 @@ export const defaultPolicy: readonly RulePolicy[] = [
       requireHighConfidence: true,
     }),
   ),
-  {
-    scanner: "zizmor",
-    ruleId: "dangerous-workflow-permissions",
-    remediationKey: "workflow-privilege",
-    publishMedium: false,
-    requireHighConfidence: true,
-  },
+  ...zizmorPolicy.audits.map(
+    (audit): RulePolicy => ({
+      scanner: "zizmor",
+      ruleId: audit.id,
+      remediationKey: audit.remediationKey,
+      publishMedium: false,
+      requireHighConfidence: true,
+    }),
+  ),
 ];

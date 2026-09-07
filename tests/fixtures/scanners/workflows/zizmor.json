@@ -1,0 +1,30 @@
+[
+  {
+    "ident": "unpinned-uses",
+    "desc": "unpinned action reference",
+    "url": "https://docs.zizmor.sh/audits/#unpinned-uses",
+    "determinations": { "confidence": "High", "severity": "High", "persona": "Regular" },
+    "ignored": false,
+    "locations": [{ "path": "/work/snapshot/.github/workflows/fixed.yml", "row": 8, "endRow": 8 }]
+  },
+  {
+    "ident": "template-injection",
+    "desc": "code injection via template expansion",
+    "url": "https://docs.zizmor.sh/audits/#template-injection",
+    "determinations": { "confidence": "High", "severity": "High", "persona": "Regular" },
+    "ignored": true,
+    "locations": [
+      { "path": "/work/snapshot/.github/workflows/vulnerable.yml", "row": 11, "endRow": 11 }
+    ]
+  },
+  {
+    "ident": "unpinned-uses",
+    "desc": "unpinned action reference",
+    "url": "https://docs.zizmor.sh/audits/#unpinned-uses",
+    "determinations": { "confidence": "High", "severity": "High", "persona": "Regular" },
+    "ignored": false,
+    "locations": [
+      { "path": "/work/snapshot/.github/workflows/vulnerable.yml", "row": 8, "endRow": 8 }
+    ]
+  }
+]
