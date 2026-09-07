@@ -1,5 +1,11 @@
 import type { RulePolicy } from "./contracts.js";
 
+// Only these explicit lockfile extractors are enabled; package.json resolution is disabled.
+export const osvPolicy = {
+  version: "2.3.8",
+  lockfiles: ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock"],
+} as const;
+
 export const opengrepRules = [
   {
     id: "rules_lgpl_javascript_exec_rule-shelljs-os-command-exec",

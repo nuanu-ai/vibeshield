@@ -164,6 +164,23 @@ RUN arch="$(dpkg --print-architecture)" \
 
 WORKDIR /work
 
+# Official OSV-Scanner v2.3.8, release assets pinned by upstream SHA-256.
+RUN arch="$(dpkg --print-architecture)" \
+  && case "$arch" in \
+    amd64) digest="bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc" ;; \
+    arm64) digest="8158b18edd2d03b1a30d905ca91b032bc62262167be8f206c27114f08823e27c" ;; \
+    *) exit 1 ;; \
+  esac \
+  && curl -fsSL "https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_${arch}" -o /usr/local/bin/osv-scanner \
+  && printf '%s  %s\n' "$digest" /usr/local/bin/osv-scanner | sha256sum -c - \
+  && chmod 755 /usr/local/bin/osv-scanner \
+  && osv-scanner --version
+
+COPY osv.mjs /usr/local/bin/vibeshield-osv
+RUN mkdir -p /opt/vibeshield \
+  && touch /opt/vibeshield/osv.toml \
+  && chmod 644 /opt/vibeshield/osv.toml
+
 # Public-web acquisition and file-only, redacted scanner exports.
 COPY acquire.mjs /usr/local/bin/vibeshield-acquire
 COPY export-results.mjs /usr/local/bin/export-results.mjs
