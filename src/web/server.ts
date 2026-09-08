@@ -38,6 +38,18 @@ export function createWebServer(jobs: JobStore): Server {
       });
     },
   );
+  function admit(url: string): { id: string } {
+    try {
+      return jobs.start(url);
+    } catch (error) {
+      // A refused submission is the signal that someone is waiting. Try the
+      // pending cleanup once more in the background so a healed environment
+      // reopens admission without an operator restart. Never await it: a stuck
+      // deletion must not hold the response open.
+      if (error instanceof BusyError) void jobs.retryCleanup().catch(() => {});
+      throw error;
+    }
+  }
   async function handle(request: IncomingMessage, response: ServerResponse) {
     const origin = requestOrigin(request, server);
     const path = request.url ?? "";
@@ -77,7 +89,7 @@ export function createWebServer(jobs: JobStore): Server {
       } catch {
         throw new RequestError(400, "Enter a public GitHub repository URL.");
       }
-      const { id } = jobs.start(url);
+      const { id } = admit(url);
       return redirect(response, `/scans/${id}`);
     }
     if (path === "/")
@@ -102,13 +114,13 @@ export function createWebServer(jobs: JobStore): Server {
           status: job.status,
           stages: job.stages.map(({ stage, status, message }) => ({ stage, status, message })),
           ...(job.error ? { error: job.error } : {}),
-          reportReady: job.status === "completed" && job.report !== undefined,
+          reportReady: job.report !== undefined,
         }),
         "application/json",
       );
     }
     if (match?.[2] === "report") {
-      if (job.status !== "completed" || !job.report) return redirect(response, `/scans/${job.id}`);
+      if (!job.report) return redirect(response, `/scans/${job.id}`);
       return send(response, 200, renderReport(job.report));
     }
     return send(response, 200, renderProgress(job));

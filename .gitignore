@@ -28,6 +28,7 @@ runs/
 /artifacts/
 tmp/
 docs/ongoing-work/
+docs/superpowers/
 .local/research/
 
 # OS/editor

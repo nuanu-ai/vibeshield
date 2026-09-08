@@ -28,7 +28,7 @@ export interface JobStore {
 }
 export class BusyError extends Error {
   constructor() {
-    super("Another scan is running or cleanup is pending");
+    super("Another scan is still finishing. Try again in a few seconds.");
   }
 }
 export class CleanupError extends Error {
@@ -161,7 +161,10 @@ export function createJobs(options: {
           publishFinished(current, "completed");
         } catch (error) {
           if (error instanceof CleanupError) {
-            if (error.report) current.report = error.report;
+            if (error.report) {
+              current.report = error.report;
+              job.report = error.report;
+            }
             job.status = "cleanup-failed";
             job.error = "Temporary resource cleanup is still pending. Please try again later.";
             options.diagnostic?.(

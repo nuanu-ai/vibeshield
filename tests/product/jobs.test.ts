@@ -366,7 +366,7 @@ it("keeps cleanup-failed admission closed through failed retries and publishes s
   await vi.waitFor(() => expect(jobs.get(id)?.status).toBe("cleanup-failed"));
   expect(jobs.busy()).toBe(true);
   expect(jobs.get(id)?.finishedAt).toBeUndefined();
-  expect(jobs.get(id)?.report).toBeUndefined();
+  expect(jobs.get(id)?.report?.issues).toHaveLength(5);
   expect(() => jobs.start(fixtureSnapshot.url)).toThrow(BusyError);
   await expect(jobs.retryCleanup()).rejects.toBeInstanceOf(CleanupError);
   expect(jobs.busy()).toBe(true);
@@ -526,4 +526,19 @@ it("evicts only the oldest completed report at 21 reports and a new store has no
   expect(restarted.jobs.get(ids[20] ?? "")).toBeUndefined();
   expect(restarted.jobs.busy()).toBe(false);
   await restarted.jobs.shutdown();
+});
+// Withholding a finished report does not remove the leaked sandbox; it only
+// punishes the person who waited. Admission stays closed either way.
+it("hands over the finished report while cleanup is still unresolved", async () => {
+  const { jobs, sandbox } = setup();
+  sandbox.cleanupFails = true;
+  sandbox.releaseAll();
+  const { id } = jobs.start(fixtureSnapshot.url);
+  await vi.waitFor(() => expect(jobs.get(id)?.status).toBe("cleanup-failed"));
+  expect(jobs.get(id)?.report?.issues).toHaveLength(5);
+  expect(jobs.busy()).toBe(true);
+  expect(() => jobs.start(fixtureSnapshot.url)).toThrow(BusyError);
+  sandbox.cleanupFails = false;
+  await jobs.retryCleanup();
+  await jobs.shutdown();
 });

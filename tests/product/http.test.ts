@@ -81,15 +81,16 @@ it("keeps cleanup failure busy until a bounded maintenance retry verifies deleti
   const path = await start();
   await expect.poll(async () => (await status(path)).status).toBe("cleanup-failed");
   expect((await submit()).status).toBe(409);
+  await expect.poll(() => sandbox.destroyed.length).toBe(2);
   expect(await (await get("/")).text()).toMatch(/cleanup.*pending/i);
-  expect((await get(`${path}/report`)).headers.get("location")).toBe(path);
+  expect((await get(`${path}/report`)).status).toBe(200);
   expect(sandbox.sessions.size).toBe(1);
   sandbox.cleanupFails = false;
   sandbox.cleanupGate = deferred();
   clock.advance(5000);
-  await expect.poll(() => sandbox.destroyed.length).toBe(2);
+  await expect.poll(() => sandbox.destroyed.length).toBe(3);
   clock.advance(60_000);
-  expect(sandbox.destroyed).toHaveLength(2);
+  expect(sandbox.destroyed).toHaveLength(3);
   expect((await submit()).status).toBe(409);
   sandbox.cleanupGate.resolve();
   expect(await complete(path)).toContain("Exposed credential");
@@ -118,7 +119,7 @@ it("exhausts three maintenance attempts without releasing admission or leaking d
   expect(clock.pending()).toBe(0);
   expect((await submit()).status).toBe(409);
   const state = await status(path);
-  expect(state).toMatchObject({ status: "cleanup-failed", reportReady: false });
+  expect(state).toMatchObject({ status: "cleanup-failed", reportReady: true });
   expect(JSON.stringify(state)).not.toMatch(/operator|retry attempt|synthetic-credential/);
   expect(diagnostics.join(" ")).toMatch(/operator/i);
   expect(diagnostics.join(" ")).not.toContain(privateText);
@@ -243,4 +244,43 @@ it("keeps an unexpected coordinator failure out of the 500 response", async () =
   expect(html).toMatch(/role="alert">[^<]+/);
   expect(html).not.toContain(privateText);
   expect(sandbox.created).toHaveLength(0);
+});
+
+// The person who waited for this scan gets their report; the leaked sandbox is
+// an operator problem and keeps admission closed on its own.
+it("serves the finished report while cleanup is still pending", async () => {
+  sandbox.cleanupFails = true;
+  sandbox.releaseAll();
+  const path = await start();
+  await expect.poll(async () => (await status(path)).status).toBe("cleanup-failed");
+  expect(await status(path)).toMatchObject({ reportReady: true });
+  const response = await get(`${path}/report`);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("Exposed credential");
+  expect((await submit()).status).toBe(409);
+});
+
+// Background attempts stop so the process can go idle. Without a retry driven by
+// a waiting person the service stays closed until an operator restarts it.
+it("reopens admission after a refused submission retries the pending cleanup", async () => {
+  sandbox.cleanupFails = true;
+  sandbox.releaseAll();
+  const path = await start();
+  await expect.poll(async () => (await status(path)).status).toBe("cleanup-failed");
+  for (const count of [2, 3, 4]) {
+    clock.advance(5000);
+    await expect.poll(() => sandbox.destroyed.length).toBe(count);
+  }
+  clock.advance(86_400_000);
+  expect(clock.pending()).toBe(0);
+  const stillBroken = await submit();
+  expect(stillBroken.status).toBe(409);
+  await expect.poll(() => sandbox.destroyed.length).toBe(5);
+  expect((await status(path)).status).toBe("cleanup-failed");
+  sandbox.cleanupFails = false;
+  const refused = await submit();
+  expect(refused.status).toBe(409);
+  expect(await refused.text()).toMatch(/again/i);
+  await expect.poll(async () => (await status(path)).status).toBe("completed");
+  expect((await submit()).status).toBe(303);
 });
