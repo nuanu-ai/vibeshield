@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Progress, Report } from "../scan/contracts.js";
+import type { FailureCode, Progress, Report } from "../scan/contracts.js";
+import { ScanFailure } from "../scan/contracts.js";
 import type { ScanDiagnostic } from "../scan/execute.js";
 import { LIMITS } from "../scan/limits.js";
 import { parseRepositoryUrl } from "../scan/source.js";
@@ -17,7 +18,7 @@ export interface Job {
   status: "running" | "completed" | "failed" | "cleanup-failed";
   stages: Progress[];
   report?: Report;
-  error?: string;
+  failure?: FailureCode;
 }
 export interface JobStore {
   start(url: string): { id: string };
@@ -32,7 +33,10 @@ export class BusyError extends Error {
   }
 }
 export class CleanupError extends Error {
-  constructor(readonly report?: Report) {
+  constructor(
+    readonly report?: Report,
+    readonly code: FailureCode = "internal",
+  ) {
     super("Sandbox cleanup could not be verified; operator cleanup is required");
   }
 }
@@ -50,6 +54,7 @@ export function createJobs(options: {
     deadline: ScanDeadline;
     done: Promise<void>;
     report?: Report;
+    failure?: FailureCode;
     finishedStatus?: "completed" | "failed" | "cleanup_failed";
   };
   let active: Active | undefined;
@@ -107,11 +112,10 @@ export function createJobs(options: {
     if (current.report) {
       job.report = current.report;
       job.status = "completed";
-      delete job.error;
+      delete job.failure;
     } else {
       job.status = "failed";
-      job.error =
-        "Scan failed before a report could be prepared. Check repository access and the scanner environment.";
+      job.failure = current.failure ?? "internal";
     }
     job.finishedAt = options.clock.now();
     if (active === current) {
@@ -165,13 +169,15 @@ export function createJobs(options: {
               current.report = error.report;
               job.report = error.report;
             }
+            current.failure = error.code;
             job.status = "cleanup-failed";
-            job.error = "Temporary resource cleanup is still pending. Please try again later.";
+            job.failure = "cleanup_pending";
             options.diagnostic?.(
               "Temporary resource cleanup could not be verified. Admission remains closed during bounded retries.",
             );
             scheduleCleanup(current);
           } else {
+            current.failure = error instanceof ScanFailure ? error.code : "internal";
             finish(current);
             publishFinished(current, "failed");
           }

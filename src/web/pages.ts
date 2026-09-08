@@ -1,4 +1,4 @@
-import type { Issue, Report, Stage } from "../scan/contracts.js";
+import type { FailureCode, Issue, Report, Stage } from "../scan/contracts.js";
 import type { Job } from "./jobs.js";
 
 const labels: Record<Stage, string> = {
@@ -12,6 +12,19 @@ const labels: Record<Stage, string> = {
   report: "Prepare report",
   cleanup: "Remove temporary resources",
 };
+const failureText: Record<FailureCode, string> = {
+  repository_unreachable:
+    "We couldn't get that repo from GitHub. Check the link. Private repos don't work yet.",
+  repository_too_large: "That repo is larger than we can copy in one go.",
+  took_too_long: "This one ran past the time we allow, so we stopped it.",
+  environment_unavailable:
+    "Our scanning machine didn't start. Nothing ran, and nothing was left behind.",
+  cleanup_pending: "We're still clearing up after the last scan. Try again in a few seconds.",
+  internal: "Something broke on our side before we could write anything up.",
+};
+export function failureMessage(failure?: FailureCode): string {
+  return failure ? failureText[failure] : "";
+}
 function escapeHtml(value: string | number): string {
   return String(value).replace(
     /[&<>"']/g,
@@ -31,7 +44,7 @@ export function renderHome(error?: string): string {
 export function renderProgress(job: Job): string {
   return page(
     "Scan progress",
-    `<h1>Scan progress</h1><p>${escapeHtml(job.url)}</p><p role="status" data-status>${job.status === "running" ? "Running" : job.status === "completed" ? "Completed" : "Scan needs attention"}</p><p data-error role="alert">${escapeHtml(job.error ?? "")}</p><button type="button" data-retry hidden>Retry status</button><ol data-stages>${job.stages.map((entry) => `<li data-stage="${escapeHtml(entry.stage)}"><strong>${escapeHtml(labels[entry.stage])}</strong><span data-stage-state>${escapeHtml(entry.status)} — ${escapeHtml(entry.message)}</span></li>`).join("")}</ol><p>You can reload this page while the scan runs.</p><a href="/">Start another scan</a>`,
+    `<h1>Scan progress</h1><p>${escapeHtml(job.url)}</p><p role="status" data-status>${job.status === "running" ? "Running" : job.status === "completed" ? "Completed" : "Scan needs attention"}</p><p data-error role="alert">${escapeHtml(failureMessage(job.failure))}</p><button type="button" data-retry hidden>Retry status</button><ol data-stages>${job.stages.map((entry) => `<li data-stage="${escapeHtml(entry.stage)}"><strong>${escapeHtml(labels[entry.stage])}</strong><span data-stage-state>${escapeHtml(entry.status)} — ${escapeHtml(entry.message)}</span></li>`).join("")}</ol><p>You can reload this page while the scan runs.</p><a href="/">Start another scan</a>`,
     true,
   );
 }

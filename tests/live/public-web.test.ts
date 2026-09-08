@@ -68,7 +68,7 @@ it("submits a public GitHub URL through the real web/executor/runtime compositio
       durationMs: Date.now() - started,
       status: job?.status,
       stages: job?.stages,
-      error: job?.error,
+      failure: job?.failure,
       report: job?.report,
     });
     expect(
@@ -109,7 +109,7 @@ it("submits a public GitHub URL through the real web/executor/runtime compositio
         durationMs: Date.now() - started,
         status: job?.status,
         stages: job?.stages,
-        error: job?.error,
+        failure: job?.failure,
         report: job?.report,
       });
     }

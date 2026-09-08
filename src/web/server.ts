@@ -3,7 +3,13 @@ import { isIP } from "node:net";
 import { parseRepositoryUrl } from "../scan/source.js";
 import { browserScript, stylesheet } from "./assets.js";
 import { BusyError, type JobStore } from "./jobs.js";
-import { renderHome, renderProgress, renderReport, renderUnavailable } from "./pages.js";
+import {
+  failureMessage,
+  renderHome,
+  renderProgress,
+  renderReport,
+  renderUnavailable,
+} from "./pages.js";
 
 const bodyLimit = 8 * 1024;
 const jobPath =
@@ -113,7 +119,7 @@ export function createWebServer(jobs: JobStore): Server {
         JSON.stringify({
           status: job.status,
           stages: job.stages.map(({ stage, status, message }) => ({ stage, status, message })),
-          ...(job.error ? { error: job.error } : {}),
+          ...(job.failure ? { error: failureMessage(job.failure) } : {}),
           reportReady: job.report !== undefined,
         }),
         "application/json",

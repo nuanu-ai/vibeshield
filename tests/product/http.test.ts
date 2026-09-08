@@ -284,3 +284,23 @@ it("reopens admission after a refused submission retries the pending cleanup", a
   await expect.poll(async () => (await status(path)).status).toBe("completed");
   expect((await submit()).status).toBe(303);
 });
+
+// One generic sentence for every failure leaves the person with nothing to act
+// on, even though the executor already knows which one happened.
+it("tells apart a repository it cannot read from a scan environment that is down", async () => {
+  const alertOf = (html: string) => /role="alert"[^>]*>([^<]+)</.exec(html)?.[1]?.trim() ?? "";
+  sandbox.acquisitionFails = true;
+  const first = await start();
+  await expect.poll(async () => (await status(first)).status).toBe("failed");
+  const repository = alertOf(await (await get(first)).text());
+  expect(repository).toMatch(/repo/i);
+
+  sandbox.acquisitionFails = false;
+  sandbox.setAvailability({ available: false, reason: privateText });
+  const second = await start();
+  await expect.poll(async () => (await status(second)).status).toBe("failed");
+  const environment = alertOf(await (await get(second)).text());
+  expect(environment).not.toMatch(/repo/i);
+  expect(environment).not.toContain(privateText);
+  expect(environment).not.toBe(repository);
+});

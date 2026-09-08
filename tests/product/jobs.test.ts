@@ -542,3 +542,25 @@ it("hands over the finished report while cleanup is still unresolved", async () 
   await jobs.retryCleanup();
   await jobs.shutdown();
 });
+// A live stage that only repeats its own status tells the waiting person nothing.
+it("says how much each check found while the scan runs", async () => {
+  const { jobs, sandbox } = setup();
+  sandbox.releaseAll();
+  const { id } = jobs.start(fixtureSnapshot.url);
+  await completed(jobs, id);
+  expect(jobs.get(id)?.stages.find((stage) => stage.stage === "gitleaks")?.message).toMatch(
+    /\b1\b/,
+  );
+  await jobs.shutdown();
+});
+it("says a check found nothing instead of describing its coverage", async () => {
+  const { jobs, sandbox } = setup();
+  sandbox.outputs.set("gitleaks-current", []);
+  sandbox.releaseAll();
+  const { id } = jobs.start(fixtureSnapshot.url);
+  await completed(jobs, id);
+  expect(jobs.get(id)?.stages.find((stage) => stage.stage === "gitleaks")?.message).toMatch(
+    /nothing/i,
+  );
+  await jobs.shutdown();
+});

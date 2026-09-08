@@ -89,6 +89,20 @@ export interface Report {
   suppressedCount: number;
 }
 export type Stage = "prepare" | "acquire" | ScannerId | "report" | "cleanup";
+export type FailureCode =
+  | "repository_unreachable"
+  | "repository_too_large"
+  | "took_too_long"
+  | "environment_unavailable"
+  | "cleanup_pending"
+  | "internal";
+/** A scan that ends without a report carries the reason the user is owed. */
+export class ScanFailure extends Error {
+  override readonly name = "ScanFailure";
+  constructor(readonly code: FailureCode) {
+    super("Scan failed before a report could be prepared");
+  }
+}
 export interface Progress {
   stage: Stage;
   status: "waiting" | "running" | "completed" | "skipped" | "failed";

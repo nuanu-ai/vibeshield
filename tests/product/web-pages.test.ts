@@ -77,7 +77,7 @@ it("escapes every report text field and progress errors, with external assets on
       url: hostile,
       createdAt: 1,
       status: "failed",
-      error: hostile,
+      failure: "internal",
       stages: [{ stage: "acquire", status: "failed", message: hostile }],
     }),
     renderUnavailable(),

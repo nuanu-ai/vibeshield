@@ -7,7 +7,16 @@ import {
   systemClock,
 } from "../web/clock.js";
 import { CleanupError, type ExecuteScan } from "../web/jobs.js";
-import type { Progress, Provenance, Report, ScannerId, ScanResult, Stage } from "./contracts.js";
+import type {
+  FailureCode,
+  Progress,
+  Provenance,
+  Report,
+  ScannerId,
+  ScanResult,
+  Stage,
+} from "./contracts.js";
+import { ScanFailure } from "./contracts.js";
 import { LIMITS } from "./limits.js";
 import { defaultPolicy } from "./policy.js";
 import { buildReport } from "./report.js";
@@ -56,6 +65,7 @@ export function createExecutor(
     let cleanup: Promise<void> | undefined;
     let report: Report | undefined;
     let failure: Error | undefined;
+    let failureCode: FailureCode = "internal";
     let stage: Stage = "prepare";
     let transportFailed = false;
     const observe = (event: ScanDiagnostic) => {
@@ -157,13 +167,17 @@ export function createExecutor(
             : result.coverage.every((entry) => entry.status === "skipped")
               ? "skipped"
               : "completed";
+          const found = result.findings.length;
+          const limited = result.coverage.some(
+            (entry) => entry.status === "failed" || entry.status === "degraded",
+          );
           progress(
             status,
-            result.coverage.some(
-              (entry) => entry.status === "failed" || entry.status === "degraded",
-            )
-              ? "Check completed with coverage limitations."
-              : "Check finished; coverage details are in the report.",
+            status === "skipped"
+              ? "Nothing here for this check to look at."
+              : found === 0
+                ? `Found nothing${limited ? ", and part of it could not be checked" : ""}.`
+                : `Found ${found} thing${found === 1 ? "" : "s"} to look at${limited ? ", and part of it could not be checked" : ""}.`,
             status === "failed" ? "scanner_failed" : undefined,
           );
         } catch {
@@ -185,7 +199,7 @@ export function createExecutor(
           });
           progress(
             "failed",
-            "Check did not complete.",
+            "This check could not finish.",
             overallFailureReason() ??
               (stageDeadline.remainingMs() === 0
                 ? "timeout"
@@ -208,33 +222,32 @@ export function createExecutor(
       });
       progress("completed", "Report prepared.");
     } catch (error) {
-      progress(
-        "failed",
-        "Scan could not prepare a repository report.",
+      const reason =
         overallFailureReason() ??
-          (error instanceof AcquisitionError
-            ? error.code
-            : stage === "prepare"
-              ? "prepare_failed"
-              : stage === "report"
-                ? "report_failed"
-                : "internal_error"),
-      );
-      failure = new Error("Scan failed before a report could be prepared");
+        (error instanceof AcquisitionError
+          ? error.code
+          : stage === "prepare"
+            ? "prepare_failed"
+            : stage === "report"
+              ? "report_failed"
+              : "internal_error");
+      progress("failed", "Scan could not prepare a repository report.", reason);
+      failureCode = failureCodeFor(reason);
+      failure = new ScanFailure(failureCode);
     } finally {
       stage = "cleanup";
       progress("running", "Removing temporary scan resources.");
       try {
         if (creationCleanupFailed) {
           progress("failed", "Temporary resource cleanup could not be verified.", "cleanup_failed");
-          failure = new CleanupError();
+          failure = new CleanupError(undefined, failureCode);
         } else {
           if (created) await remove();
           progress("completed", "Temporary scan resources removed.");
         }
       } catch {
         progress("failed", "Temporary resource cleanup could not be verified.", "cleanup_failed");
-        failure = new CleanupError(report);
+        failure = new CleanupError(report, failureCode);
       } finally {
         deadline.signal.removeEventListener("abort", abort);
         if (!registered) deadline.dispose();
@@ -251,11 +264,30 @@ export function createExecutor(
     }
     if (!report) {
       if (emitFinished) observe({ event: "scan_finished", scanId: request.id, status: "failed" });
-      throw new Error("Scan failed before a report could be prepared");
+      throw new ScanFailure(failureCode);
     }
     if (emitFinished) observe({ event: "scan_finished", scanId: request.id, status: "completed" });
     return report;
   };
+}
+
+function failureCodeFor(reason: string): FailureCode {
+  switch (reason) {
+    case "git_failed":
+    case "invalid_snapshot":
+      return "repository_unreachable";
+    case "file_limit":
+    case "snapshot_limit":
+      return "repository_too_large";
+    case "timeout":
+    case "overall_timeout":
+      return "took_too_long";
+    case "sandbox_failed":
+    case "prepare_failed":
+      return "environment_unavailable";
+    default:
+      return "internal";
+  }
 }
 
 /** One stage budget includes every subcommand and export operation. Runtime
