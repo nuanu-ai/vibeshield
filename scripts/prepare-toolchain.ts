@@ -4,7 +4,9 @@ import { constants } from "node:fs";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { Image } from "microsandbox";
 import { toolchainImage } from "../src/adapters/toolchain.js";
 
 const execFileP = promisify(execFile);
@@ -46,6 +48,41 @@ async function main(): Promise<void> {
     process.stdout.write(`VibeShield toolchain is ready: ${tag}\n`);
   } finally {
     await rm(tmp, { recursive: true, force: true });
+  }
+  await discardSuperseded(imageBuilder, tag);
+}
+
+/** Every toolchain build leaves a 4 GiB image behind in two places. Only our own
+ * content-addressed tags are ever named, and cleanup never fails preparation. */
+export function staleToolchainTags(references: readonly string[], keep: string): string[] {
+  const ours = /^vibeshield-toolchain:sha256-[a-f0-9]{64}$/;
+  return [...new Set(references)].filter((reference) => ours.test(reference) && reference !== keep);
+}
+
+async function discardSuperseded(imageBuilder: string, keep: string): Promise<void> {
+  const built = await execFileP(imageBuilder, ["images", "--format", "{{.Repository}}:{{.Tag}}"])
+    .then(({ stdout }) =>
+      staleToolchainTags(
+        stdout.split("\n").map((line) => line.trim()),
+        keep,
+      ),
+    )
+    .catch(() => []);
+  for (const reference of built) {
+    process.stdout.write(`Removing superseded image: ${reference}\n`);
+    await execFileP(imageBuilder, ["rmi", reference]).catch(() => {});
+  }
+  const cached = await Image.list()
+    .then((images) =>
+      staleToolchainTags(
+        images.map((image) => image.reference),
+        keep,
+      ),
+    )
+    .catch(() => []);
+  for (const reference of cached) {
+    process.stdout.write(`Removing superseded sandbox image: ${reference}\n`);
+    await Image.remove(reference).catch(() => {});
   }
 }
 
@@ -104,4 +141,4 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

@@ -113,3 +113,28 @@ it.each([
   await writeFile(join(installed, manifestPath), text);
   expect(() => verifyRuleManifests(manifest, source, installed)).not.toThrow();
 });
+
+// This list is handed to an image remover, so anything that is not our own
+// content-addressed tag must never reach it.
+it("selects only our own superseded toolchain tags for removal", async () => {
+  const { staleToolchainTags } = await import("../../scripts/prepare-toolchain.js");
+  const keep = `vibeshield-toolchain:sha256-${"a".repeat(64)}`;
+  const superseded = `vibeshield-toolchain:sha256-${"b".repeat(64)}`;
+  expect(
+    staleToolchainTags(
+      [
+        keep,
+        superseded,
+        superseded,
+        "vibeshield-toolchain:latest",
+        `vibeshield-toolchain-evil:sha256-${"c".repeat(64)}`,
+        `ghcr.io/someone/vibeshield-toolchain:sha256-${"d".repeat(64)}`,
+        `vibeshield-toolchain:sha256-${"e".repeat(63)}`,
+        "postgres:16",
+        "<none>:<none>",
+        "",
+      ],
+      keep,
+    ),
+  ).toEqual([superseded]);
+});

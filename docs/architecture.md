@@ -176,6 +176,12 @@ too big are told apart — a repository over the file or byte ceiling, and one f
 Git could not fetch at all — because the reader can act on the difference. See [runtime-limits.md](runtime-limits.md) for how the guest
 enforces them.
 
+Preparing the toolchain removes the toolchain images it supersedes, in the image
+builder and in the sandbox image cache, so a changed toolchain does not leave a
+4 GiB image behind on every build. Only tags matching this service's own
+content-addressed name are ever named, and a failed removal never fails
+preparation.
+
 Sandboxes and temporary directories are marked as service-owned. Startup
 reconciles only owned resources; shutdown closes admission, aborts the active
 job, waits for verified deletion and exits nonzero when it cannot confirm it.
