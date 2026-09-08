@@ -190,3 +190,40 @@ it("shows what each step is doing instead of its status word", () => {
   expect(html).toContain("Clean machine ready.");
   expect(html.replace(/<[^>]*>/g, " ")).not.toMatch(/completed|waiting/i);
 });
+
+// Everything published is high severity, so the tiebreaker decided the order:
+// a workflow note outranked a leaked credential because ".github" sorts first.
+it("orders jobs by what to do first, not by where the file sits", async () => {
+  const value = await report();
+  const blocks = renderReport(value).split("<article data-fix").slice(1);
+  const rankOf = (marker: string) => blocks.findIndex((block) => block.includes(marker)) + 1;
+  expect(rankOf("A credential pattern was detected")).toBe(1);
+  expect(rankOf("flow: app.ts:2")).toBe(2);
+  expect(rankOf("zizmor template-injection")).toBe(3);
+  expect(rankOf("lodash@4.17.20")).toBe(4);
+  expect(rankOf("KSV-0017")).toBe(5);
+});
+
+// A key in shipped code is not the same job as a key in a test fixture, and a
+// reader should not have to read ten paths to find the one that ships.
+it("puts application files ahead of test files and says how many are tests", async () => {
+  const value = await report();
+  const first = value.issues[0];
+  if (!first) throw new Error("Expected a fixture issue");
+  const html = renderReport({
+    ...value,
+    issues: [
+      {
+        ...first,
+        locations: [
+          { path: "src/buy.test.ts", line: 12 },
+          { path: "src/checkout.spec.ts", line: 3 },
+          { path: "src/buy.ts", line: 46 },
+        ],
+      },
+    ],
+  });
+  expect(html.indexOf("src/buy.ts:46")).toBeLessThan(html.indexOf("src/buy.test.ts:12"));
+  expect(html.indexOf("src/buy.ts:46")).toBeLessThan(html.indexOf("src/checkout.spec.ts:3"));
+  expect(html).toContain("2 of them test files");
+});

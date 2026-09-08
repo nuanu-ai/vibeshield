@@ -105,6 +105,18 @@ resulting issues are ordered deterministically by severity and path.
 reader acts on changes rather than on alerts. Nine flows fixed by the same
 validation are one job with nine locations, not nine cards.
 
+Jobs are ordered by a reviewed table of actions in `src/web/pages.ts`, not by
+severity alone. Everything that survives publication is already high or critical,
+so severity leaves the order to the path tiebreaker, which once put a workflow
+note above a leaked credential. The table states the intent: a credential is out
+of the owner's hands until it is revoked, injection and broken token checks let
+someone in, and hardening defaults wait behind them. It is an ordering of work,
+not a claim about exploitability.
+
+Inside a job, application files come before files whose path looks like a test,
+and the count of test files is stated. Test files are never dropped: a real key
+leaks the same from a fixture.
+
 The open page carries the first thing to do, then the jobs: what it is, where it
 is, why it matters, what to change, how to check, and a prompt built from that
 job's own evidence. The first five jobs are open and the rest are folded, but

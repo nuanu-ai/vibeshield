@@ -10,6 +10,11 @@ job carrying every location and every piece of evidence. The first five jobs are
 open and the rest are folded onto the same page with their count. No job is ever
 dropped to meet a presentation limit.
 
+Jobs are ordered by a reviewed table of actions rather than by severity, which no
+longer separates anything once publication has run: a leaked credential leads, a
+hardening default trails. Inside a job, application files come before paths that
+look like tests, and the count of test files is stated rather than hidden.
+
 The open page carries the first thing to do, then each job's plain-language
 title, where it is, why it matters, what to change, how to check it, and a prompt
 built from that job's own evidence. Scanner names, versions, rule and advisory

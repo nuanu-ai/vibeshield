@@ -70,6 +70,31 @@ const jobs: Record<RemediationKey, { start: string; title: string; why: string }
   },
 };
 
+/** Reviewed order of actions, not a claim about exploitability. Everything that
+ * reaches a reader is already high severity, so without this the tiebreaker is
+ * the file path. A leaked credential is out of your hands until it is revoked;
+ * a hardening default can wait behind the things that let someone in. */
+const order: Record<RemediationKey, number> = {
+  "secret-rotation": 1,
+  "command-input": 2,
+  "sql-input": 2,
+  "unsafe-deserialization": 2,
+  "jwt-validation": 2,
+  "path-url-validation": 3,
+  "workflow-input": 4,
+  "workflow-privilege": 5,
+  "dependency-upgrade": 6,
+  "config-privilege": 7,
+};
+
+/** Path shape only. Test files are ordered last and counted, never dropped: a
+ * real key leaks the same from a fixture. */
+function looksLikeTest(path: string): boolean {
+  return (
+    /(^|\/)(tests?|__tests__|specs?)\//i.test(path) || /[._-](test|spec)s?\.[^/]+$/i.test(path)
+  );
+}
+
 /** Publication only emits known keys; rendering still never crashes on data. */
 const unknownJob = {
   start: "Start with the first item below.",
@@ -151,17 +176,26 @@ function groupByFix(issues: readonly Issue[]): FixJob[] {
     if (existing) existing.push(issue);
     else grouped.set(issue.remediationKey, [issue]);
   }
-  return [...grouped].map(([key, members]) => ({ key, issues: members }));
+  return [...grouped]
+    .map(([key, members]) => ({ key, issues: members }))
+    .sort((left, right) => (order[left.key] ?? 99) - (order[right.key] ?? 99));
 }
 function locationsOf(job: FixJob): string[] {
-  return job.issues.flatMap((issue) =>
+  const places = job.issues.flatMap((issue) =>
     issue.locations.map((location) => `${location.path}:${location.line}`),
   );
+  return [...places.filter((place) => !isTestPlace(place)), ...places.filter(isTestPlace)];
+}
+function isTestPlace(place: string): boolean {
+  return looksLikeTest(place.slice(0, place.lastIndexOf(":")));
 }
 function whereLine(job: FixJob): string {
   const places = locationsOf(job);
   const files = new Set(places.map((place) => place.slice(0, place.lastIndexOf(":"))));
-  return `${plural(places.length, "place")} in ${plural(files.size, "file")}`;
+  const tests = [...files].filter(looksLikeTest).length;
+  return `${plural(places.length, "place")} in ${plural(files.size, "file")}${
+    tests ? `, ${tests} of them ${tests === 1 ? "a test file" : "test files"}` : ""
+  }`;
 }
 function agentPrompt(job: FixJob, repository: string): string {
   const first = job.issues[0];
@@ -184,7 +218,10 @@ function fixBody(job: FixJob, repository: string): string {
   return `<p class="why">${escapeHtml(jobFor(job.key).why)}</p><dl class="what"><dt>What to do</dt><dd>${escapeHtml(first.remediation)}</dd><dt>Then check</dt><dd>${escapeHtml(first.verification)}</dd></dl><div class="prompt"><p class="label">Paste this to your coding agent</p><pre data-prompt tabindex="0">${escapeHtml(agentPrompt(job, repository))}</pre><button type="button" data-copy>Copy</button><span role="status" data-copy-status></span></div><details class="tech"><summary>Where exactly, and how we found it</summary><ul class="plain">${locationsOf(
     job,
   )
-    .map((place) => `<li><code>${escapeHtml(place)}</code></li>`)
+    .map(
+      (place) =>
+        `<li><code>${escapeHtml(place)}</code>${isTestPlace(place) ? " test file" : ""}</li>`,
+    )
     .join("")}</ul><ul class="plain">${job.issues
     .flatMap((issue) => [issue.title, ...issue.evidence])
     .map((line) => `<li>${escapeHtml(line)}</li>`)
