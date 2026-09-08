@@ -110,7 +110,7 @@ export function createExecutor(
         "report",
         "cleanup",
       ] as const)
-        emit({ stage: waiting, status: "waiting", message: "Waiting." });
+        emit({ stage: waiting, status: "waiting", message: "" });
       progress("running", "Preparing scan environment.");
       const url = parseRepositoryUrl(request.url);
       if (!(await bounded(() => runtime.isAvailable(), deadline)).available) throw new Error();

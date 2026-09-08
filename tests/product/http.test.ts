@@ -130,10 +130,10 @@ it("keeps other issues visible when OSV exports malformed JSON", async () => {
   sandbox.releaseAll();
   const path = await start();
   const html = await complete(path);
-  expect(html.match(/<details data-issue/g)).toHaveLength(4);
+  expect(html.match(/<article data-fix/g)).toHaveLength(4);
   expect(html).toContain("Exposed credential");
   expect(html).toContain("Scan incomplete");
-  expect(html).toMatch(/osv · package-lock\.json<\/strong><span>failed/);
+  expect(html).toMatch(/osv · package-lock\.json<\/code> failed/);
   expect(html).not.toMatch(/No important problems found|\{broken/);
   expect(await status(path)).toMatchObject({
     reportReady: true,
@@ -170,7 +170,7 @@ it("times out stalled work but publishes completed findings only after cleanup",
   expect(await status(path)).toMatchObject({ reportReady: false });
   sandbox.cleanupGate.resolve();
   const html = await complete(path);
-  expect(html.match(/<details data-issue/g)).toHaveLength(1);
+  expect(html.match(/<article data-fix/g)).toHaveLength(1);
   expect(html).toContain("Exposed credential");
   expect(html).toContain("Scan incomplete");
   expect(html).toContain("overall deadline exceeded");

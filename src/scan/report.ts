@@ -1,4 +1,5 @@
 import type { Finding, Issue, Report, ReportInput, RulePolicy, Severity } from "./contracts.js";
+import type { RemediationKey } from "./remediation.js";
 import { hasRemediationTemplate, remediationFor } from "./remediation.js";
 
 export function buildReport(input: ReportInput): Report {
@@ -155,6 +156,7 @@ function issueFor(members: Finding[]): Issue {
   return {
     id: `issue:${findingIds.join(",")}`,
     title: representative.title,
+    remediationKey: representative.remediationKey as RemediationKey,
     severity: highestSeverity(members),
     why: `Observed by ${representative.scanner}; review the preserved evidence before deciding impact.`,
     locations,

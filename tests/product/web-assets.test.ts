@@ -103,7 +103,7 @@ it("waits until status settles before scheduling 2s polling and uses textContent
   expect(b.fetch).toHaveBeenCalledTimes(1);
   resolve(response());
   await settle();
-  expect(b.stage.textContent).toBe("running — <img src=x onerror=alert(1)>");
+  expect(b.stage.textContent).toBe("<img src=x onerror=alert(1)>");
   expect([...b.timers.values()].map((timer) => timer.ms)).toEqual([2000]);
   b.fetch.mockResolvedValue(response(state({ reportReady: true, status: "completed" })));
   await [...b.timers.values()][0]?.callback();
@@ -115,7 +115,7 @@ it("reconnect retries only status, while fatal jobs and unavailable results stop
   b.fetch.mockRejectedValue(new Error("offline"));
   b.run();
   await settle();
-  expect(b.error.textContent).toContain("temporarily unavailable");
+  expect(b.error.textContent).toContain("lost the connection");
   expect(b.retry.hidden).toBe(false);
   expect(b.timers.size).toBe(0);
   b.fetch.mockResolvedValue(response(state({ status: "failed", error: "Repository unavailable" })));
@@ -175,10 +175,10 @@ it("reconnects the shipped script to the same HTTP job and reaches its report wi
     b.run();
     await settle();
     expect(b.retry.hidden).toBe(false);
-    expect(b.error.textContent).toContain("temporarily unavailable");
+    expect(b.error.textContent).toContain("lost the connection");
     offline = false;
     await b.listeners.get("retry")?.();
-    expect(b.status.textContent).toBe("Running");
+    expect(b.status.textContent).toMatch(/^\d+ of 9 steps done$/);
     expect(b.error.textContent).toBe("");
     app.sandbox.releaseAll();
     await expect.poll(() => app.jobs.get(path.split("/")[2] ?? "")?.status).toBe("completed");

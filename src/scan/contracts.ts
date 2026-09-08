@@ -1,3 +1,5 @@
+import type { RemediationKey } from "./remediation.js";
+
 export type ScannerId = "gitleaks" | "opengrep" | "osv" | "trivy" | "zizmor";
 export type Severity = "critical" | "high" | "medium" | "low" | "unknown";
 export type Category = "secret" | "code" | "dependency" | "config" | "workflow";
@@ -70,6 +72,7 @@ export interface Provenance {
 export interface Issue {
   id: string;
   title: string;
+  remediationKey: RemediationKey;
   severity: Severity;
   why: string;
   locations: Location[];
