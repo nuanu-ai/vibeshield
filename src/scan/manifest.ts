@@ -56,6 +56,10 @@ export function validateAcquisition(value: unknown): {
     s.languages.some((x) => typeof x !== "string" || !/^[A-Za-z+# ]{1,30}$/.test(x)) ||
     !isRecord(s.history) ||
     typeof s.history.truncated !== "boolean" ||
+    typeof s.oversized !== "number" ||
+    !Number.isSafeInteger(s.oversized) ||
+    s.oversized < 0 ||
+    s.oversized > LIMITS.files ||
     value.fetchedCommits.length < 1 ||
     value.fetchedCommits.length > LIMITS.historyCommits ||
     value.fetchedCommits.some((x) => typeof x !== "string" || !/^[a-f0-9]{40}$/.test(x)) ||
@@ -95,6 +99,7 @@ export function validateAcquisition(value: unknown): {
       commit: s.commit,
       files,
       languages: s.languages as string[],
+      oversized: s.oversized,
       history: { commits: value.fetchedCommits.length, truncated: s.history.truncated },
     },
     fetchedCommits: value.fetchedCommits as string[],

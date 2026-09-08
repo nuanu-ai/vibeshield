@@ -617,3 +617,27 @@ it("ends a queued scan on shutdown instead of leaving it pending", async () => {
   expect(sandbox.created.length).toBeLessThanOrEqual(1);
   expect(clock.pending()).toBe(0);
 });
+// One at a time is the whole contract: the queued sandbox may not exist while
+// the one ahead of it is still alive.
+it("starts the queued sandbox only after the first one is destroyed", async () => {
+  const { jobs, sandbox } = setup();
+  const order: string[] = [];
+  const create = sandbox.create.bind(sandbox);
+  const destroy = sandbox.destroy.bind(sandbox);
+  sandbox.create = async (options) => {
+    order.push("create");
+    return create(options);
+  };
+  sandbox.destroy = async (name) => {
+    order.push("destroy");
+    return destroy(name);
+  };
+  const first = jobs.start(fixtureSnapshot.url);
+  const second = jobs.start(fixtureSnapshot.url);
+  sandbox.releaseAll();
+  await completed(jobs, first.id);
+  await completed(jobs, second.id);
+  expect(order).toEqual(["create", "destroy", "create", "destroy"]);
+  expect(sandbox.sessions.size).toBe(0);
+  await jobs.shutdown();
+});

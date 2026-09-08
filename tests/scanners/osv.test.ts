@@ -16,6 +16,7 @@ const snapshot: Snapshot = {
   files: ["package-lock.json"],
   languages: ["JavaScript"],
   history: { commits: 1, truncated: false },
+  oversized: 0,
 };
 // Sanitized subset captured from v2.3.8 in Microsandbox on 2026-09-07.
 // Retains the official results/source/packages/vulnerabilities/groups schema.

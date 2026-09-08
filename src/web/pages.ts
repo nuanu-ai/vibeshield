@@ -119,7 +119,10 @@ function jobFor(key: RemediationKey): { todo: string; start: string; title: stri
 const failureText: Record<FailureCode, string> = {
   repository_unreachable:
     "We couldn't get that repo from GitHub. Check the link. Private repos don't work yet.",
-  repository_too_large: "That repo is larger than we can copy in one go.",
+  repository_too_large:
+    "That repo is bigger than we handle. We stop at 50,000 files or 500 MB of code.",
+  repository_file_too_large:
+    "One file in that repo was too big for us to fetch, and Git gave up on the whole download.",
   took_too_long: "This one ran past the time we allow, so we stopped it.",
   environment_unavailable:
     "Our scanning machine didn't start. Nothing ran, and nothing was left behind.",
@@ -275,7 +278,7 @@ export function renderReport(report: Report): string {
       )
       .join(
         "",
-      )}</ul><p>We looked through ${escapeHtml(plural(report.repository.history.commits, "commit"))} of history${report.repository.history.truncated ? "; anything older was not fetched" : ""}.</p><p>${escapeHtml(
+      )}</ul><p>We looked through ${escapeHtml(plural(report.repository.history.commits, "commit"))} of history${report.repository.history.truncated ? "; anything older was not fetched" : ""}.${report.repository.oversized ? ` ${escapeHtml(report.repository.oversized === 1 ? "1 file was" : `${report.repository.oversized} files were`)} too big to copy, so nothing looked inside them.` : ""}</p><p>${escapeHtml(
       report.suppressedCount
         ? `${plural(report.suppressedCount, "other alert")} came out of these checks and did not make your list: low severity, low confidence, or a rule we have no checked fix for yet.`
         : "Nothing else was held back.",

@@ -26,6 +26,7 @@ const snapshot: Snapshot = {
   files: ["vulnerable.yaml", "fixed.yaml"],
   languages: [],
   history: { commits: 1, truncated: false },
+  oversized: 0,
 };
 const secret = "synthetic-target-value-never-export";
 const directories: string[] = [];

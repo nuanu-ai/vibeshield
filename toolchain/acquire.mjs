@@ -146,6 +146,9 @@ export function inventory(repo, destination, url) {
   );
   const entries = [];
   let total = 0;
+  // A single outsized blob is that file's problem, not the repository's. Skip it
+  // and count it so the report can say what was not looked at.
+  let oversized = 0;
   for (const record of tree.split("\0").filter(Boolean)) {
     const match = /^(\d{6}) (blob|commit) ([a-f0-9]{40}) +(-|\d+)\t([\s\S]+)$/.exec(record);
     if (!match) throw new Error("Invalid snapshot");
@@ -154,14 +157,13 @@ export function inventory(repo, destination, url) {
     if (path.split("/").some((part) => ignored.has(part))) continue;
     if (!safePath(path)) throw new Error("Invalid snapshot");
     const size = Number(sizeText);
+    if (!Number.isSafeInteger(size) || size < 0) throw new Error("Invalid snapshot");
+    if (size > 5 * 1024 * 1024) {
+      oversized += 1;
+      continue;
+    }
     total += size;
-    if (
-      !Number.isSafeInteger(size) ||
-      size < 0 ||
-      size > 5 * 1024 * 1024 ||
-      total > 500 * 1024 * 1024 ||
-      entries.length >= 50_000
-    )
+    if (total > 500 * 1024 * 1024 || entries.length >= 50_000)
       throw new AcquisitionFailure("snapshot_limit");
     entries.push({ path, size, kind: "file", oid });
   }
@@ -203,6 +205,7 @@ export function inventory(repo, destination, url) {
         commits: fetchedCommits.length,
         truncated: shallow === "true" || fetchedHistory.length > 100,
       },
+      oversized,
     },
     entries: entries.map(({ path, size, kind }) => ({ path, size, kind })),
     fetchedCommits,

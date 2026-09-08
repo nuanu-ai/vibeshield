@@ -17,6 +17,7 @@ const snapshot: Snapshot = {
   files: ["app.ts"],
   languages: ["TypeScript"],
   history: { commits: 2, truncated: false },
+  oversized: 0,
 };
 const record = { ruleId: "github-pat", path: "app.ts", line: 7, fingerprint: "c".repeat(64) };
 const raw = {
@@ -89,6 +90,7 @@ it("accepts equivalent Snapshot fields regardless of object property order", asy
   const ctx = await context([record]);
   ctx.snapshot = {
     history: ctx.snapshot.history,
+    oversized: ctx.snapshot.oversized,
     languages: ctx.snapshot.languages,
     files: ctx.snapshot.files,
     commit: ctx.snapshot.commit,

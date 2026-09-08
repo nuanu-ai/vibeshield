@@ -135,6 +135,7 @@ live(
         files: ["app.py"],
         languages: ["Python"],
         history: { commits: 1, truncated: false },
+  oversized: 0,
       };
       // Characterize the actual engine's silent empty result for Python-only
       // input, then prove this is not misreported as successful JS/TS coverage.
@@ -208,6 +209,7 @@ live(
         ],
         languages: ["Python", "TypeScript"],
         history: { commits: 1, truncated: false },
+  oversized: 0,
       };
       const parsed = await scanOpengrep({
         session,

@@ -18,6 +18,7 @@ const snapshot: Snapshot = {
   files: [".github/workflows/vulnerable.yml", ".github/workflows/fixed.yml"],
   languages: [],
   history: { commits: 1, truncated: false },
+  oversized: 0,
 };
 const secret = "synthetic-target-text-never-export";
 function output() {

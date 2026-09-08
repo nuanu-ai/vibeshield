@@ -270,6 +270,7 @@ function failureCodeFor(reason: string): FailureCode {
     case "invalid_snapshot":
       return "repository_unreachable";
     case "file_limit":
+      return "repository_file_too_large";
     case "snapshot_limit":
       return "repository_too_large";
     case "timeout":

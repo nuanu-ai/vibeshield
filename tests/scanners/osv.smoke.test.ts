@@ -119,6 +119,7 @@ live(
         ],
         languages: ["JavaScript"],
         history: { commits: 1, truncated: false },
+  oversized: 0,
       };
       for (const fixture of ["vulnerable", "fixed"] as const) {
         await session.uploadBytes(

@@ -16,6 +16,7 @@ const snapshot = {
   files: ["src/app.ts"],
   languages: ["TypeScript"],
   history: { commits: 1, truncated: false },
+  oversized: 0,
 };
 const manifest = {
   snapshot,
@@ -323,4 +324,38 @@ it("marks the history cap even when the fetched repository is not shallow", asyn
   const result = guest.inventory(repo, join(dir, "snapshot"), snapshot.url);
   expect(result.snapshot.history).toEqual({ commits: 100, truncated: true });
   expect(result.fetchedCommits).toHaveLength(100);
+});
+// One oversized file used to cost the whole scan. Skip it, count it, keep going.
+it("skips a file too big to copy instead of abandoning the repository", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "vs-oversized-")));
+  dirs.push(dir);
+  const repo = join(dir, "repo");
+  execFileSync("git", ["init", "-q", repo]);
+  await writeFile(join(repo, "app.ts"), "export const safe = true;\n");
+  await writeFile(join(repo, "huge.bin"), Buffer.alloc(5 * 1024 * 1024 + 1));
+  execFileSync("git", ["-C", repo, "add", "-f", "."]);
+  execFileSync("git", [
+    "-C",
+    repo,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-qm",
+    "fixture",
+  ]);
+  const result = guest.inventory(repo, join(dir, "snapshot"), snapshot.url);
+  expect(result.snapshot.files).toEqual(["app.ts"]);
+  expect(result.snapshot.oversized).toBe(1);
+  expect(result.entries).toHaveLength(1);
+});
+
+it("rejects a snapshot whose skipped-file count is not a plain count", () => {
+  for (const oversized of [-1, 1.5, "2", undefined])
+    expect(() =>
+      validateAcquisition({ ...manifest, snapshot: { ...snapshot, oversized } }),
+    ).toThrow(/Invalid snapshot/);
 });

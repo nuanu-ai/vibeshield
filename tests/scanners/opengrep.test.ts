@@ -21,6 +21,7 @@ const snapshot: Snapshot = {
   files: ["app.ts"],
   languages: ["TypeScript"],
   history: { commits: 1, truncated: false },
+  oversized: 0,
 };
 const secret = "synthetic-target-content-never-export";
 function location(line = 5, uri = "/work/snapshot/app.ts") {

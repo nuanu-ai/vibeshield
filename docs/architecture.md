@@ -167,7 +167,13 @@ starting a second scan, and opens the report as soon as one exists.
 
 Two CPUs and 4 GiB per sandbox, a 2 GiB workspace, 50,000 files and 500 MiB per
 snapshot, 100 fetched commits, one hour of result retention and at most twenty
-retained reports. See [runtime-limits.md](runtime-limits.md) for how the guest
+retained reports.
+
+A single file larger than 5 MiB is skipped rather than fatal: the count of
+skipped files travels in the snapshot and the report says how many were never
+looked inside. Only the totals end a scan, and the two ways a repository can be
+too big are told apart — a repository over the file or byte ceiling, and one file
+Git could not fetch at all — because the reader can act on the difference. See [runtime-limits.md](runtime-limits.md) for how the guest
 enforces them.
 
 Sandboxes and temporary directories are marked as service-owned. Startup

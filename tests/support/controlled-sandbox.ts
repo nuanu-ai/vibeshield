@@ -33,6 +33,7 @@ export const fixtureSnapshot: Snapshot = {
   ],
   languages: ["TypeScript"],
   history: { commits: 1, truncated: false },
+  oversized: 0,
 };
 function fixture(name: string): unknown {
   return JSON.parse(readFileSync(new URL(`../fixtures/scanners/${name}`, import.meta.url), "utf8"));

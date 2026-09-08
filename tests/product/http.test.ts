@@ -327,3 +327,21 @@ it("puts a second visitor in line instead of turning them away", async () => {
   expect(await complete(path)).toContain("Exposed credential");
   expect(sandbox.created).toHaveLength(2);
 });
+
+// "Too large" that does not say which limit leaves nothing to act on.
+it("tells apart a repository that is too big from one oversized file", async () => {
+  const alertOf = (html: string) => /role="alert"[^>]*>([^<]+)</.exec(html)?.[1]?.trim() ?? "";
+  sandbox.acquisitionFails = true;
+  sandbox.acquisitionStderr = "VIBESHIELD_ACQUIRE_FAILURE=snapshot_limit\n";
+  const big = await start();
+  await expect.poll(async () => (await status(big)).status).toBe("failed");
+  const bigText = alertOf(await (await get(big)).text());
+  expect(bigText).toMatch(/50,000 files|500 MB/);
+
+  sandbox.acquisitionStderr = "VIBESHIELD_ACQUIRE_FAILURE=file_limit\n";
+  const single = await start();
+  await expect.poll(async () => (await status(single)).status).toBe("failed");
+  const singleText = alertOf(await (await get(single)).text());
+  expect(singleText).toMatch(/one file/i);
+  expect(singleText).not.toBe(bigText);
+});

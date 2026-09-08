@@ -47,6 +47,7 @@ it.each([
       files: ["vulnerable.yaml", "fixed.yaml"],
       languages: [],
       history: { commits: 1, truncated: false },
+  oversized: 0,
     };
     const ctx = { session, snapshot, signal: new AbortController().signal };
     const result = await scanFixture(ctx);
@@ -186,6 +187,7 @@ live(
         files: ["vulnerable.yaml", "fixed.yaml", "trivy.yaml", ".trivyignore"],
         languages: [],
         history: { commits: 1, truncated: false },
+  oversized: 0,
       };
       const ctx = { session, snapshot, signal: new AbortController().signal };
       const result = await scanFixture(ctx);

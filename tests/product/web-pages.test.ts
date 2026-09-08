@@ -251,3 +251,13 @@ it("ends after the last job and folds the rest into one disclosure", async () =>
   expect(html.match(/<section class="after"/g)).toHaveLength(1);
   expect(html).toContain("Logins, permissions");
 });
+
+// A file we could not copy is a hole in the scan, and the reader is owed it.
+it("says how many files were too big to look at", async () => {
+  const value = await report();
+  expect(renderReport(value)).not.toMatch(/too big/i);
+  const skipped = { ...value, repository: { ...value.repository, oversized: 2 } };
+  expect(renderReport(skipped)).toContain("2 files were too big to copy");
+  const one = { ...value, repository: { ...value.repository, oversized: 1 } };
+  expect(renderReport(one)).toContain("1 file was too big to copy");
+});

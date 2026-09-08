@@ -61,6 +61,8 @@ export interface Snapshot {
   commit: string;
   files: string[];
   history: { commits: number; truncated: boolean };
+  /** Files skipped because a single blob was larger than we copy. */
+  oversized: number;
   languages: string[];
 }
 export interface Provenance {
@@ -107,6 +109,7 @@ export const scanStages: readonly Stage[] = [
 export type FailureCode =
   | "repository_unreachable"
   | "repository_too_large"
+  | "repository_file_too_large"
   | "took_too_long"
   | "environment_unavailable"
   | "cleanup_pending"

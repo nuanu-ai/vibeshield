@@ -92,6 +92,7 @@ live(
         files: [".github/workflows/vulnerable.yml", ".github/workflows/fixed.yml"],
         languages: [],
         history: { commits: 1, truncated: false },
+  oversized: 0,
       };
       for (const file of ["vulnerable.yml", "fixed.yml"])
         await session.uploadBytes(
