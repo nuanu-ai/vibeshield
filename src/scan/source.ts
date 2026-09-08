@@ -4,6 +4,21 @@ import { LIMITS } from "./limits.js";
 import { validateAcquisition } from "./manifest.js";
 import { readScannerJson } from "./scanners/shared.js";
 
+export type AcquisitionFailureCode =
+  | "timeout"
+  | "file_limit"
+  | "git_failed"
+  | "snapshot_limit"
+  | "invalid_snapshot";
+
+export class AcquisitionError extends Error {
+  override readonly name = "AcquisitionError";
+
+  constructor(readonly code: AcquisitionFailureCode) {
+    super("Repository acquisition failed");
+  }
+}
+
 export function parseRepositoryUrl(value: string): string {
   try {
     if (/[\\\s%]/.test(value)) throw new Error();
@@ -43,11 +58,32 @@ export async function acquire(
     signal,
     timeoutMs: LIMITS.acquisitionMs,
   });
-  if (result.exitCode !== 0) throw new Error("Repository acquisition failed");
+  if (result.exitCode !== 0) {
+    throw new AcquisitionError(acquisitionFailureCode(result.exitCode, result.stderr));
+  }
   signal.throwIfAborted();
-  const { snapshot } = validateAcquisition(
-    await readScannerJson(session, "/work/.vibeshield/exports/snapshot.json"),
-  );
-  if (snapshot.url !== canonical) throw new Error("Invalid snapshot");
-  return snapshot;
+  try {
+    const { snapshot } = validateAcquisition(
+      await readScannerJson(session, "/work/.vibeshield/exports/snapshot.json"),
+    );
+    if (snapshot.url !== canonical) throw new Error("Invalid snapshot");
+    return snapshot;
+  } catch {
+    signal.throwIfAborted();
+    throw new AcquisitionError("invalid_snapshot");
+  }
+}
+
+function acquisitionFailureCode(exitCode: number, stderr: string): AcquisitionFailureCode {
+  if (exitCode === 124) return "timeout";
+  const marker = /(?:^|\n)VIBESHIELD_ACQUIRE_FAILURE=(\w+)(?:\n|$)/.exec(stderr)?.[1];
+  if (
+    marker === "timeout" ||
+    marker === "file_limit" ||
+    marker === "git_failed" ||
+    marker === "snapshot_limit" ||
+    marker === "invalid_snapshot"
+  )
+    return marker;
+  return "git_failed";
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -71,6 +71,97 @@ it("normalizes the optional git suffix and preserves case", () => {
     "https://github.com/Owner/Repo",
   );
 });
+it("classifies bounded guest Git failures without returning diagnostic text", () => {
+  expect(typeof guest.classifyGitFailure).toBe("function");
+  const results = [
+    guest.classifyGitFailure({ error: { code: "ETIMEDOUT", message: "fixture-private-text" } }),
+    guest.classifyGitFailure({ signal: "SIGXFSZ", stderr: "fixture-private-text" }),
+    guest.classifyGitFailure({ error: { code: "EFBIG", message: "fixture-private-text" } }),
+    guest.classifyGitFailure({
+      error: { code: "ENOBUFS", message: "fixture-private-text" },
+      signal: "SIGTERM",
+    }),
+    guest.classifyGitFailure({
+      status: 128,
+      signal: null,
+      stderr: Buffer.from("fatal: fetch-pack: invalid index-pack output\nfixture-private-text"),
+    }),
+    guest.classifyGitFailure(
+      {
+        status: 128,
+        signal: null,
+        stderr: Buffer.from("fatal: fetch-pack: invalid index-pack output\nfixture-private-text"),
+      },
+      true,
+    ),
+    guest.classifyGitFailure({ status: 128, stderr: "fixture-private-text" }),
+  ];
+  expect(results).toEqual([
+    "timeout",
+    "file_limit",
+    "file_limit",
+    "snapshot_limit",
+    "git_failed",
+    "file_limit",
+    "git_failed",
+  ]);
+  expect(JSON.stringify(results)).not.toContain("fixture-private-text");
+});
+it("fetches a default branch without checkout and preserves exact file-limit evidence", async () => {
+  expect(typeof guest.fetchRepository).toBe("function");
+  expect(typeof guest.cloneFileLimitReached).toBe("function");
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "vs-fetch-fixture-")));
+  dirs.push(dir);
+  const fetched = join(dir, "fetched");
+  const calls: string[][] = [];
+  const success = (_file: string, args: string[]) => {
+    calls.push(args);
+    return { status: 0, signal: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+  };
+  guest.fetchRepository(snapshot.url, fetched, success);
+  expect(calls).toEqual([
+    ["init", "--quiet", "--template=", fetched],
+    [
+      "-C",
+      fetched,
+      "fetch",
+      "--depth=100",
+      "--no-tags",
+      "--no-recurse-submodules",
+      "--",
+      snapshot.url,
+      "HEAD",
+    ],
+    ["-C", fetched, "update-ref", "HEAD", "FETCH_HEAD"],
+  ]);
+  expect(calls.flat()).not.toContain("checkout");
+  const packDirectory = join(fetched, ".git", "objects", "pack");
+  await mkdir(packDirectory, { recursive: true });
+  const pack = join(packDirectory, "tmp_pack_fixture");
+  await writeFile(pack, "");
+  await truncate(pack, 64 * 1024 * 1024);
+  expect(guest.cloneFileLimitReached(fetched)).toBe(true);
+  await truncate(pack, 64 * 1024 * 1024 - 1);
+  expect(guest.cloneFileLimitReached(fetched)).toBe(false);
+  await truncate(pack, 64 * 1024 * 1024);
+  const error = (() => {
+    try {
+      guest.fetchRepository(snapshot.url, fetched, (_file: string, args: string[]) =>
+        args.includes("fetch")
+          ? {
+              status: 128,
+              signal: null,
+              stdout: Buffer.alloc(0),
+              stderr: Buffer.from("fatal: fetch-pack: invalid index-pack output\n"),
+            }
+          : { status: 0, signal: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) },
+      );
+    } catch (caught) {
+      return caught;
+    }
+  })();
+  expect(error).toMatchObject({ code: "file_limit", message: "Repository acquisition failed" });
+});
 it("acquires bounded file metadata without interpreting diagnostic stdout", async () => {
   const runtime = new FakeSandboxRuntime({
     exec: async (argv, session) => {
@@ -85,6 +176,28 @@ it("acquires bounded file metadata without interpreting diagnostic stdout", asyn
   const session = await runtime.create({ name: "source", imageTag: "fixture" });
   expect(await acquire(session, snapshot.url, new AbortController().signal)).toEqual(snapshot);
 });
+it("classifies malformed acquisition exports without retaining their contents", async () => {
+  const runtime = new FakeSandboxRuntime({
+    exec: async (argv, session) => {
+      if (argv.includes("/usr/local/bin/vibeshield-acquire"))
+        await session.uploadBytes(
+          "/work/.vibeshield/exports/snapshot.json",
+          Buffer.from(`{"snapshot":{"commit":"fixture-private-text"}}`),
+        );
+      return { exitCode: 0, stdout: "", stderr: "" };
+    },
+  });
+  const session = await runtime.create({ name: "invalid-source", imageTag: "fixture" });
+  const error = await acquire(session, snapshot.url, new AbortController().signal).catch(
+    (caught: unknown) => caught,
+  );
+  expect(error).toMatchObject({
+    name: "AcquisitionError",
+    message: "Repository acquisition failed",
+    code: "invalid_snapshot",
+  });
+  expect(JSON.stringify(error)).not.toContain("fixture-private-text");
+});
 it("rejects failed acquisition without echoing repository diagnostics", async () => {
   const runtime = new FakeSandboxRuntime({
     exec: () => ({ exitCode: 128, stdout: "fixture-private-text", stderr: "fixture-private-text" }),
@@ -93,6 +206,42 @@ it("rejects failed acquisition without echoing repository diagnostics", async ()
   await expect(acquire(session, snapshot.url, new AbortController().signal)).rejects.toThrow(
     /^Repository acquisition failed$/,
   );
+});
+it.each([
+  {
+    exitCode: 1,
+    stderr: "VIBESHIELD_ACQUIRE_FAILURE=file_limit\nfixture-private-text",
+    expected: "file_limit",
+  },
+  {
+    exitCode: 1,
+    stderr: "VIBESHIELD_ACQUIRE_FAILURE=snapshot_limit\n",
+    expected: "snapshot_limit",
+  },
+  { exitCode: 124, stderr: "fixture-private-text", expected: "timeout" },
+  {
+    exitCode: 1,
+    stderr: "VIBESHIELD_ACQUIRE_FAILURE=fixture-private-text\n",
+    expected: "git_failed",
+  },
+])("classifies acquisition failure as $expected without retaining stderr", async (failure) => {
+  const runtime = new FakeSandboxRuntime({
+    exec: () => ({
+      exitCode: failure.exitCode,
+      stdout: "fixture-private-text",
+      stderr: failure.stderr,
+    }),
+  });
+  const session = await runtime.create({ name: `source-${failure.expected}`, imageTag: "fixture" });
+  const error = await acquire(session, snapshot.url, new AbortController().signal).catch(
+    (caught: unknown) => caught,
+  );
+  expect(error).toMatchObject({
+    name: "AcquisitionError",
+    message: "Repository acquisition failed",
+    code: failure.expected,
+  });
+  expect(JSON.stringify(error)).not.toContain("fixture-private-text");
 });
 it.each([
   { entries: [{ path: "../escape", size: 1, kind: "file" }] },

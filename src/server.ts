@@ -5,11 +5,28 @@ import { pathToFileURL } from "node:url";
 import { MicrosandboxRuntime } from "./adapters/microsandbox/runtime.js";
 import { reconcileOwnedRuntime } from "./adapters/runtime-ownership.js";
 import { toolchainProvenance } from "./adapters/toolchain.js";
-import { createExecutor } from "./scan/execute.js";
+import type { SandboxRuntime } from "./ports/sandbox-runtime.js";
+import type { Provenance } from "./scan/contracts.js";
+import { createExecutor, type ScanDiagnostic } from "./scan/execute.js";
 import { LIMITS } from "./scan/limits.js";
 import { systemClock } from "./web/clock.js";
 import { createJobs, type JobStore } from "./web/jobs.js";
 import { createWebServer } from "./web/server.js";
+
+export function createObservedExecutor(
+  runtime: SandboxRuntime,
+  provenance: Provenance,
+  write: (line: string) => void = (line) => console.error(line),
+) {
+  return createExecutor(runtime, provenance, createDiagnosticObserver(write));
+}
+
+export function createDiagnosticObserver(
+  write: (line: string) => void = (line) => console.error(line),
+) {
+  return (event: ScanDiagnostic) =>
+    write(JSON.stringify({ timestamp: new Date().toISOString(), ...event }));
+}
 
 export function createService(jobs: JobStore) {
   const server = createWebServer(jobs);
@@ -62,11 +79,13 @@ async function main() {
     memoryMib: LIMITS.memoryMib,
   });
   const cleanup = () => reconcileOwnedRuntime(runtime, ownerDir);
+  const lifecycle = createDiagnosticObserver();
   const jobs = createJobs({
-    execute: createExecutor(runtime, provenance),
+    execute: createExecutor(runtime, provenance, lifecycle, false),
     cleanup,
     clock: systemClock,
     diagnostic: (message) => console.error(message),
+    lifecycle,
   });
   const service = createService(jobs);
   const server = service.server;

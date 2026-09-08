@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Progress, Report } from "../scan/contracts.js";
+import type { ScanDiagnostic } from "../scan/execute.js";
 import { LIMITS } from "../scan/limits.js";
 import { parseRepositoryUrl } from "../scan/source.js";
 import { type Clock, createScanDeadline, type ScanDeadline } from "./clock.js";
@@ -40,15 +41,34 @@ export function createJobs(options: {
   cleanup: () => Promise<void>;
   clock: Clock;
   diagnostic?: (message: string) => void;
+  lifecycle?: (event: ScanDiagnostic) => void;
 }): JobStore {
   const jobs = new Map<string, Job>();
   const expiry = new Map<string, () => void>();
-  type Active = { job: Job; deadline: ScanDeadline; done: Promise<void>; report?: Report };
+  type Active = {
+    job: Job;
+    deadline: ScanDeadline;
+    done: Promise<void>;
+    report?: Report;
+    finishedStatus?: "completed" | "failed" | "cleanup_failed";
+  };
   let active: Active | undefined;
   let stopped = false;
   let retry: Promise<void> | undefined;
   let stopping: Promise<void> | undefined;
   let cancelMaintenance: (() => void) | undefined;
+  const lifecycle = (event: ScanDiagnostic) => {
+    try {
+      options.lifecycle?.(event);
+    } catch {
+      // Operator logging must not change job state.
+    }
+  };
+  const publishFinished = (current: Active, status: "completed" | "failed" | "cleanup_failed") => {
+    if (current.finishedStatus === status) return;
+    current.finishedStatus = status;
+    lifecycle({ event: "scan_finished", scanId: current.job.id, status });
+  };
   const scheduleCleanup = (current: Active, attempt = 1) => {
     if (stopped || active !== current) return;
     cancelMaintenance = options.clock.schedule(5000, () => {
@@ -138,6 +158,7 @@ export function createJobs(options: {
             },
           );
           finish(current);
+          publishFinished(current, "completed");
         } catch (error) {
           if (error instanceof CleanupError) {
             if (error.report) current.report = error.report;
@@ -147,7 +168,10 @@ export function createJobs(options: {
               "Temporary resource cleanup could not be verified. Admission remains closed during bounded retries.",
             );
             scheduleCleanup(current);
-          } else finish(current);
+          } else {
+            finish(current);
+            publishFinished(current, "failed");
+          }
         } finally {
           current.deadline.dispose();
         }
@@ -165,9 +189,22 @@ export function createJobs(options: {
       const current = active;
       if (current?.job.status !== "cleanup-failed") return;
       retry = (async () => {
+        lifecycle({
+          event: "scan_stage",
+          scanId: current.job.id,
+          stage: "cleanup",
+          status: "running",
+        });
         try {
           await options.cleanup();
         } catch {
+          lifecycle({
+            event: "scan_stage",
+            scanId: current.job.id,
+            stage: "cleanup",
+            status: "failed",
+            reason: "cleanup_failed",
+          });
           throw new CleanupError();
         }
         const cleanup = current.job.stages.find((stage) => stage.stage === "cleanup");
@@ -175,7 +212,14 @@ export function createJobs(options: {
           cleanup.status = "completed";
           cleanup.message = "Temporary scan resources removed.";
         }
+        lifecycle({
+          event: "scan_stage",
+          scanId: current.job.id,
+          stage: "cleanup",
+          status: "completed",
+        });
         finish(current);
+        publishFinished(current, current.report ? "completed" : "failed");
       })();
       try {
         await retry;
@@ -194,7 +238,10 @@ export function createJobs(options: {
       stopping = (async () => {
         await active?.done;
         await retry;
-        if (active?.job.status === "cleanup-failed") throw new CleanupError();
+        if (active?.job.status === "cleanup-failed") {
+          publishFinished(active, "cleanup_failed");
+          throw new CleanupError();
+        }
         try {
           await options.cleanup();
         } catch {

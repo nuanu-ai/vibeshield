@@ -176,6 +176,7 @@ export class ControlledSandbox extends FakeSandboxRuntime {
   readonly failures = new Map<ScannerId, number>();
   snapshot = structuredClone(fixtureSnapshot);
   acquisitionFails = false;
+  acquisitionStderr = privateText;
   cleanupFails = false;
   cleanupGate: ReturnType<typeof deferred> | undefined;
   beforeExport: ((key: string) => void) | undefined;
@@ -186,7 +187,7 @@ export class ControlledSandbox extends FakeSandboxRuntime {
         const bin = command[1];
         if (bin === "/usr/local/bin/vibeshield-acquire") {
           if (this.acquisitionFails)
-            return { exitCode: 128, stdout: privateText, stderr: privateText };
+            return { exitCode: 128, stdout: privateText, stderr: this.acquisitionStderr };
           const snapshot = { ...this.snapshot, url: command[2] };
           await this.export(session, "snapshot", {
             snapshot,

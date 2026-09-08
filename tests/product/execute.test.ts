@@ -58,6 +58,165 @@ it("acquires once and sequentially composes all five real adapters into a normal
   );
   expect(sandbox.sessions.size).toBe(0);
 });
+it("emits structured operator lifecycle without repository or sandbox output", async () => {
+  const sandbox = new ControlledSandbox();
+  sandbox.releaseAll();
+  const diagnostics: unknown[] = [];
+  await createExecutor(sandbox, fixtureProvenance, (event) => diagnostics.push(event))(
+    { id: "observable-success", url: fixtureSnapshot.url },
+    new AbortController().signal,
+    () => {},
+  );
+  expect(
+    diagnostics
+      .filter(
+        (event): event is { event: string; stage: string; status: string } =>
+          typeof event === "object" && event !== null && "stage" in event && "status" in event,
+      )
+      .map((event) => `${event.stage}:${event.status}`),
+  ).toEqual([
+    "prepare:running",
+    "prepare:completed",
+    "acquire:running",
+    "acquire:completed",
+    "gitleaks:running",
+    "gitleaks:completed",
+    "opengrep:running",
+    "opengrep:completed",
+    "osv:running",
+    "osv:completed",
+    "trivy:running",
+    "trivy:completed",
+    "zizmor:running",
+    "zizmor:completed",
+    "report:running",
+    "report:completed",
+    "cleanup:running",
+    "cleanup:completed",
+  ]);
+  expect(diagnostics.at(-1)).toEqual({
+    event: "scan_finished",
+    scanId: "observable-success",
+    status: "completed",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain(fixtureSnapshot.url);
+  expect(JSON.stringify(diagnostics)).not.toContain(privateText);
+});
+it("reports a safe acquisition failure category without diagnostic output", async () => {
+  const sandbox = new ControlledSandbox();
+  sandbox.acquisitionFails = true;
+  sandbox.acquisitionStderr = `VIBESHIELD_ACQUIRE_FAILURE=file_limit\n${privateText}`;
+  const diagnostics: unknown[] = [];
+  await expect(
+    createExecutor(sandbox, fixtureProvenance, (event) => diagnostics.push(event))(
+      { id: "observable-failure", url: fixtureSnapshot.url },
+      new AbortController().signal,
+      () => {},
+    ),
+  ).rejects.toThrow("Scan failed before a report could be prepared");
+  expect(diagnostics).toContainEqual({
+    event: "scan_stage",
+    scanId: "observable-failure",
+    stage: "acquire",
+    status: "failed",
+    reason: "file_limit",
+  });
+  expect(diagnostics.at(-1)).toEqual({
+    event: "scan_finished",
+    scanId: "observable-failure",
+    status: "failed",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain(privateText);
+});
+it("distinguishes sandbox transport failure from timeout without diagnostic output", async () => {
+  const sandbox = new ControlledSandbox();
+  sandbox.beforeRead = async (path) => {
+    if (path.endsWith("snapshot.json")) throw new Error(privateText);
+  };
+  const diagnostics: unknown[] = [];
+  await expect(
+    createExecutor(sandbox, fixtureProvenance, (event) => diagnostics.push(event))(
+      { id: "transport-failure", url: fixtureSnapshot.url },
+      new AbortController().signal,
+      () => {},
+    ),
+  ).rejects.toThrow("Scan failed before a report could be prepared");
+  expect(diagnostics).toContainEqual({
+    event: "scan_stage",
+    scanId: "transport-failure",
+    stage: "acquire",
+    status: "failed",
+    reason: "sandbox_failed",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain("overall_timeout");
+  expect(JSON.stringify(diagnostics)).not.toContain(privateText);
+});
+it("classifies an explicit early cancellation separately from a deadline", async () => {
+  const sandbox = new ControlledSandbox();
+  const controller = new AbortController();
+  controller.abort();
+  const diagnostics: unknown[] = [];
+  await expect(
+    createExecutor(sandbox, fixtureProvenance, (event) => diagnostics.push(event))(
+      { id: "cancelled", url: fixtureSnapshot.url },
+      controller.signal,
+      () => {},
+    ),
+  ).rejects.toThrow("Scan failed before a report could be prepared");
+  expect(diagnostics).toContainEqual({
+    event: "scan_stage",
+    scanId: "cancelled",
+    stage: "prepare",
+    status: "failed",
+    reason: "cancelled",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain("overall_timeout");
+});
+it("preserves cancellation while acquisition is active", async () => {
+  const sandbox = new ControlledSandbox();
+  const controller = new AbortController();
+  sandbox.beforeRead = async (path) => {
+    if (path.endsWith("snapshot.json")) {
+      controller.abort();
+      throw new Error(privateText);
+    }
+  };
+  const diagnostics: unknown[] = [];
+  await expect(
+    createExecutor(sandbox, fixtureProvenance, (event) => diagnostics.push(event))(
+      { id: "active-cancellation", url: fixtureSnapshot.url },
+      controller.signal,
+      () => {},
+    ),
+  ).rejects.toThrow("Scan failed before a report could be prepared");
+  expect(diagnostics).toContainEqual({
+    event: "scan_stage",
+    scanId: "active-cancellation",
+    stage: "acquire",
+    status: "failed",
+    reason: "cancelled",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain("sandbox_failed");
+});
+it("adds a bounded reason when a scanner returns failed coverage", async () => {
+  const sandbox = new ControlledSandbox();
+  sandbox.fail("osv");
+  sandbox.releaseAll();
+  const diagnostics: unknown[] = [];
+  await createExecutor(sandbox, fixtureProvenance, (event) => diagnostics.push(event))(
+    { id: "scanner-coverage-failure", url: fixtureSnapshot.url },
+    new AbortController().signal,
+    () => {},
+  );
+  expect(diagnostics).toContainEqual({
+    event: "scan_stage",
+    scanId: "scanner-coverage-failure",
+    stage: "osv",
+    status: "failed",
+    reason: "scanner_failed",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain(privateText);
+});
 it("isolates stage cancellation and disposes its signal registration, timer and parent listener", () => {
   const clock = new ManualClock();
   const overall = createScanDeadline(clock);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -40,6 +40,82 @@ export function parseRepositoryUrl(value) {
     throw new Error("Enter a public GitHub repository URL");
   }
 }
+class AcquisitionFailure extends Error {
+  constructor(code) {
+    super("Repository acquisition failed");
+    this.code = code;
+  }
+}
+const FILE_LIMIT_BYTES = 64 * 1024 * 1024;
+
+export function classifyGitFailure(result, fileLimitReached = false) {
+  if (result?.signal === "SIGXFSZ" || result?.error?.code === "EFBIG") return "file_limit";
+  if (["ENOBUFS", "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"].includes(result?.error?.code))
+    return "snapshot_limit";
+  if (result?.error?.code === "ETIMEDOUT") return "timeout";
+  const stderr = Buffer.isBuffer(result?.stderr)
+    ? result.stderr.toString("utf8")
+    : typeof result?.stderr === "string"
+      ? result.stderr
+      : "";
+  if (
+    fileLimitReached &&
+    result?.status === 128 &&
+    stderr.includes("fatal: fetch-pack: invalid index-pack output")
+  )
+    return "file_limit";
+  if (result?.signal === "SIGTERM") return "timeout";
+  return "git_failed";
+}
+export function cloneFileLimitReached(repo) {
+  try {
+    const packDirectory = join(repo, ".git", "objects", "pack");
+    return readdirSync(packDirectory).some((name) => {
+      const stat = lstatSync(join(packDirectory, name));
+      return stat.isFile() && stat.size === FILE_LIMIT_BYTES;
+    });
+  } catch {
+    return false;
+  }
+}
+export function fetchRepository(url, destination, run = spawnSync) {
+  const init = run("git", ["init", "--quiet", "--template=", destination], {
+    env: gitEnvironment(),
+    stdio: "ignore",
+    timeout: 110_000,
+  });
+  if (init.error || init.signal || init.status !== 0)
+    throw new AcquisitionFailure(classifyGitFailure(init));
+  const fetch = run(
+    "git",
+    [
+      "-C",
+      destination,
+      "fetch",
+      "--depth=100",
+      "--no-tags",
+      "--no-recurse-submodules",
+      "--",
+      url,
+      "HEAD",
+    ],
+    {
+      env: gitEnvironment(),
+      maxBuffer: 64 * 1024,
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 110_000,
+    },
+  );
+  if (fetch.error || fetch.signal || fetch.status !== 0)
+    throw new AcquisitionFailure(classifyGitFailure(fetch, cloneFileLimitReached(destination)));
+  const update = run("git", ["-C", destination, "update-ref", "HEAD", "FETCH_HEAD"], {
+    env: gitEnvironment(),
+    stdio: "ignore",
+    timeout: 110_000,
+  });
+  if (update.error || update.signal || update.status !== 0)
+    throw new AcquisitionFailure(classifyGitFailure(update));
+}
 function git(repo, args, maxBuffer = MAX_EXPORT_BYTES) {
   const result = spawnSync("git", ["-C", repo, ...args], {
     env: gitEnvironment(),
@@ -48,7 +124,7 @@ function git(repo, args, maxBuffer = MAX_EXPORT_BYTES) {
     stdio: ["ignore", "pipe", "ignore"],
   });
   if (result.error || result.signal || result.status !== 0)
-    throw new Error("Repository acquisition failed");
+    throw new AcquisitionFailure(classifyGitFailure(result));
   return result.stdout;
 }
 export function inventory(repo, destination, url) {
@@ -86,7 +162,7 @@ export function inventory(repo, destination, url) {
       total > 500 * 1024 * 1024 ||
       entries.length >= 50_000
     )
-      throw new Error("Snapshot limit exceeded");
+      throw new AcquisitionFailure("snapshot_limit");
     entries.push({ path, size, kind: "file", oid });
   }
   mkdirSync(destination, { mode: 0o700 });
@@ -139,24 +215,7 @@ function main() {
   mkdirSync(SERVICE, { mode: 0o700 });
   mkdirSync(`${SERVICE}/exports`, { mode: 0o700 });
   mkdirSync(`${SERVICE}/tmp`, { mode: 0o700 });
-  const clone = spawnSync(
-    "git",
-    [
-      "clone",
-      "--depth=100",
-      "--single-branch",
-      "--no-tags",
-      "--no-recurse-submodules",
-      "--no-checkout",
-      "--template=",
-      "--",
-      url,
-      "/work/repository",
-    ],
-    { cwd: "/work", env: gitEnvironment(), stdio: "ignore", timeout: 110_000 },
-  );
-  if (clone.error || clone.signal || clone.status !== 0)
-    throw new Error("Repository acquisition failed");
+  fetchRepository(url, "/work/repository");
   writeExport(
     `${SERVICE}/exports/snapshot.json`,
     inventory("/work/repository", "/work/snapshot", url),
@@ -165,8 +224,9 @@ function main() {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     main();
-  } catch {
-    process.stderr.write("Repository acquisition failed\n");
+  } catch (error) {
+    const code = error instanceof AcquisitionFailure ? error.code : "invalid_snapshot";
+    process.stderr.write(`VIBESHIELD_ACQUIRE_FAILURE=${code}\n`);
     process.exitCode = 1;
   }
 }

@@ -17,7 +17,7 @@ import { readOsvAdvisoryData, scanOsv } from "./scanners/osv.js";
 import type { ScannerContext } from "./scanners/shared.js";
 import { scanTrivy } from "./scanners/trivy.js";
 import { scanZizmor } from "./scanners/zizmor.js";
-import { acquire, parseRepositoryUrl } from "./source.js";
+import { AcquisitionError, acquire, parseRepositoryUrl } from "./source.js";
 
 const scanners: readonly [ScannerId, (context: ScannerContext) => Promise<ScanResult>][] = [
   ["gitleaks", scanGitleaks],
@@ -27,7 +27,26 @@ const scanners: readonly [ScannerId, (context: ScannerContext) => Promise<ScanRe
   ["zizmor", scanZizmor],
 ];
 
-export function createExecutor(runtime: SandboxRuntime, provenance: Provenance): ExecuteScan {
+export type ScanDiagnostic =
+  | {
+      readonly event: "scan_stage";
+      readonly scanId: string;
+      readonly stage: Stage;
+      readonly status: Progress["status"];
+      readonly reason?: string;
+    }
+  | {
+      readonly event: "scan_finished";
+      readonly scanId: string;
+      readonly status: "completed" | "failed" | "cleanup_failed";
+    };
+
+export function createExecutor(
+  runtime: SandboxRuntime,
+  provenance: Provenance,
+  diagnostic?: (event: ScanDiagnostic) => void,
+  emitFinished = true,
+): ExecuteScan {
   return async (request, signal, emit) => {
     const registered = deadlineFor(signal);
     const deadline = registered ?? createScanDeadline(systemClock, signal);
@@ -38,8 +57,33 @@ export function createExecutor(runtime: SandboxRuntime, provenance: Provenance):
     let report: Report | undefined;
     let failure: Error | undefined;
     let stage: Stage = "prepare";
-    const progress = (status: Progress["status"], message: string) =>
+    let transportFailed = false;
+    const observe = (event: ScanDiagnostic) => {
+      try {
+        diagnostic?.(event);
+      } catch {
+        // Operator logging must not change scan behavior.
+      }
+    };
+    const progress = (status: Progress["status"], message: string, reason?: string) => {
       emit({ stage, status, message });
+      if (status !== "waiting")
+        observe({
+          event: "scan_stage",
+          scanId: request.id,
+          stage,
+          status,
+          ...(reason === undefined ? {} : { reason }),
+        });
+    };
+    const overallFailureReason = () =>
+      deadline.remainingMs() === 0
+        ? "overall_timeout"
+        : transportFailed
+          ? "sandbox_failed"
+          : deadline.signal.aborted
+            ? "cancelled"
+            : undefined;
     const remove = () => {
       cleanup ??= runtime.destroy(name);
       return cleanup;
@@ -74,7 +118,9 @@ export function createExecutor(runtime: SandboxRuntime, provenance: Provenance):
         throw error;
       }
       deadline.check();
-      const session = boundedSession(raw, deadline);
+      const session = boundedSession(raw, deadline, () => {
+        transportFailed = true;
+      });
       progress("completed", "Scan environment prepared.");
       stage = "acquire";
       progress("running", "Fetching repository snapshot.");
@@ -118,6 +164,7 @@ export function createExecutor(runtime: SandboxRuntime, provenance: Provenance):
             )
               ? "Check completed with coverage limitations."
               : "Check finished; coverage details are in the report.",
+            status === "failed" ? "scanner_failed" : undefined,
           );
         } catch {
           results.push({
@@ -128,15 +175,24 @@ export function createExecutor(runtime: SandboxRuntime, provenance: Provenance):
                 area: "engine",
                 status: "failed",
                 applicable: true,
-                reason: deadline.signal.aborted
+                reason: overallFailureReason()
                   ? "Scan interrupted or overall deadline exceeded; this check did not complete."
-                  : stageDeadline.signal.aborted
+                  : stageDeadline.remainingMs() === 0
                     ? "Scanner exceeded its two-minute budget; this check did not complete."
                     : "Scanner failed; this check did not complete.",
               },
             ],
           });
-          progress("failed", "Check did not complete.");
+          progress(
+            "failed",
+            "Check did not complete.",
+            overallFailureReason() ??
+              (stageDeadline.remainingMs() === 0
+                ? "timeout"
+                : stageDeadline.signal.aborted
+                  ? "cancelled"
+                  : "scanner_failed"),
+          );
         } finally {
           stageDeadline.dispose();
         }
@@ -151,30 +207,53 @@ export function createExecutor(runtime: SandboxRuntime, provenance: Provenance):
         policy: defaultPolicy,
       });
       progress("completed", "Report prepared.");
-    } catch {
-      progress("failed", "Scan could not prepare a repository report.");
+    } catch (error) {
+      progress(
+        "failed",
+        "Scan could not prepare a repository report.",
+        overallFailureReason() ??
+          (error instanceof AcquisitionError
+            ? error.code
+            : stage === "prepare"
+              ? "prepare_failed"
+              : stage === "report"
+                ? "report_failed"
+                : "internal_error"),
+      );
       failure = new Error("Scan failed before a report could be prepared");
     } finally {
       stage = "cleanup";
       progress("running", "Removing temporary scan resources.");
       try {
         if (creationCleanupFailed) {
-          progress("failed", "Temporary resource cleanup could not be verified.");
+          progress("failed", "Temporary resource cleanup could not be verified.", "cleanup_failed");
           failure = new CleanupError();
         } else {
           if (created) await remove();
           progress("completed", "Temporary scan resources removed.");
         }
       } catch {
-        progress("failed", "Temporary resource cleanup could not be verified.");
+        progress("failed", "Temporary resource cleanup could not be verified.", "cleanup_failed");
         failure = new CleanupError(report);
       } finally {
         deadline.signal.removeEventListener("abort", abort);
         if (!registered) deadline.dispose();
       }
     }
-    if (failure) throw failure;
-    if (!report) throw new Error("Scan failed before a report could be prepared");
+    if (failure) {
+      if (emitFinished)
+        observe({
+          event: "scan_finished",
+          scanId: request.id,
+          status: failure instanceof CleanupError ? "cleanup_failed" : "failed",
+        });
+      throw failure;
+    }
+    if (!report) {
+      if (emitFinished) observe({ event: "scan_finished", scanId: request.id, status: "failed" });
+      throw new Error("Scan failed before a report could be prepared");
+    }
+    if (emitFinished) observe({ event: "scan_finished", scanId: request.id, status: "completed" });
     return report;
   };
 }
@@ -230,7 +309,11 @@ async function bounded<T>(operation: () => Promise<T>, deadline: ScanDeadline): 
     deadline.signal.removeEventListener("abort", abort);
   }
 }
-function boundedSession(session: SandboxSession, deadline: ScanDeadline): SandboxSession {
+function boundedSession(
+  session: SandboxSession,
+  deadline: ScanDeadline,
+  transportFailed: () => void,
+): SandboxSession {
   const io = <T>(operation: () => Promise<T>) =>
     bounded(async () => {
       try {
@@ -238,7 +321,10 @@ function boundedSession(session: SandboxSession, deadline: ScanDeadline): Sandbo
       } catch (error) {
         // Nonzero scanner exits are ordinary results. A rejected SDK operation
         // means the sandbox transport is unusable; stop issuing further commands.
-        deadline.abort();
+        if (!deadline.signal.aborted) {
+          transportFailed();
+          deadline.abort();
+        }
         throw error;
       }
     }, deadline);

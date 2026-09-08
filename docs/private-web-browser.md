@@ -61,6 +61,19 @@ No CORS policy is enabled. All report strings are escaped; browser updates use
 finishes. Reconnect retries status retrieval. Copy reads the displayed prompt;
 when clipboard access fails the text is selected for manual copying.
 
+## Operator diagnostics
+
+The production server writes one JSON line to stderr for each non-waiting stage
+transition and one terminal `scan_finished` event after cleanup is resolved.
+Pending cleanup retries remain nonterminal and emit their own cleanup
+transitions. Events contain a timestamp, scan id, stage, status and, for
+failures, a bounded reason such as `timeout`, `file_limit`, `git_failed`,
+`invalid_snapshot`, `sandbox_failed` or `cancelled`. A clone is classified as a
+file-limit failure only when its bounded Git failure signature is accompanied by
+a pack file at the enforced 64 MiB ceiling. Repository URLs and raw sandbox, Git
+and scanner output are not logged. Browser status and reports remain the
+sanitized user-facing contract.
+
 ## Verification
 
 ```sh

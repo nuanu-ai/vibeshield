@@ -351,7 +351,15 @@ it("stops remaining engines when sandbox transport fails while keeping prior fin
   await jobs.shutdown();
 });
 it("keeps cleanup-failed admission closed through failed retries and publishes saved findings after verified retry", async () => {
-  const { jobs, sandbox, clock } = setup();
+  const clock = new ManualClock();
+  const sandbox = new ControlledSandbox();
+  const diagnostics: unknown[] = [];
+  const jobs = createJobs({
+    execute: createExecutor(sandbox, fixtureProvenance, (event) => diagnostics.push(event), false),
+    cleanup: () => sandbox.cleanup(),
+    clock,
+    lifecycle: (event) => diagnostics.push(event),
+  });
   sandbox.cleanupFails = true;
   sandbox.releaseAll();
   const { id } = jobs.start(fixtureSnapshot.url);
@@ -372,6 +380,83 @@ it("keeps cleanup-failed admission closed through failed retries and publishes s
   expect(jobs.get(id)?.finishedAt).toBe(clock.now());
   expect(jobs.busy()).toBe(false);
   expect(sandbox.sessions.size).toBe(0);
+  expect(diagnostics).toContainEqual({
+    event: "scan_stage",
+    scanId: id,
+    stage: "cleanup",
+    status: "completed",
+  });
+  expect(diagnostics.at(-1)).toEqual({
+    event: "scan_finished",
+    scanId: id,
+    status: "completed",
+  });
+  expect(
+    diagnostics.filter(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        "event" in event &&
+        event.event === "scan_finished",
+    ),
+  ).toHaveLength(1);
+  await jobs.shutdown();
+});
+it("keeps exhausted cleanup retries nonterminal until reconciliation finishes", async () => {
+  const clock = new ManualClock();
+  const sandbox = new ControlledSandbox();
+  const diagnostics: unknown[] = [];
+  const jobs = createJobs({
+    execute: createExecutor(sandbox, fixtureProvenance, (event) => diagnostics.push(event), false),
+    cleanup: () => sandbox.cleanup(),
+    clock,
+    lifecycle: (event) => diagnostics.push(event),
+  });
+  sandbox.cleanupFails = true;
+  sandbox.releaseAll();
+  const { id } = jobs.start(fixtureSnapshot.url);
+  await vi.waitFor(() => expect(jobs.get(id)?.status).toBe("cleanup-failed"));
+  for (const [index, destroyed] of [2, 3, 4].entries()) {
+    clock.advance(5000);
+    await vi.waitFor(() => expect(sandbox.destroyed).toHaveLength(destroyed));
+    if (index < 2) await vi.waitFor(() => expect(clock.pending()).toBe(1));
+  }
+  await vi.waitFor(() =>
+    expect(
+      diagnostics.filter(
+        (event) =>
+          typeof event === "object" &&
+          event !== null &&
+          "event" in event &&
+          event.event === "scan_stage" &&
+          "stage" in event &&
+          event.stage === "cleanup" &&
+          "status" in event &&
+          event.status === "failed",
+      ),
+    ).toHaveLength(4),
+  );
+  expect(
+    diagnostics.filter(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        "event" in event &&
+        event.event === "scan_finished",
+    ),
+  ).toHaveLength(0);
+  sandbox.cleanupFails = false;
+  await jobs.retryCleanup();
+  expect(diagnostics.at(-1)).toEqual({ event: "scan_finished", scanId: id, status: "completed" });
+  expect(
+    diagnostics.filter(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        "event" in event &&
+        event.event === "scan_finished",
+    ),
+  ).toHaveLength(1);
   await jobs.shutdown();
 });
 it("shutdown aborts work, waits for deletion, closes admission and cancels expiry timers", async () => {

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import { createExecutor } from "../../src/scan/execute.js";
+import * as serverModule from "../../src/server.js";
 import { createService } from "../../src/server.js";
 import { BusyError, createJobs } from "../../src/web/jobs.js";
 import {
@@ -44,6 +45,39 @@ async function service() {
   });
   return { sandbox, jobs, clock, ...application, port };
 }
+
+it("writes production scan diagnostics as timestamped JSON lines", async () => {
+  const createObservedExecutor = (serverModule as unknown as Record<string, unknown>)
+    .createObservedExecutor;
+  expect(createObservedExecutor).toBeTypeOf("function");
+  if (typeof createObservedExecutor !== "function") return;
+  const sandbox = new ControlledSandbox();
+  sandbox.releaseAll();
+  const lines: string[] = [];
+  const execute = createObservedExecutor(sandbox, fixtureProvenance, (line: string) =>
+    lines.push(line),
+  ) as ReturnType<typeof createExecutor>;
+  await execute(
+    { id: "production-observable", url: "https://github.com/owner/repo" },
+    new AbortController().signal,
+    () => {},
+  );
+  const events = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(events[0]).toMatchObject({
+    event: "scan_stage",
+    scanId: "production-observable",
+    stage: "prepare",
+    status: "running",
+  });
+  expect(events.at(-1)).toMatchObject({
+    event: "scan_finished",
+    scanId: "production-observable",
+    status: "completed",
+  });
+  expect(events.every((event) => /^\d{4}-\d{2}-\d{2}T/.test(String(event.timestamp)))).toBe(true);
+  expect(JSON.stringify(events)).not.toContain("https://github.com/owner/repo");
+  expect(JSON.stringify(events)).not.toContain(privateText);
+});
 
 // Removing admission closure, skipping the await, or leaving a request connection
 // open breaks observable shutdown rather than just the shape of a helper.
