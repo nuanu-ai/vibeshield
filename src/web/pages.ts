@@ -262,9 +262,9 @@ export function renderReport(report: Report): string {
       .map((job, index) => renderFix(job, index, report.repository.url))
       .join(
         "",
-      )}${hidden ? `<p class="quiet">${plural(hidden, "more job")} above, folded up.</p>` : ""}<section class="after"><h2>What we looked at</h2><p>${escapeHtml(
+      )}${hidden ? `<p class="quiet">${plural(hidden, "more job")} above, folded up.</p>` : ""}<section class="after"><p class="quiet">${escapeHtml(
       report.incomplete ? `Scan incomplete. ${coverageLine(report)}` : coverageLine(report),
-    )}</p><details class="tech"><summary>Check by check, and what we left out</summary><ul class="plain">${report.coverage
+    )}</p><details class="tech"><summary>What we checked, and what we can't tell you</summary><ul class="plain"><li>Your app never started. Logins, permissions and payments went untested.</li><li>If one user can open another user's data, that looks like ordinary code to every check here.</li><li>We found patterns. Proving someone can actually pull one off is a separate job.</li><li>This is one commit at one moment. Nothing keeps watching after you close this page.</li></ul><ul class="plain">${report.coverage
       .map(
         (entry) =>
           `<li><code>${escapeHtml(entry.scanner)} · ${escapeHtml(entry.area)}</code> ${escapeHtml(entry.status)}${entry.applicable ? "" : " · not applicable"} — ${escapeHtml(entry.reason)}</li>`,
@@ -281,7 +281,7 @@ export function renderReport(report: Report): string {
       .map(([tool, version]) => `<li>${escapeHtml(tool)} ${escapeHtml(version)}</li>`)
       .join(
         "",
-      )}${report.provenance.advisoryData.map((data) => `<li>${escapeHtml(data.source)} ${escapeHtml(data.retrievedAt)}${data.revision ? ` · ${escapeHtml(data.revision)}` : ""}${data.stale ? " · stale" : ""}</li>`).join("")}</ul></details></section><section class="after"><h2>What this can't tell you</h2><ul class="plain"><li>Your app never started. Logins, permissions and payments went untested.</li><li>If one user can open another user's data, that looks like ordinary code to every check here.</li><li>We found patterns. Proving someone can actually pull one off is a separate job.</li><li>This is one commit at one moment. Nothing keeps watching after you close this page.</li></ul></section><p><a href="/">Check another repo</a></p>`,
+      )}${report.provenance.advisoryData.map((data) => `<li>${escapeHtml(data.source)} ${escapeHtml(data.retrievedAt)}${data.revision ? ` · ${escapeHtml(data.revision)}` : ""}${data.stale ? " · stale" : ""}</li>`).join("")}</ul></details></section><p><a href="/">Check another repo</a></p>`,
   );
 }
 function coverageLine(report: Report): string {

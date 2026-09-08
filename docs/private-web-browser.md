@@ -20,7 +20,8 @@ title, how many files it touches, why it matters, what to change in one sentence
 and one button that copies the fix for a coding agent. The prompt text itself,
 file paths, line numbers, code, scanner names, versions, rule and advisory
 identifiers, coverage states, the commit and the image digest sit inside
-disclosures: the reader is assumed not to open files. Coverage is stated separately from findings: a report can hold real
+disclosures: the reader is assumed not to open files. After the last job the page
+ends, with coverage, scan limits and provenance behind one closing disclosure. Coverage is stated separately from findings: a report can hold real
 findings and incomplete checks at once.
 
 ## Run

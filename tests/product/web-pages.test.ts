@@ -128,7 +128,7 @@ it("leads with the first job rather than a total", async () => {
   expect(heading).not.toMatch(/\d+\s+(important\s+)?issues?/i);
   const firstCard = /<article data-fix open><h2[^>]*>([\s\S]*?)<\/h2>/.exec(html)?.[1] ?? "";
   expect(firstCard).not.toContain(heading);
-  expect(html.indexOf("<article data-fix")).toBeLessThan(html.indexOf("What we looked at"));
+  expect(html.indexOf("<article data-fix")).toBeLessThan(html.indexOf('<section class="after"'));
 });
 
 it("escapes every report text field and progress errors, with external assets only", async () => {
@@ -238,4 +238,16 @@ it("keeps file paths and code out of the page a reader sees first", async () => 
       expect(open).not.toContain(`${location.path}:${location.line}`);
   expect(open).not.toContain("<pre");
   expect(open).not.toContain("<code");
+});
+
+// After the last job the page is finished. Coverage, limits and provenance are
+// the same words on every report, so they wait behind one disclosure.
+it("ends after the last job and folds the rest into one disclosure", async () => {
+  const value = await report();
+  const html = renderReport(value);
+  const open = surface(html);
+  expect(open.match(/<h2/g)).toHaveLength(5);
+  expect(open).not.toContain("Logins, permissions");
+  expect(html.match(/<section class="after"/g)).toHaveLength(1);
+  expect(html).toContain("Logins, permissions");
 });
