@@ -3,6 +3,7 @@ import { Sandbox } from "microsandbox";
 import { expect, it } from "vitest";
 import { reconcileOwnedRuntime } from "../../src/adapters/runtime-ownership.js";
 import { createExecutor } from "../../src/scan/execute.js";
+import { parseRepositoryUrl } from "../../src/scan/source.js";
 import { systemClock } from "../../src/web/clock.js";
 import { createJobs } from "../../src/web/jobs.js";
 import { createWebServer } from "../../src/web/server.js";
@@ -74,7 +75,7 @@ it("submits a public GitHub URL through the real web/executor/runtime compositio
       job?.status,
       "public acquisition/real engines must complete; see public-web evidence",
     ).toBe("completed");
-    expect(job?.report?.repository.url).toBe(repository.replace(/\.git$/, ""));
+    expect(job?.report?.repository.url).toBe(parseRepositoryUrl(repository));
     expect(job?.report?.repository.commit).toMatch(/^[a-f0-9]{40}$/);
     expect(stages.has("acquire")).toBe(true);
     for (const engine of ["gitleaks", "opengrep", "osv", "trivy", "zizmor"])

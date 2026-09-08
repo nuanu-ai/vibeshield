@@ -149,6 +149,39 @@ it("runs all five installed engines on vulnerable, fixed and clean controls and 
             );
         } else if (variant !== "warnings") {
           expect(result.findings, `${id} must lose the selected finding in ${variant}`).toEqual([]);
+          if (id === "trivy") {
+            expect(result.coverage).toContainEqual(
+              expect.objectContaining({
+                scanner: "trivy",
+                area: "kubernetes",
+                status: "checked",
+                applicable: true,
+              }),
+            );
+            const exported = (await readScannerJson(
+              session,
+              "/work/.vibeshield/exports/trivy.json",
+            )) as {
+              report: {
+                Results: {
+                  Target: string;
+                  Class: string;
+                  Type: string;
+                  Misconfigurations: { ID: string; Status: string }[];
+                }[];
+              };
+            };
+            await saveEvidence(`${variant}-trivy-pass`, exported);
+            expect(exported).toMatchObject({ warnings: false });
+            const deployment = exported.report.Results.filter(
+              (entry) => entry.Target === "deployment.yaml",
+            );
+            expect(deployment).toHaveLength(1);
+            expect(deployment[0]).toMatchObject({ Class: "config", Type: "kubernetes" });
+            expect(
+              deployment[0]?.Misconfigurations.filter((finding) => finding.ID === "KSV-0017"),
+            ).toEqual([{ ID: "KSV-0017", Status: "PASS" }]);
+          }
         }
         if (id === "osv") {
           const advisoryData = await readOsvAdvisoryData(session);
