@@ -92,12 +92,25 @@ export interface Report {
   suppressedCount: number;
 }
 export type Stage = "prepare" | "acquire" | ScannerId | "report" | "cleanup";
+/** The whole run in order, so a queued job can show what is coming. */
+export const scanStages: readonly Stage[] = [
+  "prepare",
+  "acquire",
+  "gitleaks",
+  "opengrep",
+  "osv",
+  "trivy",
+  "zizmor",
+  "report",
+  "cleanup",
+];
 export type FailureCode =
   | "repository_unreachable"
   | "repository_too_large"
   | "took_too_long"
   | "environment_unavailable"
   | "cleanup_pending"
+  | "waited_too_long"
   | "internal";
 /** A scan that ends without a report carries the reason the user is owed. */
 export class ScanFailure extends Error {

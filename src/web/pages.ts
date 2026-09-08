@@ -124,6 +124,8 @@ const failureText: Record<FailureCode, string> = {
   environment_unavailable:
     "Our scanning machine didn't start. Nothing ran, and nothing was left behind.",
   cleanup_pending: "We're still clearing up after the last scan. Try again in a few seconds.",
+  waited_too_long:
+    "The scan ahead of yours never finished, so yours never got its turn. Nothing ran.",
   internal: "Something broke on our side before we could write anything up.",
 };
 export function failureMessage(failure?: FailureCode): string {
@@ -157,14 +159,16 @@ export function renderHome(error?: string): string {
 export function renderProgress(job: Job): string {
   const done = job.stages.filter((entry) => entry.status === "completed").length;
   const headline =
-    job.status === "running"
-      ? `Checking ${repositoryName(job.url)}`
-      : job.status === "completed"
-        ? "All done"
-        : "This scan stopped early";
+    job.status === "waiting"
+      ? "You are next in line"
+      : job.status === "running"
+        ? `Checking ${repositoryName(job.url)}`
+        : job.status === "completed"
+          ? "All done"
+          : "This scan stopped early";
   return page(
     "Checking your repo",
-    `<h1>${escapeHtml(headline)}</h1><p class="lead" role="status" data-status>${job.status === "running" ? `${done} of ${job.stages.length} steps done` : job.status === "completed" ? "Opening your report" : "Here is what happened"}</p><p data-error role="alert">${escapeHtml(failureMessage(job.failure))}</p><button type="button" data-retry hidden>Try that again</button><ol class="stages" data-stages>${job.stages
+    `<h1>${escapeHtml(headline)}</h1><p class="lead" role="status" data-status>${job.status === "waiting" ? "Someone else's scan is finishing. Yours starts on its own, and this page will follow it." : job.status === "running" ? `${done} of ${job.stages.length} steps done` : job.status === "completed" ? "Opening your report" : "Here is what happened"}</p><p data-error role="alert">${escapeHtml(failureMessage(job.failure))}</p><button type="button" data-retry hidden>Try that again</button><ol class="stages" data-stages>${job.stages
       .map(
         (entry) =>
           `<li data-stage="${escapeHtml(entry.stage)}" data-state="${escapeHtml(entry.status)}"><strong>${escapeHtml(labels[entry.stage])}</strong><span data-stage-state>${escapeHtml(entry.message)}</span></li>`,

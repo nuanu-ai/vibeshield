@@ -103,9 +103,11 @@ export function createWebServer(jobs: JobStore): Server {
         response,
         200,
         renderHome(
-          jobs.busy()
-            ? "Another scan is running or cleanup is pending. Please try again later."
-            : undefined,
+          jobs.full()
+            ? "Two scans are already lined up. Try again in a few minutes."
+            : jobs.busy()
+              ? "A scan is finishing up. Submit yours and it starts right after it."
+              : undefined,
         ),
       );
     if (path === "/assets/app.js") return send(response, 200, browserScript, "text/javascript");

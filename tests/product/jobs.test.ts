@@ -40,7 +40,9 @@ it("reserves the one slot synchronously before any work can await", async () => 
   const first = jobs.start(fixtureSnapshot.url);
   expect(jobs.get(first.id)?.status).toBe("running");
   expect(jobs.busy()).toBe(true);
+  expect(jobs.get(jobs.start(fixtureSnapshot.url).id)?.status).toBe("waiting");
   expect(() => jobs.start(fixtureSnapshot.url)).toThrow(BusyError);
+  await vi.waitFor(() => expect(sandbox.created).toHaveLength(1));
   sandbox.releaseAll();
   await jobs.shutdown();
 });
@@ -367,7 +369,6 @@ it("keeps cleanup-failed admission closed through failed retries and publishes s
   expect(jobs.busy()).toBe(true);
   expect(jobs.get(id)?.finishedAt).toBeUndefined();
   expect(jobs.get(id)?.report?.issues).toHaveLength(5);
-  expect(() => jobs.start(fixtureSnapshot.url)).toThrow(BusyError);
   await expect(jobs.retryCleanup()).rejects.toBeInstanceOf(CleanupError);
   expect(jobs.busy()).toBe(true);
   sandbox.cleanupFails = false;
@@ -537,7 +538,6 @@ it("hands over the finished report while cleanup is still unresolved", async () 
   await vi.waitFor(() => expect(jobs.get(id)?.status).toBe("cleanup-failed"));
   expect(jobs.get(id)?.report?.issues).toHaveLength(5);
   expect(jobs.busy()).toBe(true);
-  expect(() => jobs.start(fixtureSnapshot.url)).toThrow(BusyError);
   sandbox.cleanupFails = false;
   await jobs.retryCleanup();
   await jobs.shutdown();
@@ -563,4 +563,57 @@ it("says a check found nothing instead of describing its coverage", async () => 
     /nothing/i,
   );
   await jobs.shutdown();
+});
+// One slot means one person waits, not that the second person is turned away.
+it("lets one submission wait for the running scan and refuses only the third", async () => {
+  const { jobs, sandbox } = setup();
+  const first = jobs.start(fixtureSnapshot.url);
+  const second = jobs.start(fixtureSnapshot.url);
+  expect(jobs.get(first.id)?.status).toBe("running");
+  expect(jobs.get(second.id)?.status).toBe("waiting");
+  expect(() => jobs.start(fixtureSnapshot.url)).toThrow(BusyError);
+  await vi.waitFor(() => expect(sandbox.created).toHaveLength(1));
+  sandbox.releaseAll();
+  await completed(jobs, first.id);
+  await jobs.shutdown();
+});
+it("starts the waiting scan on its own once the running one is done", async () => {
+  const { jobs, sandbox } = setup();
+  const first = jobs.start(fixtureSnapshot.url);
+  const second = jobs.start(fixtureSnapshot.url);
+  sandbox.releaseAll();
+  await completed(jobs, first.id);
+  expect((await completed(jobs, second.id)).issues).toHaveLength(5);
+  expect(sandbox.created).toHaveLength(2);
+  expect(jobs.busy()).toBe(false);
+  await jobs.shutdown();
+  expect(sandbox.sessions.size).toBe(0);
+});
+// The wait must end even when the scan ahead never releases the slot.
+it("gives up a queued scan when the one ahead never releases the slot", async () => {
+  const { jobs, sandbox, clock } = setup();
+  sandbox.cleanupFails = true;
+  sandbox.releaseAll();
+  const first = jobs.start(fixtureSnapshot.url);
+  await vi.waitFor(() => expect(jobs.get(first.id)?.status).toBe("cleanup-failed"));
+  const second = jobs.start(fixtureSnapshot.url);
+  expect(jobs.get(second.id)?.status).toBe("waiting");
+  clock.advance(660_000);
+  expect(jobs.get(second.id)?.status).toBe("failed");
+  expect(jobs.get(second.id)?.failure).toBe("waited_too_long");
+  expect(sandbox.created).toHaveLength(1);
+  expect(jobs.get(jobs.start(fixtureSnapshot.url).id)?.status).toBe("waiting");
+  sandbox.cleanupFails = false;
+  await jobs.shutdown().catch(() => {});
+});
+it("ends a queued scan on shutdown instead of leaving it pending", async () => {
+  const { jobs, sandbox, clock } = setup();
+  jobs.start(fixtureSnapshot.url);
+  const second = jobs.start(fixtureSnapshot.url);
+  sandbox.releaseAll();
+  await jobs.shutdown();
+  expect(jobs.get(second.id)?.status).toBe("failed");
+  expect(jobs.get(second.id)?.failure).toBe("waited_too_long");
+  expect(sandbox.created.length).toBeLessThanOrEqual(1);
+  expect(clock.pending()).toBe(0);
 });

@@ -196,3 +196,14 @@ it("reconnects the shipped script to the same HTTP job and reaches its report wi
     expect(app.clock.pending()).toBe(0);
   }
 });
+
+// A queued page that stops polling never notices its own turn arriving.
+it("keeps polling and says what is happening while a scan is queued", async () => {
+  const b = browser();
+  b.fetch.mockResolvedValue(response(state({ status: "waiting", stages: [] })));
+  b.run();
+  await settle();
+  expect(b.status.textContent).toContain("starts on its own");
+  expect([...b.timers.values()].map((timer) => timer.ms)).toEqual([2000]);
+  expect(b.location.assign).not.toHaveBeenCalled();
+});

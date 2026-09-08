@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FailureCode, Progress, Report } from "../scan/contracts.js";
-import { ScanFailure } from "../scan/contracts.js";
+import { ScanFailure, scanStages } from "../scan/contracts.js";
 import type { ScanDiagnostic } from "../scan/execute.js";
 import { LIMITS } from "../scan/limits.js";
 import { parseRepositoryUrl } from "../scan/source.js";
@@ -15,7 +15,7 @@ export interface Job {
   url: string;
   createdAt: number;
   finishedAt?: number;
-  status: "running" | "completed" | "failed" | "cleanup-failed";
+  status: "waiting" | "running" | "completed" | "failed" | "cleanup-failed";
   stages: Progress[];
   report?: Report;
   failure?: FailureCode;
@@ -24,12 +24,13 @@ export interface JobStore {
   start(url: string): { id: string };
   get(id: string): Job | undefined;
   busy(): boolean;
+  full(): boolean;
   shutdown(): Promise<void>;
   retryCleanup(): Promise<void>;
 }
 export class BusyError extends Error {
   constructor() {
-    super("Another scan is still finishing. Try again in a few seconds.");
+    super("Two scans are already lined up. Try again in a few minutes.");
   }
 }
 export class CleanupError extends Error {
@@ -58,6 +59,7 @@ export function createJobs(options: {
     finishedStatus?: "completed" | "failed" | "cleanup_failed";
   };
   let active: Active | undefined;
+  let waiting: { job: Job; cancel: () => void } | undefined;
   let stopped = false;
   let retry: Promise<void> | undefined;
   let stopping: Promise<void> | undefined;
@@ -107,6 +109,29 @@ export function createJobs(options: {
     for (const job of completed.slice(0, Math.max(0, completed.length - LIMITS.reports)))
       remove(job.id);
   };
+  /** A queued job never outlives one full scan budget. Whatever went wrong with
+   * the scan ahead of it, the wait ends and the slot is released. */
+  const giveUpWaiting = () => {
+    const queued = waiting;
+    if (!queued) return;
+    waiting = undefined;
+    queued.cancel();
+    queued.job.status = "failed";
+    queued.job.failure = "waited_too_long";
+    queued.job.finishedAt = options.clock.now();
+    if (!stopped)
+      expiry.set(
+        queued.job.id,
+        options.clock.schedule(LIMITS.reportTtlMs, () => remove(queued.job.id)),
+      );
+  };
+  const promote = () => {
+    const queued = waiting;
+    if (stopped || active || !queued) return;
+    waiting = undefined;
+    queued.cancel();
+    begin(queued.job);
+  };
   const finish = (current: Active) => {
     const job = current.job;
     if (current.report) {
@@ -129,10 +154,59 @@ export function createJobs(options: {
         options.clock.schedule(LIMITS.reportTtlMs, () => remove(job.id)),
       );
     prune();
+    promote();
   };
+  /** Everything a live scan owns. Promotion reuses it, so a queued job runs
+   * exactly like a job that never had to wait. */
+  const begin = (job: Job): void => {
+    const current: Active = {
+      job,
+      deadline: createScanDeadline(options.clock),
+      done: Promise.resolve(),
+    };
+    active = current;
+    job.status = "running";
+    current.done = (async () => {
+      try {
+        current.report = await options.execute(
+          { id: job.id, url: job.url },
+          current.deadline.signal,
+          (event) => {
+            if (job.status !== "running") return;
+            const index = job.stages.findIndex((stage) => stage.stage === event.stage);
+            if (index < 0) job.stages.push({ ...event });
+            else job.stages[index] = { ...event };
+          },
+        );
+        finish(current);
+        publishFinished(current, "completed");
+      } catch (error) {
+        if (error instanceof CleanupError) {
+          if (error.report) {
+            current.report = error.report;
+            job.report = error.report;
+          }
+          current.failure = error.code;
+          job.status = "cleanup-failed";
+          job.failure = "cleanup_pending";
+          options.diagnostic?.(
+            "Temporary resource cleanup could not be verified. Admission remains closed during bounded retries.",
+          );
+          scheduleCleanup(current);
+        } else {
+          current.failure = error instanceof ScanFailure ? error.code : "internal";
+          finish(current);
+          publishFinished(current, "failed");
+        }
+      } finally {
+        current.deadline.dispose();
+      }
+    })();
+  };
+
   const store: JobStore = {
     start(value) {
-      if (active || stopped) throw new BusyError();
+      if (stopped || (active && waiting)) throw new BusyError();
       const url = parseRepositoryUrl(value);
       prune();
       const job: Job = {
@@ -142,49 +216,16 @@ export function createJobs(options: {
         status: "running",
         stages: [],
       };
-      const current: Active = {
-        job,
-        deadline: createScanDeadline(options.clock),
-        done: Promise.resolve(),
-      };
-      active = current;
       jobs.set(job.id, job);
-      current.done = (async () => {
-        try {
-          current.report = await options.execute(
-            { id: job.id, url },
-            current.deadline.signal,
-            (event) => {
-              if (job.status !== "running") return;
-              const index = job.stages.findIndex((stage) => stage.stage === event.stage);
-              if (index < 0) job.stages.push({ ...event });
-              else job.stages[index] = { ...event };
-            },
-          );
-          finish(current);
-          publishFinished(current, "completed");
-        } catch (error) {
-          if (error instanceof CleanupError) {
-            if (error.report) {
-              current.report = error.report;
-              job.report = error.report;
-            }
-            current.failure = error.code;
-            job.status = "cleanup-failed";
-            job.failure = "cleanup_pending";
-            options.diagnostic?.(
-              "Temporary resource cleanup could not be verified. Admission remains closed during bounded retries.",
-            );
-            scheduleCleanup(current);
-          } else {
-            current.failure = error instanceof ScanFailure ? error.code : "internal";
-            finish(current);
-            publishFinished(current, "failed");
-          }
-        } finally {
-          current.deadline.dispose();
-        }
-      })();
+      if (!active) {
+        begin(job);
+        return { id: job.id };
+      }
+      // Someone is waiting, so this is the moment to try a stuck deletion again.
+      job.status = "waiting";
+      job.stages = scanStages.map((stage) => ({ stage, status: "waiting", message: "" }));
+      waiting = { job, cancel: options.clock.schedule(LIMITS.waitMs, giveUpWaiting) };
+      if (active.job.status === "cleanup-failed") void store.retryCleanup().catch(() => {});
       return { id: job.id };
     },
     get(id) {
@@ -193,6 +234,7 @@ export function createJobs(options: {
       return job && structuredClone(job);
     },
     busy: () => active !== undefined || stopped,
+    full: () => (active !== undefined && waiting !== undefined) || stopped,
     async retryCleanup() {
       if (retry) return retry;
       const current = active;
@@ -238,6 +280,7 @@ export function createJobs(options: {
     },
     async shutdown() {
       stopped = true;
+      giveUpWaiting();
       cancelMaintenance?.();
       cancelMaintenance = undefined;
       for (const cancel of expiry.values()) cancel();

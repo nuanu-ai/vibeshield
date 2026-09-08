@@ -59,6 +59,25 @@ the whole run has ten minutes. A failed, timed-out or malformed engine becomes a
 coverage row, not a lost report: the remaining engines keep running and the
 report is still built from what completed.
 
+## One Slot, One Place in Line
+
+One scan runs at a time. A visitor who arrives during a live scan is queued
+rather than turned away: their submission gets its own opaque URL, its page says
+it is next in line and that it starts on its own, and it begins the moment the
+slot frees. There is exactly one waiting place; a third submission is refused
+with a plain message.
+
+The wait is bounded so the mechanism cannot stick. A queued job carries its own
+deadline of one full scan budget plus slack (`LIMITS.waitMs`). If the scan ahead
+never releases the slot — a sandbox whose deletion cannot be verified, for
+instance — the queued job ends as `failed` with `waited_too_long`, having run
+nothing, and the waiting place is free again. Shutdown ends a queued job the same
+way rather than leaving it pending.
+
+Queueing is also what unsticks a pending cleanup: joining the line behind a
+`cleanup-failed` job, like being refused, starts one further deletion attempt in
+the background.
+
 ## Terminal States
 
 A scan that starts always ends in one of three states, and each one is a page
@@ -66,6 +85,7 @@ worth reading:
 
 | State | What the reader gets |
 | --- | --- |
+| `waiting` | A page that says it is next in line and starts on its own. |
 | `completed` | The report. |
 | `cleanup-failed` | The report, plus closed admission until deletion is verified. |
 | `failed` | A named reason and something to do about it. |

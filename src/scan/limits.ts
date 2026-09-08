@@ -2,6 +2,9 @@ export const LIMITS = {
   cpus: 2,
   memoryMib: 4096,
   totalMs: 600_000,
+  // One full scan budget plus slack, so a scan that hits its own deadline still
+  // gets to hand the slot over before the person behind it gives up.
+  waitMs: 660_000,
   acquisitionMs: 120_000,
   scannerMs: 120_000,
   historyCommits: 100,

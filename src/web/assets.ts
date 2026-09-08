@@ -19,14 +19,14 @@ if (document.body.hasAttribute("data-progress")) {
       if (!response.ok) throw new Error();
       const state = await response.json();
       const done = state.stages.filter(stage => stage.status === "completed").length;
-      status.textContent = state.status === "running" ? done + " of " + state.stages.length + " steps done" : state.status === "completed" ? "Opening your report" : "Here is what happened";
+      status.textContent = state.status === "waiting" ? "Someone else's scan is finishing. Yours starts on its own, and this page will follow it." : state.status === "running" ? done + " of " + state.stages.length + " steps done" : state.status === "completed" ? "Opening your report" : "Here is what happened";
       error.textContent = state.error || "";
       for (const stage of state.stages) {
         const row = [...document.querySelectorAll("[data-stage]")].find(row => row.dataset.stage === stage.stage);
         if (row) { row.dataset.state = stage.status; row.querySelector("[data-stage-state]").textContent = stage.message; }
       }
       if (state.reportReady) { location.assign(location.pathname + "/report"); return; }
-      again = state.status === "running" || state.status === "cleanup-failed";
+      again = state.status === "waiting" || state.status === "running" || state.status === "cleanup-failed";
     } catch {
       error.textContent = "We lost the connection to this scan. It is still running.";
       retry.hidden = false;

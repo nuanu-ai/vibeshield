@@ -43,6 +43,7 @@ export function createBrowserFixture() {
     start: (url) => state.jobs.start(url),
     get: (id) => state.jobs.get(id),
     busy: () => state.jobs.busy(),
+    full: () => state.jobs.full(),
     shutdown: () => state.jobs.shutdown(),
     retryCleanup: () => state.jobs.retryCleanup(),
   });

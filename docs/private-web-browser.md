@@ -65,6 +65,17 @@ can go idle. A refused submission starts one further attempt in the background
 and is still answered 409, which is how a healed environment reopens admission
 without an operator restart. The attempt is never awaited inside the response.
 
+## Waiting in line
+
+A visitor who submits during a live scan is queued instead of refused: the
+submission redirects to its own job URL whose page says it is next in line and
+starts on its own, and the browser keeps polling that URL. There is one waiting
+place; the next submission is answered 409. A queued job never runs longer than
+one scan budget plus slack before it gives up with a stated reason and frees the
+place, and shutdown ends it the same way. Joining the line behind a job whose
+cleanup is pending starts one further deletion attempt, exactly as a refusal
+does.
+
 ## HTTP and browser behavior
 
 The routes are `GET /`, `POST /scans`, `GET /scans/:id`,

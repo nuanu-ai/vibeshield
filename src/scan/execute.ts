@@ -16,7 +16,7 @@ import type {
   ScanResult,
   Stage,
 } from "./contracts.js";
-import { ScanFailure } from "./contracts.js";
+import { ScanFailure, scanStages } from "./contracts.js";
 import { LIMITS } from "./limits.js";
 import { defaultPolicy } from "./policy.js";
 import { buildReport } from "./report.js";
@@ -103,14 +103,7 @@ export function createExecutor(
     };
     deadline.signal.addEventListener("abort", abort, { once: true });
     try {
-      for (const waiting of [
-        "prepare",
-        "acquire",
-        ...scanners.map(([id]) => id),
-        "report",
-        "cleanup",
-      ] as const)
-        emit({ stage: waiting, status: "waiting", message: "" });
+      for (const waiting of scanStages) emit({ stage: waiting, status: "waiting", message: "" });
       progress("running", "Preparing scan environment.");
       const url = parseRepositoryUrl(request.url);
       if (!(await bounded(() => runtime.isAvailable(), deadline)).available) throw new Error();

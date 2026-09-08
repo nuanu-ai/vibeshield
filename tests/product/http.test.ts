@@ -80,9 +80,10 @@ it("keeps cleanup failure busy until a bounded maintenance retry verifies deleti
   sandbox.releaseAll();
   const path = await start();
   await expect.poll(async () => (await status(path)).status).toBe("cleanup-failed");
-  expect((await submit()).status).toBe(409);
+  expect((await submit()).status).toBe(303);
   await expect.poll(() => sandbox.destroyed.length).toBe(2);
-  expect(await (await get("/")).text()).toMatch(/cleanup.*pending/i);
+  expect(sandbox.created).toHaveLength(1);
+  expect(await (await get("/")).text()).toMatch(/lined up|finishing up/i);
   expect((await get(`${path}/report`)).status).toBe(200);
   expect(sandbox.sessions.size).toBe(1);
   sandbox.cleanupFails = false;
@@ -94,8 +95,7 @@ it("keeps cleanup failure busy until a bounded maintenance retry verifies deleti
   expect((await submit()).status).toBe(409);
   sandbox.cleanupGate.resolve();
   expect(await complete(path)).toContain("Exposed credential");
-  expect(sandbox.sessions.size).toBe(0);
-  expect((await submit()).status).toBe(303);
+  await expect.poll(() => sandbox.created.length).toBe(2);
   expect(diagnostics.length).toBeGreaterThan(0);
   expect(diagnostics.join(" ")).not.toContain(privateText);
   expect(JSON.stringify(await status(path))).not.toMatch(
@@ -117,6 +117,8 @@ it("exhausts three maintenance attempts without releasing admission or leaking d
   clock.advance(86_400_000);
   expect(sandbox.destroyed).toHaveLength(4);
   expect(clock.pending()).toBe(0);
+  expect((await submit()).status).toBe(303);
+  await expect.poll(() => sandbox.destroyed.length).toBe(5);
   expect((await submit()).status).toBe(409);
   const state = await status(path);
   expect(state).toMatchObject({ status: "cleanup-failed", reportReady: true });
@@ -166,7 +168,7 @@ it("times out stalled work but publishes completed findings only after cleanup",
   sandbox.cleanupGate = deferred();
   clock.advance(600_000);
   await expect.poll(() => sandbox.destroyed.length).toBe(1);
-  expect((await submit()).status).toBe(409);
+  expect((await submit()).status).toBe(303);
   expect(await status(path)).toMatchObject({ reportReady: false });
   sandbox.cleanupGate.resolve();
   const html = await complete(path);
@@ -174,8 +176,7 @@ it("times out stalled work but publishes completed findings only after cleanup",
   expect(html).toContain("Exposed credential");
   expect(html).toContain("Scan incomplete");
   expect(html).toContain("overall deadline exceeded");
-  expect(sandbox.sessions.size).toBe(0);
-  expect((await submit()).status).toBe(303);
+  await expect.poll(() => sandbox.created.length).toBe(2);
 });
 
 it("expires a report at one hour with a new-scan link on every old job URL", async () => {
@@ -257,7 +258,7 @@ it("serves the finished report while cleanup is still pending", async () => {
   const response = await get(`${path}/report`);
   expect(response.status).toBe(200);
   expect(await response.text()).toContain("Exposed credential");
-  expect((await submit()).status).toBe(409);
+  expect((await submit()).status).toBe(303);
 });
 
 // Background attempts stop so the process can go idle. Without a retry driven by
@@ -273,16 +274,19 @@ it("reopens admission after a refused submission retries the pending cleanup", a
   }
   clock.advance(86_400_000);
   expect(clock.pending()).toBe(0);
-  const stillBroken = await submit();
-  expect(stillBroken.status).toBe(409);
+  const queued = await submit();
+  expect(queued.status).toBe(303);
   await expect.poll(() => sandbox.destroyed.length).toBe(5);
   expect((await status(path)).status).toBe("cleanup-failed");
-  sandbox.cleanupFails = false;
   const refused = await submit();
   expect(refused.status).toBe(409);
   expect(await refused.text()).toMatch(/again/i);
+  sandbox.cleanupFails = false;
+  const waiting = queued.headers.get("location") as string;
+  expect((await submit()).status).toBe(409);
   await expect.poll(async () => (await status(path)).status).toBe("completed");
-  expect((await submit()).status).toBe(303);
+  await expect.poll(() => sandbox.created.length).toBe(2);
+  expect((await status(waiting)).status).not.toBe("waiting");
 });
 
 // One generic sentence for every failure leaves the person with nothing to act
@@ -303,4 +307,23 @@ it("tells apart a repository it cannot read from a scan environment that is down
   expect(environment).not.toMatch(/repo/i);
   expect(environment).not.toContain(privateText);
   expect(environment).not.toBe(repository);
+});
+
+// Turning the second visitor away wastes the wait they were willing to do.
+it("puts a second visitor in line instead of turning them away", async () => {
+  const running = await start();
+  const queued = await submit();
+  expect(queued.status).toBe(303);
+  const path = queued.headers.get("location") as string;
+  expect(path).not.toBe(running);
+  expect(await status(path)).toMatchObject({ status: "waiting", reportReady: false });
+  const queuedPage = await (await get(path)).text();
+  expect(queuedPage).toMatch(/next in line/i);
+  expect(queuedPage).toContain("starts on its own");
+  expect((await submit()).status).toBe(409);
+  expect(sandbox.created).toHaveLength(1);
+  sandbox.releaseAll();
+  await expect.poll(async () => (await status(path)).status).toBe("completed");
+  expect(await complete(path)).toContain("Exposed credential");
+  expect(sandbox.created).toHaveLength(2);
 });

@@ -175,6 +175,7 @@ it("maps invalid, duplicate and unknown requests to 400, 409, 404 and 405", asyn
     ).status,
   ).toBe(400);
   expect((await start()).status).toBe(303);
+  expect((await start()).status).toBe(303);
   expect((await start()).status).toBe(409);
   for (const path of [
     "/",
