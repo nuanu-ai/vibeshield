@@ -48,7 +48,7 @@ export function makeReportInput(results: ScanResult[]): ReportInput {
       commit: "0123456789abcdef",
       files: ["src/config.ts"],
       history: { commits: 12, truncated: false },
-  oversized: 0,
+      oversized: 0,
       languages: ["TypeScript"],
     },
     provenance: {
