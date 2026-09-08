@@ -7,20 +7,23 @@ relevant files under `docs/` instead of duplicating it here.
 
 ## Project Context
 
-VibeShield is an early-stage security audit pipeline for AI-generated and
-beginner-built web projects.
-
-The current product slice focuses on proving the detection core through a local CLI
-pipeline that accepts a GitHub repository URL or local Git worktree root:
+VibeShield is a private web service for AI-generated and beginner-built web
+projects. Someone submits a public GitHub repository URL, watches the checks run,
+and gets a short list of jobs to do with prompts for their coding agent.
 
 ```bash
-vibeshield scan <github-url-or-local-path>
+pnpm start   # http://127.0.0.1:3000
 ```
 
 Primary orientation:
 
-- `README.md`: concise project overview.
-- `docs/`: current product, architecture, and planning documents.
+- `README.md`: what the product is and how to run it.
+- `docs/architecture.md`: how the service is put together.
+- `docs/private-web-browser.md`: pages, routes, diagnostics and acceptance.
+
+The earlier CLI pipeline and its deep-static experiment are still in the tree
+with their tests. They are not the product and not a current promise. Do not
+extend them; removing them is outstanding work.
 
 ## Repository Layout
 
@@ -55,8 +58,10 @@ debug from files on disk.
 - Preserve existing user changes and avoid broad refactors while doing focused
   work.
 - Treat repositories being analyzed by VibeShield as untrusted input.
-- For local path scans, require a Git worktree root and use Git-filtered
-  snapshots; do not add a non-Git directory fallback.
+- Product input is a public GitHub repository URL. Do not add local paths,
+  private repositories or credentials to the scan flow.
+- Never run repository code: no install, build, test, migration or package
+  script, on the host or in the sandbox.
 - Do not add legacy paths, fallbacks, migrations, or backward compatibility for
   old runs/contracts unless the user explicitly asks for it.
 
@@ -74,22 +79,21 @@ the first working scan flow exists.
 Project tooling:
 
 - install: `pnpm install`;
+- build/load the pinned scanner image: `pnpm toolchain:prepare`;
+- run the service in dev: `pnpm dev`;
+- run the built service: `pnpm build && pnpm start`;
 - lint: `pnpm lint`;
 - typecheck: `pnpm typecheck`;
-- test: `pnpm test`;
-- build/load the local scanner image: `pnpm toolchain:prepare`;
-- run the local CLI in dev: `pnpm scan <github-url-or-local-path>`;
-- resume a failed run from durable artifacts: `pnpm resume /path/to/run-directory`;
-- run the live Microsandbox smoke:
-  `pnpm exec vitest run tests/microsandbox-runtime.smoke.test.ts`;
-- build package output: `pnpm build`.
+- fast tests: `pnpm test`;
+- all four of the above: `pnpm check`;
+- real engines in Microsandbox: `pnpm test:live`.
 
-The current default CLI path uses `MicrosandboxRuntime` with the local
-`vibeshield-toolchain` image. OpenRouter is optional and only enhances Fix Pack
-wording; if `OPENROUTER_API_KEY` is missing or invalid, the deterministic catalog
-fallback is used. If the sandbox/toolchain is unavailable, the CLI must fail
-clearly rather than running scanners on the host. `FakeSandboxRuntime` is only a
-local test double.
+The fast suite supplies controlled scanner exports at the sandbox boundary and
+does not boot a VM. `pnpm test:live` is a separate mandatory serial check: it
+fails clearly when the runtime, image, binaries, rules or versions are missing,
+and a skipped live run does not count as acceptance. If the sandbox or toolchain
+is unavailable, the service must fail clearly rather than running scanners on the
+host.
 
 ## Commit Hygiene
 

@@ -1,353 +1,171 @@
 # Architecture
 
-VibeShield is a local security-audit CLI for AI-generated and beginner-built web
-projects. It accepts either a public GitHub repository URL or a local Git
-worktree root and returns a small, inspectable **Agent Fix Pack**: concrete
-findings, file/line evidence, plain-language explanation, and prompts the owner
-can paste into a coding agent.
+VibeShield is a private web service. Someone pastes a public GitHub repository
+URL, watches the checks run, and gets a short list of things to fix, each with a
+prompt they can paste into a coding agent. There is no CLI in the product flow,
+no account, no stored history.
 
-There are two product modes:
+The service runs one scan at a time and keeps nothing: results live in memory for
+an hour and do not survive a restart.
 
-- **Quick Scan**: `vibeshield scan <github-url-or-local-git-root>`. This is the
-  default, deterministic scanner pipeline.
-- **Deep Static**: `vibeshield scan <repo> --deep`. This runs Quick Scan, then
-  adds a Joern-backed security graph, static attack hypotheses, validation
-  recipes, and richer report sections.
-
-The model is never the source of truth. Scanners, graph facts, priorities,
-verdicts, coverage, and hypothesis statuses are deterministic before any model
-call. Optional OpenRouter calls only improve wording and coding-agent prompts.
+A model never decides anything. Scanner selection, publication, grouping,
+ordering and wording are deterministic. There are no model calls in this service.
 
 ## Runtime Boundary
 
-Repositories scanned by VibeShield are untrusted input.
+A repository submitted to VibeShield is untrusted input.
 
-The default runtime creates one fresh Microsandbox per scan. GitHub input is
-cloned inside the sandbox. Local input must be a Git worktree root; the host
-creates a Git-filtered archive, uploads it, and extracts it inside the sandbox.
+Each scan creates one fresh Microsandbox from the pinned toolchain image. The
+repository is cloned inside that sandbox and every scanner runs there. The host
+orchestrates the run, receives bounded and redacted exports, renders escaped
+HTML, and destroys the sandbox when the run resolves. The host never executes
+repository content, and the repository's own scanner configuration cannot
+disable a selected check.
 
-The host orchestrates the run, stores artifacts, renders reports, and performs
-optional model calls. Scanner tools and Joern run inside the sandbox, never on
-the host. VibeShield does not start the scanned app and does not run package
-scripts, tests, builds, migrations, app commands, or git hooks from the scanned
-repository.
+The application is never started. No install, build, test, migration or package
+script runs at any point.
 
-Network is enabled for the current product slice. Scanner vulnerability data is
-refreshed at run start where the toolchain supports it, and freshness is
-recorded in the manifest. If the sandbox or toolchain is unavailable, the scan
-fails clearly instead of falling back to host execution.
-
-## Run State
-
-The default state root is `~/.vibeshield`:
-
-- `runs/<run-id>/` contains owner-facing run artifacts such as `manifest.json`,
-  `report.json`, `report.md`, `report.html`, and, for Deep Static,
-  `repository-map.json`;
-- `state.sqlite` records runs, stage attempts, artifact refs, SecurityGraph
-  projections, and Deep Static coverage;
-- `blobs/sha256/...` stores content-addressed raw artifacts, including redacted
-  scanner outputs and Joern program-analysis artifacts.
-
-The run id is the identity for both Quick Scan and Deep Static. Deep Static adds
-stages and artifacts to the same run; it does not create a second pipeline or a
-second source of truth.
-
-The state model is resume-shaped, but CLI resume is not available yet:
-`vibeshield resume` fails clearly. Old MVP surfaces and old run contracts are
-not compatibility targets.
-
-## Quick Scan Flow
+## Shape
 
 ```text
-vibeshield scan <github-url-or-local-git-root>
-  -> source.resolve
-       GitHub: clone inside Microsandbox
-       local: upload Git-filtered snapshot into Microsandbox
-  -> toolchain.refresh
-       refresh scanner vulnerability databases where applicable
-  -> snapshot.manifest
-       origin, commit when available, file hashes, exclusions, tool/DB versions
-  -> inventory.detect
-       languages, package manifests, workflows, IaC/config files
-  -> scan.*
-       gitleaks
-       opengrep
-       syft
-       trivy vuln
-       osv
-       actionlint
-       zizmor
-       trivy config
-  -> findings.normalize
-       redacted raw artifacts -> Evidence -> Finding
-  -> findings.correlate
-       cluster same-root-cause findings
-  -> actions.rank
-       deterministic priority, verdict impact, and verdict
-  -> remediation.generate
-       catalog remediation for every action
-       optional bounded OpenRouter calls per action
-  -> report.compose
-       one SecurityAssessment
-  -> report render
-       terminal receipt + report.json + report.md + report.html
-  -> destroy sandbox
+src/server.ts       process entry: bind, ownership reconciliation, shutdown
+src/web/server.ts   HTTP routing, origin checks, admission
+src/web/jobs.ts     the one job slot, terminal states, expiry, cleanup retries
+src/web/pages.ts    the three server-rendered pages
+src/web/assets.ts   one stylesheet and one browser script
+src/scan/execute.ts stage sequencing, deadlines, sandbox lifecycle
+src/scan/scanners/  one adapter per engine, raw export to normalized findings
+src/scan/policy.ts  the reviewed rule set that may reach a reader
+src/scan/report.ts  publication, grouping by root cause, prompts
 ```
 
-The implemented Quick Scan check stages are:
-
-| Check | Tool | Runs When | Purpose |
-| --- | --- | --- | --- |
-| `secrets.gitleaks` | `gitleaks` | Always | Detect committed secret-like values. |
-| `code-patterns.opengrep` | `opengrep` | Source files exist | Detect simple unsafe code patterns. |
-| `sbom.syft` | `syft` | Dependency manifests exist | Produce a CycloneDX SBOM artifact. |
-| `dependencies.trivy` | `trivy fs --scanners vuln` | Dependency manifests exist | Detect vulnerable dependencies from the SBOM/filesystem view. |
-| `dependencies.osv` | `vibeshield-osv-scan` | Dependency manifests exist | Detect vulnerable packages with OSV data. |
-| `github-actions.actionlint` | `actionlint` | Workflow files exist | Parse and lint GitHub Actions workflows. |
-| `github-actions.zizmor` | `zizmor` | Workflow files exist | Detect GitHub Actions hardening issues. |
-| `iac.trivy-config` | `trivy config` | IaC/config files exist | Detect infrastructure/config issues. |
-
-That is eight check stages backed by seven scanner binaries because `trivy` is
-used for both dependency and IaC checks.
-
-## Deep Static Flow
-
-Deep Static is opt-in and runs after the direct scanner facts exist:
+## Scan Flow
 
 ```text
-vibeshield scan <repo> --deep
-  -> Quick Scan stages through actions.rank
-  -> deep.static.compose
-       quick.graph-import
-       program-analysis.model       Joern builds the CPG/IR
-       program-analysis.extract     entities, boundaries, calls, flows, usage
-       security-graph.compose       one deterministic SecurityGraph projection
-       graph.context                CI/IaC, content/assets, smart contracts
-       graph.reachability           component/dependency usage context
-       graph.correlate              deterministic hypothesis candidates
-       hypotheses.static-validate   supported / contradicted / inconclusive
-       validation-recipes.compose   concrete runtime check recipes
-       repository-map.render        derived human graph view
-  -> remediation.generate           Quick Scan action wording
-  -> hypotheses.enrich              optional bounded model batches for hypotheses
-  -> report.compose
-  -> report render
+POST /scans
+  -> prepare    fresh sandbox from the pinned image
+  -> acquire    clone the default branch, at most 100 commits
+  -> gitleaks   credentials in the snapshot and in fetched history
+  -> opengrep   selected code rules, taint rules carry their flow
+  -> osv        official OSV-Scanner over supported lockfiles
+  -> trivy      container and infrastructure configuration
+  -> zizmor     GitHub Actions workflows
+  -> report     publication, grouping, prompts
+  -> cleanup    destroy the sandbox, verified
 ```
 
-Deep Static keeps direct findings and attack hypotheses separate:
+Stages run in order inside one sandbox. Each engine has a two-minute budget and
+the whole run has ten minutes. A failed, timed-out or malformed engine becomes a
+coverage row, not a lost report: the remaining engines keep running and the
+report is still built from what completed.
 
-- a direct finding is scanner-backed evidence, such as a published secret or a
-  vulnerable package;
-- a static hypothesis is a graph-backed path the owner should validate, such as
-  external input reaching a dangerous operation;
-- `deepActionGroups` group direct actions and linked hypotheses only when that
-  avoids duplicate work for the owner.
+## Terminal States
 
-Deep Static can strengthen the verdict to `not-ready-to-deploy` when at least
-one hypothesis is both `statically_supported` and publishable under the
-precision-first promotion contract. It does not rewrite Quick Scan findings,
-severities, fingerprints, or direct evidence.
+A scan that starts always ends in one of three states, and each one is a page
+worth reading:
 
-## Program Analysis Backend
+| State | What the reader gets |
+| --- | --- |
+| `completed` | The report. |
+| `cleanup-failed` | The report, plus closed admission until deletion is verified. |
+| `failed` | A named reason and something to do about it. |
 
-Joern is the only production program-analysis backend. There is no secondary
-program-analysis fallback and no legacy compatibility layer for old
-program-analysis contracts.
+`failed` only happens when there is nothing to report: the repository could not
+be read, it exceeded the acquisition limits, the sandbox never started, or the
+run was stopped. `src/scan/execute.ts` maps its internal reason to a
+`FailureCode`; `src/web/pages.ts` owns the sentence each code turns into. The
+operator diagnostic keeps the precise internal reason, which is narrower than
+what the page says.
 
-The backend interface is language-agnostic above the implementation, but the
-current Joern backend selects one supported language for the source snapshot:
-JavaScript, TypeScript, Java, Python, or Go. Unsupported source files are
-reported through `language_support` coverage. Mixed-language repositories can be
-partially covered; the report must say which coverage area is partial,
-degraded, failed, or skipped.
+A finished report is handed over even while cleanup is unresolved. Withholding it
+does not remove a leaked sandbox; admission stays closed either way.
 
-Joern produces two artifact classes:
+Cleanup retries are bounded so the process can go idle. A refused submission
+starts one more attempt in the background, which is how a healed environment
+reopens admission without an operator restart.
 
-- a raw program model artifact, stored as `program-analysis.raw`;
-- normalized slice artifacts, stored as `program-analysis.slice`.
+## Publication
 
-VibeShield owns the extraction scripts, normalization, graph composition, and
-hypothesis rules above Joern. Joern is the static-analysis engine, not the
-product policy engine.
+Running more checks must not produce more noise.
 
-## Security Graph
+`src/scan/policy.ts` lists the rules that may reach a reader, each with a
+remediation key. A finding is published only when its rule is on that list, its
+severity is high or critical, its evidence is present, and — for rules that
+require it — the engine reported high confidence. Taint rules publish only with a
+complete flow. Everything else is counted and reported as a number, never as a
+card.
 
-`SecurityGraph` is the source of truth for Deep Static correlation. The full
-Joern CPG/IR remains a blob artifact; the graph is the compact deterministic
-projection later stages use for validation and reports.
+`src/scan/report.ts` then groups published findings by root cause: advisories for
+one package version become one upgrade, and equivalent alerts collapse. The
+resulting issues are ordered deterministically by severity and path.
 
-Graph nodes include:
+## Report
 
-- boundaries, code entities, sources, sinks, controls, flows;
-- components, findings, secrets, build steps, infrastructure resources,
-  external services, data stores, and content/resources.
+`src/web/pages.ts` groups issues once more, by the fix they share, because a
+reader acts on changes rather than on alerts. Nine flows fixed by the same
+validation are one job with nine locations, not nine cards.
 
-Graph edges include:
+The open page carries the first thing to do, then the jobs: what it is, where it
+is, why it matters, what to change, how to check, and a prompt built from that
+job's own evidence. The first five jobs are open and the rest are folded, but
+every job, location and piece of evidence stays on the page.
 
-- containment/import/call/registration relationships;
-- receives/flows-to/uses/reads/writes relationships;
-- protection, exposure, dependency, location, impact, support, and contradiction
-  relationships.
+Scanner names, versions, rule identifiers, advisory identifiers, coverage states,
+the commit and the image digest live inside disclosures. Coverage is stated
+plainly and separately from findings: a report can hold real findings and
+incomplete checks at the same time, and saying so is not an alarm.
 
-Stable ids come from content such as repository path, symbol, line range, node
-kind, edge kind, and graph version. Backend-assigned ids do not become product
-ids. The same snapshot should produce the same graph, hypotheses, ids, and
-ordering.
+Prompts are deterministic templates filled with observed evidence. They state
+what was matched, what to change, how to verify it, and that nothing was
+executed, so an agent does not overclaim.
 
-`repository-map.json` is derived from `SecurityGraph` for humans and debugging.
-It is not the pipeline source of truth.
+## Progress
 
-## Hypotheses
+`GET /scans/:id/status` returns the public job state, one row per stage, the
+public failure message when there is one, and whether a report exists. It never
+returns report contents.
 
-Deep Static currently emits deterministic candidate families for:
+A stage reports what its check found — how many things to look at, or nothing —
+rather than restating its own status. The progress page polls every two seconds
+after the previous request settles, reconnects after a network error without
+starting a second scan, and opens the report as soon as one exists.
 
-- external input to dangerous operation;
-- Quick SAST finding to reachable path;
-- dependency vulnerability to usage path;
-- CI supply-chain path;
-- secret impact chain;
-- hidden content/resource exposure;
-- smart-contract risk.
+## Limits and Ownership
 
-Static hypothesis statuses are intentionally limited:
+Two CPUs and 4 GiB per sandbox, a 2 GiB workspace, 50,000 files and 500 MiB per
+snapshot, 100 fetched commits, one hour of result retention and at most twenty
+retained reports. See [runtime-limits.md](runtime-limits.md) for how the guest
+enforces them.
 
-- `candidate`;
-- `statically_supported`;
-- `statically_contradicted`;
-- `inconclusive`.
+Sandboxes and temporary directories are marked as service-owned. Startup
+reconciles only owned resources; shutdown closes admission, aborts the active
+job, waits for verified deletion and exits nonzero when it cannot confirm it.
 
-`confirmed` is reserved for a future runtime-validation stage. Current reports
-must say "not observed on the analyzed path" rather than claiming a control is
-globally absent.
+## What This Does Not Establish
 
-Promotion is stricter than candidate correlation. A publishable supported
-hypothesis requires an external source, a security-typed sink, a matching
-`SecurityFlow`, current line-pinned path evidence, checked candidate/path
-coverage, checked `control_flow` coverage, an exact-sink guard assessment, and
-a stable root-cause key. Structural reachability, generic sinks, stale evidence,
-partial coverage, ambiguous controls, or missing control-flow coverage remain
-`inconclusive` in the machine record and cannot affect the verdict.
+Passing checks and fixture tests prove orchestration and specific examples. They
+are not evidence of detection precision or recall, of exploitability, or of
+authorization and runtime coverage. See
+[benchmark-methodology.md](benchmark-methodology.md).
 
-An effective control contradicts a hypothesis only when it is value/sink
-matched, dominates the exact sink, and has current evidence. A nearby or
-different-sink control is not treated as proof of safety.
+## Legacy Code Still in the Tree
 
-## Model Calls
-
-Model calls are enhancement-only and batch-bounded:
-
-- Quick Scan remediation starts with catalog text for every ranked action, then
-  sends at most the top bounded actions to OpenRouter one action at a time with
-  limited concurrency.
-- Deep Static hypothesis enrichment starts with catalog text for every
-  hypothesis, then sends hypothesis batches with bounded batch size and
-  concurrency.
-- If a model call is unavailable, invalid, slow, or fails, only that action or
-  hypothesis falls back to catalog text.
-- Model output is schema-validated and cannot change ids, paths, line numbers,
-  findings, graph refs, statuses, priorities, verdicts, or coverage.
-
-The deterministic result is complete without `OPENROUTER_API_KEY`.
-
-## Progress And Terminal Output
-
-The terminal is owner-facing, not a raw sandbox log. Stages emit structured
-events; the terminal maps them to friendly labels such as "Running security
-checks", "Running Deep Static analysis", "Tracing data flow", and "Explaining
-likely attack paths".
-
-On TTY streams the terminal uses a spinner for the current progress label. On
-non-TTY streams it prints each deduplicated label once. Raw sandbox stderr/stdout
-can be counted and recorded as event details, but raw Joern or scanner output is
-not printed directly as user-facing CLI text.
-
-## Coverage And Verdict
-
-Quick Scan coverage states are:
-
-- `checked`: the applicable tool ran and produced parseable output;
-- `skipped`: the check was not applicable to this repository;
-- `failed`: the tool or parser failed;
-- `degraded`: supporting data such as vulnerability DB freshness is stale or
-  incomplete.
-
-Deep Static adds `partial` for graph and program-analysis areas where the
-backend observed some but not all relevant facts. Important Deep Static coverage
-areas include language support, entities, boundaries, call graph, data flow,
-dependency usage, CI/IaC, content assets, and smart contracts.
-
-Required Quick Scan coverage loss blocks a green verdict. Deep Static coverage
-loss is surfaced in the report and limitations instead of pretending the graph
-is complete. Other completed checks still produce a useful Fix Pack.
-
-## Reports
-
-The terminal ends with a short receipt: repository, verdict, report path, and the
-static-scan limitation. Full details live in `report.html` and `report.md`.
-
-`report.json` contains the run id, the complete machine-readable
-`SecurityAssessment`, and the deterministic owner projection. The assessment
-includes the manifest summary, repository identity, toolchain summary, Quick Scan coverage,
-Deep Static coverage when present, evidence, findings, clusters, ranked actions,
-static hypotheses, validation recipes, hypothesis enrichments, deep action
-groups, verdict, and limitations.
-
-The owner projection renders `Fix now`, `Validate next`, and `Technical
-appendix`. It folds supported traces into an owning direct action, groups
-remaining publishable traces by typed root cause, ranks groups without model
-input, expands at most five fix groups and three validation groups, and retains
-every raw candidate and trace in the assessment.
-
-Raw scanner outputs are redacted before entering blob storage. The scanned
-source tree itself is not stored as a run artifact. The manifest is the
-reproducibility boundary: origin, commit SHA when available, file list, hashes,
-exclusions, source hash, tool versions, and DB freshness.
-
-## Benchmarks
-
-`docs/benchmark-methodology.md` is the quality measurement contract for the R&D
-path: Phase 1 proves capability against curated external truth, and Phase 2
-optimizes cost, latency, and stack size without dropping below the same metric
-floor. It defines the scored surfaces, ground-truth rules, precision/recall
-targets, anti-overfit discipline, baseline procedure, and gap-driven R&D work
-order.
-
-`docs/deep-static-training-benchmark.md` is the current regression gate for the
-Joern-backed Deep Static pipeline. It is an input to the methodology, not the
-full scored TP/FP/FN harness yet. The checked matrix covers:
-
-- WebGoat (Java);
-- Juice Shop (JS/TS);
-- Freeland (local JS/TS);
-- Vulnerable-Flask-App (Python);
-- go-dvwa (Go).
-
-The benchmark asserts machine-readable candidate families, supported static
-hypotheses, no failed Deep Static coverage, complete dependency-usage coverage
-where dependency components exist, and curated ground-truth expectations for
-WebGoat and Juice Shop. Python and Go scored precision/recall require pinned
-curated truth for Vulnerable-Flask-App and go-dvwa first. Freeland is a local
-stability and determinism canary, not a precision/recall source.
-
-Benchmark repositories are product benchmarks, not training patches: failures
-should expose systemic gaps in Joern extraction, graph construction, rule
-taxonomy, validation logic, or reporting.
-
-Do not add repository-specific detector behavior to make benchmark runs pass.
-
-`pnpm benchmark:report-v1` is a Phase 0 promotion/report unit-regression gate.
-Its constructed TypeScript/Java development cases and Python/Go synthetic
-holdback cases start from fixture-built normalized graphs. They do not measure
-detection precision, recall, tool competitiveness, or held-out generalization.
-The boundary is documented in `docs/report-v1-research.md`; the end-to-end
-detection comparison is preregistered in `docs/phase-1-capability-research.md`.
-The completed results in `docs/phase-1-capability-results.md` select no detection
-winner and do not promote Approach B or any other candidate-generation approach.
+The deterministic web service is the product. The earlier CLI pipeline —
+`src/cli.ts`, `src/application/`, `src/domain/`, `src/pipeline/`, `src/stages/`,
+`src/reporting/`, the SQLite state store, the Joern backend and the OpenRouter
+provider — is still present with its tests, and its `pnpm scan` / `pnpm resume`
+scripts still run. None of it is reachable from the web service, and none of it
+is a current product promise. Its research records stay as history:
+[stage-1](stage-1-deterministic-security-core-plan.md),
+[stage-2](stage-2-deep-static-security-graph-plan.md),
+[phase-1 results](phase-1-capability-results.md),
+[report v1](report-v1-research.md) and the
+[terminated CWE-78 experiment](cwe78-flow-chain-experiment-termination.md).
+Removing it is outstanding work.
 
 ## Retired Surfaces
 
 The current architecture does not include Daytona, Pi mapping collectors,
-repository-map-as-truth, attack-hypothesis evaluator loops, in-memory run
-registries, host-executed scanners, non-Git local directory fallback, or
-compatibility shims for old run contracts.
+repository-map-as-truth, attack-hypothesis evaluator loops, host-executed
+scanners, local-path product input, model-written findings, or compatibility
+shims for old run contracts.
