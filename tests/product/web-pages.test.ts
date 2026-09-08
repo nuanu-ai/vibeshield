@@ -225,5 +225,17 @@ it("puts application files ahead of test files and says how many are tests", asy
   });
   expect(html.indexOf("src/buy.ts:46")).toBeLessThan(html.indexOf("src/buy.test.ts:12"));
   expect(html.indexOf("src/buy.ts:46")).toBeLessThan(html.indexOf("src/checkout.spec.ts:3"));
-  expect(html).toContain("2 of them test files");
+  expect(html).toContain("2 of them tests");
+});
+
+// A reader who does not open files should never be shown one. Paths, line
+// numbers and code live in the prompt and behind a disclosure.
+it("keeps file paths and code out of the page a reader sees first", async () => {
+  const value = await report();
+  const open = surface(renderReport(value));
+  for (const issue of value.issues)
+    for (const location of issue.locations)
+      expect(open).not.toContain(`${location.path}:${location.line}`);
+  expect(open).not.toContain("<pre");
+  expect(open).not.toContain("<code");
 });

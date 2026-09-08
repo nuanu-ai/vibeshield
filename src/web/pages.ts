@@ -17,53 +17,63 @@ const labels: Record<Stage, string> = {
 };
 
 /** One job the reader can actually do, named in their words. */
-const jobs: Record<RemediationKey, { start: string; title: string; why: string }> = {
+const jobs: Record<RemediationKey, { todo: string; start: string; title: string; why: string }> = {
   "secret-rotation": {
+    todo: "Get a new key from wherever this one came from and switch the old one off. Then keep the new one out of the repo.",
     start: "Start by replacing the key that is in your code.",
     title: "A key or password is sitting in your code",
     why: "Anyone who can open this repo can copy it and use it as you. So can anyone holding an old clone, and any log that printed it.",
   },
   "dependency-upgrade": {
+    todo: "Update them to the fixed versions and run your tests.",
     start: "Start by updating the packages with known bugs.",
     title: "Packages you install have known security bugs",
     why: "These run inside your app, and the bugs are already public. The fixes are published too.",
   },
   "command-input": {
+    todo: "Stop building the command out of text you didn't write. Pass the pieces separately and check each one.",
     start: "Start with the shell command built from outside input.",
     title: "Outside input helps build a shell command",
     why: "Someone can append their own command to the one you meant to run.",
   },
   "sql-input": {
+    todo: "Let the database handle the values instead of pasting them into the query.",
     start: "Start with the database query built from outside input.",
     title: "Outside input goes straight into a database query",
     why: "Someone can change what the query does and read or delete rows you never meant to expose.",
   },
   "path-url-validation": {
+    todo: "Decide which addresses this code is allowed to reach, and refuse the rest.",
     start: "Start by deciding where your server is allowed to connect.",
     title: "Your server will open whatever path or address it is handed",
     why: "Someone can point it at files or internal addresses it was never meant to reach.",
   },
   "unsafe-deserialization": {
+    todo: "Use a plain data format and check the shape before anything acts on it.",
     start: "Start with the untrusted data being turned back into objects.",
     title: "Untrusted data is turned back into objects",
     why: "Rebuilding objects from data you did not write can hand control to whoever sent it.",
   },
   "jwt-validation": {
+    todo: "Check the signature and the claims properly, and say which algorithm you accept.",
     start: "Start by checking login tokens properly.",
     title: "Login tokens are accepted without a real check",
     why: "Someone can hand you a token they made themselves and be treated as signed in.",
   },
   "config-privilege": {
+    todo: "Take the extra power away and grant only what the job needs.",
     start: "Start by taking power away from the container that doesn't need it.",
     title: "A container runs with more power than it needs",
     why: "If anything ever escapes the app, it starts out with far more access than the job requires.",
   },
   "workflow-input": {
+    todo: "Move the text into an environment variable instead of pasting it into the script.",
     start: "Start with the pull request text that reaches a CI script.",
     title: "Text from a pull request lands in a GitHub Actions script",
     why: "Anyone who can open a pull request can get their own text run as a command in your CI.",
   },
   "workflow-privilege": {
+    todo: "Narrow what the workflow is allowed to touch.",
     start: "Start by narrowing what your workflows are allowed to touch.",
     title: "A workflow runs with more access than it needs",
     why: "Wide workflow access is a short path from a pull request to the rest of your repo.",
@@ -97,11 +107,12 @@ function looksLikeTest(path: string): boolean {
 
 /** Publication only emits known keys; rendering still never crashes on data. */
 const unknownJob = {
+  todo: "Open the details below and decide what this one needs.",
   start: "Start with the first item below.",
   title: "Something worth fixing",
   why: "A check matched here and we have no plain description for this one yet.",
 };
-function jobFor(key: RemediationKey): { start: string; title: string; why: string } {
+function jobFor(key: RemediationKey): { todo: string; start: string; title: string; why: string } {
   return jobs[key] ?? unknownJob;
 }
 
@@ -190,12 +201,9 @@ function isTestPlace(place: string): boolean {
   return looksLikeTest(place.slice(0, place.lastIndexOf(":")));
 }
 function whereLine(job: FixJob): string {
-  const places = locationsOf(job);
-  const files = new Set(places.map((place) => place.slice(0, place.lastIndexOf(":"))));
+  const files = new Set(locationsOf(job).map((place) => place.slice(0, place.lastIndexOf(":"))));
   const tests = [...files].filter(looksLikeTest).length;
-  return `${plural(places.length, "place")} in ${plural(files.size, "file")}${
-    tests ? `, ${tests} of them ${tests === 1 ? "a test file" : "test files"}` : ""
-  }`;
+  return `${plural(files.size, "file")}${tests ? `, ${tests === 1 ? "one of them a test" : `${tests} of them tests`}` : ""}`;
 }
 function agentPrompt(job: FixJob, repository: string): string {
   const first = job.issues[0];
@@ -215,7 +223,7 @@ function agentPrompt(job: FixJob, repository: string): string {
 function fixBody(job: FixJob, repository: string): string {
   const first = job.issues[0];
   if (!first) return "";
-  return `<p class="why">${escapeHtml(jobFor(job.key).why)}</p><dl class="what"><dt>What to do</dt><dd>${escapeHtml(first.remediation)}</dd><dt>Then check</dt><dd>${escapeHtml(first.verification)}</dd></dl><div class="prompt"><p class="label">Paste this to your coding agent</p><pre data-prompt tabindex="0">${escapeHtml(agentPrompt(job, repository))}</pre><button type="button" data-copy>Copy</button><span role="status" data-copy-status></span></div><details class="tech"><summary>Where exactly, and how we found it</summary><ul class="plain">${locationsOf(
+  return `<p class="why">${escapeHtml(jobFor(job.key).why)}</p><p class="todo">${escapeHtml(jobFor(job.key).todo)}</p><p class="act"><button type="button" data-copy>Copy the fix for your agent</button><span role="status" data-copy-status></span></p><details class="tech"><summary>What gets copied</summary><pre data-prompt tabindex="0">${escapeHtml(agentPrompt(job, repository))}</pre></details><details class="tech"><summary>Where it is, and how we found it</summary><ul class="plain">${locationsOf(
     job,
   )
     .map(
@@ -223,7 +231,7 @@ function fixBody(job: FixJob, repository: string): string {
         `<li><code>${escapeHtml(place)}</code>${isTestPlace(place) ? " test file" : ""}</li>`,
     )
     .join("")}</ul><ul class="plain">${job.issues
-    .flatMap((issue) => [issue.title, ...issue.evidence])
+    .flatMap((issue) => [issue.title, ...issue.evidence, issue.remediation, issue.verification])
     .map((line) => `<li>${escapeHtml(line)}</li>`)
     .join("")}</ul></details>`;
 }
@@ -244,7 +252,7 @@ export function renderReport(report: Report): string {
       ? "Scan incomplete"
       : "No important problems found by the completed checks";
   const lead = first
-    ? `${plural(fixes.length, "thing")} to fix in ${escapeHtml(repositoryName(report.repository.url))}.${report.incomplete ? " Scan incomplete: some checks didn't see everything, and that's written down below." : ""}`
+    ? `${plural(fixes.length, "thing")} to fix.`
     : report.incomplete
       ? "Some checks didn't finish, so treat this as an unfinished picture rather than a clean result."
       : "Nothing to do from these checks. That is not the same as being safe.";
@@ -255,7 +263,7 @@ export function renderReport(report: Report): string {
       .join(
         "",
       )}${hidden ? `<p class="quiet">${plural(hidden, "more job")} above, folded up.</p>` : ""}<section class="after"><h2>What we looked at</h2><p>${escapeHtml(
-      coverageLine(report),
+      report.incomplete ? `Scan incomplete. ${coverageLine(report)}` : coverageLine(report),
     )}</p><details class="tech"><summary>Check by check, and what we left out</summary><ul class="plain">${report.coverage
       .map(
         (entry) =>

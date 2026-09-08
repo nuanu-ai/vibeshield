@@ -16,10 +16,11 @@ hardening default trails. Inside a job, application files come before paths that
 look like tests, and the count of test files is stated rather than hidden.
 
 The open page carries the first thing to do, then each job's plain-language
-title, where it is, why it matters, what to change, how to check it, and a prompt
-built from that job's own evidence. Scanner names, versions, rule and advisory
+title, how many files it touches, why it matters, what to change in one sentence,
+and one button that copies the fix for a coding agent. The prompt text itself,
+file paths, line numbers, code, scanner names, versions, rule and advisory
 identifiers, coverage states, the commit and the image digest sit inside
-disclosures. Coverage is stated separately from findings: a report can hold real
+disclosures: the reader is assumed not to open files. Coverage is stated separately from findings: a report can hold real
 findings and incomplete checks at once.
 
 ## Run

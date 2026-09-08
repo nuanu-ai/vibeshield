@@ -117,13 +117,14 @@ Inside a job, application files come before files whose path looks like a test,
 and the count of test files is stated. Test files are never dropped: a real key
 leaks the same from a fixture.
 
-The open page carries the first thing to do, then the jobs: what it is, where it
-is, why it matters, what to change, how to check, and a prompt built from that
-job's own evidence. The first five jobs are open and the rest are folded, but
-every job, location and piece of evidence stays on the page.
+The open page carries the first thing to do, then the jobs: what it is, how many
+files it touches, why it matters, what to change in one plain sentence, and one
+button that copies the fix. The first five jobs are open and the rest are folded,
+but every job, location and piece of evidence stays on the page.
 
-Scanner names, versions, rule identifiers, advisory identifiers, coverage states,
-the commit and the image digest live inside disclosures. Coverage is stated
+The reader is assumed not to open files. File paths, line numbers, code, the
+prompt text, scanner names, versions, rule and advisory identifiers, coverage
+states, the commit and the image digest all live inside disclosures. Coverage is stated
 plainly and separately from findings: a report can hold real findings and
 incomplete checks at the same time, and saying so is not an alarm.
 
