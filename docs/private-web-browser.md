@@ -1,13 +1,21 @@
 # Private web interface
 
 The three server-rendered pages submit a public GitHub repository, show actual
-scan stages, and display grouped findings with evidence, remediation and copyable
-agent prompts. The first five issues start open; every remaining issue is on the
-same page. Incomplete coverage stays visible beside findings.
-
-This implementation is part of the private web transition. The existing CLI and
-its documentation remain until the final removal task. Real-engine acceptance
+scan stages, and hand back a short list of jobs to do. Real-engine acceptance
 uses the pinned image; an external browser check completes delivery acceptance.
+
+The report groups published issues by the fix they share, because a reader acts
+on changes rather than on alerts: issues with the same remediation key become one
+job carrying every location and every piece of evidence. The first five jobs are
+open and the rest are folded onto the same page with their count. No job is ever
+dropped to meet a presentation limit.
+
+The open page carries the first thing to do, then each job's plain-language
+title, where it is, why it matters, what to change, how to check it, and a prompt
+built from that job's own evidence. Scanner names, versions, rule and advisory
+identifiers, coverage states, the commit and the image digest sit inside
+disclosures. Coverage is stated separately from findings: a report can hold real
+findings and incomplete checks at once.
 
 ## Run
 
@@ -43,6 +51,13 @@ aborts the active job, waits for verified cleanup, and exits nonzero if cleanup
 cannot be confirmed. Normal job completion uses only its executor's cleanup.
 There is no HTTP cleanup or administrative retry endpoint.
 
+When cleanup cannot be verified, the report that scan already produced is still
+served: withholding it does not remove the leaked sandbox, and admission stays
+closed either way. Background maintenance attempts remain bounded so the process
+can go idle. A refused submission starts one further attempt in the background
+and is still answered 409, which is how a healed environment reopens admission
+without an operator restart. The attempt is never awaited inside the response.
+
 ## HTTP and browser behavior
 
 The routes are `GET /`, `POST /scans`, `GET /scans/:id`,
@@ -54,7 +69,13 @@ results and unsupported methods use 400, 409, 413, 404 and 405 respectively.
 Encoded/ambiguous route paths are not normalized into accepted routes.
 
 Status returns only the public job state, stages, public error and report
-availability. It never returns report contents. All responses disable caching,
+availability. It never returns report contents. A scan that ends without a report
+carries a failure code — unreachable repository, snapshot over the limit,
+exhausted deadline, unavailable environment, pending cleanup, or an internal
+fault — and the page turns that code into one sentence with something to act on.
+The precise internal reason stays in the operator diagnostic and is narrower than
+what the reader is shown. A stage row reports what its check found rather than
+repeating its own status word. All responses disable caching,
 disable MIME sniffing and use a CSP allowing external same-origin assets.
 No CORS policy is enabled. All report strings are escaped; browser updates use
 `textContent`. Only progress pages poll, two seconds after the prior request
